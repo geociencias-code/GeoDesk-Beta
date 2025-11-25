@@ -1,0 +1,57 @@
+.barra-superior {
+  /* tus estilos existentes */
+  transition: transform 0.3s ease-in-out;
+}
+
+.barra-superior.hidden {
+  transform: translateY(-100%);
+}
+
+
+
+/* 🎨 Barra Superior con paleta gris */
+.barra-superior {
+  display: flex;
+  align-items: center;
+  padding: 16px 24px;
+ background-color: var(--color-bg-card);  /* gris oscuro pero no negro */
+  border-bottom: 1px solid var(--color-bg-card);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Logo */
+.barra-superior img {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+/* Nombre del proyecto */
+.barra-superior .titulo {
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: var(--color-text-main);
+  margin-left: 1rem;
+  white-space: nowrap;
+}
+
+/* Palabras clave */
+.barra-superior .palabras {
+  font-size: 1rem;
+  color: var(--color-text-muted);
+  margin-left: 3rem;
+  white-space: nowrap;
+}
+
+/* Tecnología */
+.barra-superior .tecnologia {
+  margin-left: auto; /* se pega a la derecha de forma responsive */
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background-color: var(--color-bg-card);
+  color: var(--color-text-main);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  border: 1px solid var(--color-primary-soft);
+}

@@ -1,0 +1,103 @@
+/* Contenedor de los tres elementos del header */
+.cover-header {
+  display: flex;
+  flex-direction: row;     /* Alinea horizontalmente */
+  align-items: center;     /* Centra verticalmente */
+  justify-content: flex-start;
+  gap: 2rem;               /* Espacio entre elementos */
+}
+
+/* Asegura que el título no rompa el layout */
+.cover-title {
+  display: flex;
+  flex-direction: column;  /* Apila título + subtítulo */
+  justify-content: center;
+}
+
+.cover-title h1{
+  font-size: 3rem;    /* Tamaño del título */
+  font-weight: 1500;
+}
+
+.cover-title p {
+  font-size: 1rem;    /* Tamaño del subtítulo */
+  opacity: 0.8;
+  text-transform: uppercase;
+}
+
+/* Ajusta el logo */
+.cover-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 150px;
+  height: 150px;
+}
+
+/* Ajusta la imagen */
+.cover-img {
+  width: 650px;
+  height: 350px;
+  border-radius: 1rem;
+  overflow: hidden;
+}
+.cover-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+
+.descripcion {
+  padding: 30px;
+}
+
+.btn-cta {
+  display: inline-block;
+  padding: 12px 32px;
+  background: linear-gradient(135deg, #8b929e 0%, #505662 100%);
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 400;
+  border-radius: 12px;
+  text-decoration: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* Hover */
+.btn-cta:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+/* Active (clic) */
+.btn-cta:active {
+  transform: translateY(0);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* Accesibilidad: foco con tab */
+.btn-cta:focus {
+  outline: 3px solid #93c5fd;
+  outline-offset: 3px;
+}
+
+
+.seccion-contenido {
+  display: grid;
+  gap: 50px;
+}
+
+
+.info{
+  display: grid;
+  gap: 30px;
+}
+
+
+.card {
+  background-color: #0c0f15; /* ejemplo: azul oscuro */
+  color: white;              /* texto blanco para contraste */
+}
+

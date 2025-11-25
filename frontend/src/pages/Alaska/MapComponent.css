@@ -1,0 +1,91 @@
+/* ===== Contenedor general ===== */
+.alaska-map-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 1rem;
+}
+
+/* ===== Tarjeta principal del mapa ===== */
+.alaska-map-card {
+  width: 100%;
+  background: rgba(30, 32, 38, 0.7);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 18px;
+  padding: 1.2rem;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+  transition: 0.25s ease-out;
+}
+
+.alaska-map-card:hover {
+  box-shadow: 0 15px 38px rgba(0, 0, 0, 0.35);
+}
+
+/* ===== Título y subtítulo ===== */
+.map-header {
+  margin-bottom: 0.8rem;
+}
+
+.map-header h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #ffffff;
+  margin-bottom: 2px;
+}
+
+.map-header p {
+  font-size: 0.85rem;
+  color: #a7b0c1;
+  opacity: 0.8;
+}
+
+/* ===== Mapa ===== */
+.alaska-map-wrapper {
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.alaska-map {
+  filter: saturate(1.05);
+}
+
+/* ===== Footer ===== */
+.alaska-map-footer {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ===== Botón ===== */
+.alaska-btn {
+  padding: 8px 16px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #5d5fef, #4a4cd9);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  text-align: center;
+  transition: 0.25s;
+}
+
+.alaska-btn:hover {
+  background: linear-gradient(145deg, #6a6cf5, #5d5fef);
+  transform: translateY(-2px);
+}
+
+/* ===== Hints ===== */
+.map-hint {
+  font-size: 0.8rem;
+  opacity: 0.75;
+  color: #cbd3e0;
+}
+
+.map-hint.success {
+  color: #82ff9e;
+  font-weight: 500;
+}

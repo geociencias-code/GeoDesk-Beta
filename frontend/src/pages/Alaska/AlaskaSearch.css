@@ -1,0 +1,145 @@
+/* ===============================
+   AlaskaSearch.css
+   =============================== */
+
+/* Estilo general de la tarjeta */
+.card {
+  background-color: #2d2f3d;   /* Gris oscuro */
+  color: #ffffff;              
+  border-radius: 12px;         
+  padding: 20px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.3); /* Sombra más pronunciada */
+  max-width: 900px;
+  margin: 20px auto;
+  font-family: "Inter", sans-serif;
+}
+
+/* Título */
+.card h2 {
+  margin-bottom: 16px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #f1f1f1; /* Blanco suave */
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 8px;
+  text-align: center;
+}
+
+/* Etiquetas y campos de entrada */
+.card label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.9rem;
+  color: #d1d5db; /* Gris claro */
+  margin-bottom: 4px;
+}
+
+/* Inputs y selects */
+.card input[type="date"],
+.card input[type="number"],
+.card select {
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #4c566a;  /* Borde gris sutil */
+  background-color: #3b4252;   /* Gris oscuro */
+  color: #ffffff;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+}
+
+.card input[type="date"]:focus,
+.card input[type="number"]:focus,
+.card select:focus {
+  outline: none;
+  border-color: #e5e7eb;       /* Borde gris claro al enfocar */
+  background-color: #4c566a;   /* Gris más oscuro */
+}
+
+/* Inputs pequeños para Ruta y Marco */
+.card .small-inputs input[type="number"] {
+  width: 80px; 
+}
+
+/* Contenedor para inputs pequeños */
+.card .small-inputs {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+/* Botón */
+.card button {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #7a7e84 0%, #565a61 100%); /* Degradado gris oscuro */
+  color: white;
+  font-weight: 600;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: 0.3s ease;
+}
+
+.card button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+.card button:active {
+  transform: translateY(1px);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+
+.card button:disabled {
+  background: #6b7280; /* Gris cuando está deshabilitado */
+  cursor: not-allowed;
+}
+
+/* Mensajes pequeños debajo del botón */
+.card small {
+  font-size: 0.85rem;
+  color: #e2e8f0; /* Gris claro */
+  text-align: center;
+  opacity: 0.85;
+}
+
+.card small b {
+  color: #f1f1f1; /* Blanco suave */
+}
+
+/* Mensaje de error */
+.card div[style*="color: #ffb4b4"],
+.card .error-message {
+  font-size: 0.85rem;
+  color: #f87171;  /* Rojo suave */
+  background-color: rgba(255, 180, 180, 0.1);
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+/* Contenedores de inputs en grid */
+.card > div {
+  display: grid;
+  gap: 12px;
+}
+
+/* Ajuste responsive */
+@media (max-width: 768px) {
+  .card > div {
+    grid-template-columns: 1fr 1fr; 
+  }
+
+  .card button {
+    width: auto;
+    margin: 0 auto;
+  }
+
+  .map-container {
+    height: 350px;  
+  }
+
+  .card .small-inputs input[type="number"] {
+    width: 100%;
+  }
+}

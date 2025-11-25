@@ -1,0 +1,161 @@
+/* ---- Sidebar theme (versión fija/ancha con imagen + iconos) ------------------------ */
+:root {
+  --sidebar-bg: #1c1f2e;
+  --sidebar-fg: #ffffff;
+  --sidebar-fg-dim: #b6c2ff;
+  --accent: #00c3ff;        /* pill activa */
+  --accent-ghost: rgba(0, 195, 255, 0.16); /* hover */
+  --item-radius: 12px;
+  --glass: rgba(255, 255, 255, 0.04);
+  --glow: 0 0 18px rgba(0, 195, 255, 0.25);
+
+  --font-family: 'Poppins', 'Inter', system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue',
+    sans-serif;
+}
+
+/* Aplica la tipografía */
+body,
+.sidebar {
+  font-family: var(--font-family);
+}
+
+.sidebar {
+  width: 280px; /* ancho fijo */
+  background: linear-gradient(165deg, var(--sidebar-bg) 0%, #131622 100%);
+  color: var(--sidebar-fg);
+  padding: 28px 22px;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);  /* glass effect */
+  animation: slideInSidebar 400ms ease-out;
+}
+
+/* Branding con logo */
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.sidebar__brand img {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.sidebar__brand span {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--sidebar-fg);
+}
+
+/* Título de sección */
+.sidebar__title {
+  margin: 0 0 20px 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  background: linear-gradient(90deg, #00c3ff, #8a7dff);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent; /* fallback */
+}
+
+/* Lista y items */
+.sidebar__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.sidebar__item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 18px;
+  border-radius: var(--item-radius);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 15px;
+  font-weight: 500;
+  user-select: none;
+  transition: background 160ms ease, color 160ms ease, transform 80ms ease, box-shadow 200ms ease;
+  color: var(--sidebar-fg);
+  outline: none;
+  background: transparent;
+}
+
+/* Iconos dentro de items */
+.sidebar__item i,
+.sidebar__item svg {
+  font-size: 18px;
+  flex-shrink: 0;
+  color: var(--sidebar-fg-dim);
+  transition: color 200ms ease;
+}
+
+.sidebar__item:hover:not(.is-active) {
+  background: var(--glass);
+  box-shadow: inset 0 0 0 1px rgba(0,195,255,0.2);
+}
+
+.sidebar__item:hover i,
+.sidebar__item:hover svg {
+  color: var(--accent);
+}
+
+.sidebar__item:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.sidebar__item.is-active {
+  background: var(--accent);
+  color: #000;
+  font-weight: 700; /* texto en negrita */
+  box-shadow: var(--glow);
+}
+
+.sidebar__item.is-active i,
+.sidebar__item.is-active svg {
+  color: #000; /* combina con el texto activo */
+}
+
+/* mini "marker" decorativo */
+.sidebar__marker {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: .85;
+  transition: transform 200ms ease;
+}
+
+.sidebar__item.is-active .sidebar__marker {
+  transform: scale(1.4);
+}
+
+/* Foco accesible */
+.sidebar__item:focus-visible {
+  box-shadow: 0 0 0 2px rgba(0, 195, 255, 0.55);
+}
+
+/* Animación de entrada sidebar */
+@keyframes slideInSidebar {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

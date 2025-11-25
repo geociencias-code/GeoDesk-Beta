@@ -1,0 +1,114 @@
+/* Barra lateral fija */
+.sidebar {
+  width: 300px;
+  height: 100vh;
+  background-color: #27282c; /* #171719 */
+  color: var(--color-text-main);          /* #f1f1f1 */
+  font-family: "Inter", system-ui, sans-serif;
+  padding-top: 20px;
+  position: fixed;
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Título */
+.sidebar__title {
+  font-size: 1.6rem;
+  text-align: center;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  color: var(--color-primary); /* blanco suave */
+}
+
+/* Lista principal */
+.sidebar__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex: 1;
+}
+
+/* Botones principales */
+.sidebar__item {
+  padding: 14px 20px;
+  margin: 4px 10px;
+  cursor: pointer;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  position: relative;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+  user-select: none;
+  color: var(--color-text-main);
+}
+
+.sidebar__item:hover {
+  background-color: var(--color-bg-card);  /* gris oscuro */
+  color: var(--color-primary);            /* blanco */
+}
+
+.sidebar__marker {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-primary);
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+/* Botón activo */
+.is-active {
+  background-color: var(--color-primary-soft); /* blanco 20% */
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* Submenú */
+.submenu {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.3s ease;
+}
+
+/* Submenú visible (toggle) */
+.submenu.open {
+  max-height: 500px;
+}
+
+/* Ítems del submenú */
+.submenu__item {
+  padding: 10px 16px;
+  margin: 2px 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  transition: all 0.2s ease-in-out;
+}
+
+.submenu__item:hover {
+  background-color: var(--color-bg-card);
+  color: var(--color-primary);
+}
+
+.submenu__item.is-active {
+  background-color: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* Accesibilidad: foco */
+.sidebar__item:focus,
+.submenu__item:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}

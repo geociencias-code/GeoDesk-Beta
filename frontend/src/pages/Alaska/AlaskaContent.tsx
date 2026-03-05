@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import AlaskaSearch from "./AlaskaSearch";
 import SentinelDashboard from "./SentinelDashboard";
 import "./alaska.css";
-
-const BACKEND = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8000";
+import axios from "axios";
+import { API_URL } from "../../services/api";
 
 export type Scene = {
   granule: string;
@@ -62,13 +62,8 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
         polarization: polarization || undefined,
       };
 
-      const res = await fetch(`${BACKEND}/api/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data: Scene[] = await res.json();
+      const res = await axios.post(`${API_URL}/api/search`, body);
+      const data: Scene[] = res.data;
       setScenes(data);
     } catch (e: unknown) {
       if (typeof e === "object" && e !== null && "message" in e) {
@@ -85,13 +80,8 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
   async function loadFromHyP3() {
     try {
       setError(null);
-      const res = await fetch(`${BACKEND}/api/hyp3-files`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nombre_proyecto: DEFAULT_PROJECT, product_type: "INSAR_GAMMA", ruta, marco }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data: Array<{ granule: string; download_url: string; size_mb?: number|null; }> = await res.json();
+      const res = await axios.post(`${API_URL}/api/hyp3-files`, { nombre_proyecto: DEFAULT_PROJECT, product_type: "INSAR_GAMMA", ruta, marco });
+      const data: Array<{ granule: string; download_url: string; size_mb?: number|null; }> = res.data;
       setScenes(data.map(d => ({ granule: d.granule, download_url: d.download_url, size_mb: d.size_mb ?? null })));
     } catch (e: unknown) {
       if (typeof e === "object" && e !== null && "message" in e) {
@@ -143,7 +133,7 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
 
         <SentinelDashboard
           scenes={scenes}
-          backendUrl={BACKEND}
+          backendUrl={API_URL}
           ruta={ruta}
           marco={marco}
         />

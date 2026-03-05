@@ -2,9 +2,9 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { MapPin } from "lucide-react";
-import "./inicio.css";
+import "./Home.css";
 
-import Alaska_procesamiento from "./Alaska_procesamiento"; // EJEMPLO DE IMPORTACIÓN
+import Alaska_procesamiento from "../AlaskaProcessing/AlaskaProcessing";
 
 type GeoDeskCoverProps = {
   onNavigate: (page: string) => void;   // ⬅️ ahora obligatorio

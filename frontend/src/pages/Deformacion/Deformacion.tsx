@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import axios from "axios";
+import { API_URL } from "../../services/api";
 
 export default function DeformacionPage() {
   const [files, setFiles] = useState<File[]>([]);
@@ -15,13 +17,12 @@ export default function DeformacionPage() {
     const form = new FormData();
     files.forEach(f => form.append("zip_files", f));
 
-    const res = await fetch("http://127.0.0.1:8000/api/deformacion", {
-      method: "POST",
-      body: form,
-    });
-
-    const data = await res.json();
-    setImages(data.resultados || []);
+    try {
+      const res = await axios.post(`${API_URL}/api/deformacion`, form);
+      setImages(res.data.resultados || []);
+    } catch {
+      alert("Error procesando deformación");
+    }
     setLoading(false);
   };
 
@@ -47,7 +48,7 @@ export default function DeformacionPage() {
       {images.length > 0 && (
         <div className="mt-6">
           {images.map((img, i) => (
-            <img key={i} src={`http://127.0.0.1:8000/${img}`} className="mb-4 border" />
+            <img key={i} src={`${API_URL}/${img}`} className="mb-4 border" />
           ))}
         </div>
       )}

@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { MapContainer, TileLayer, Rectangle, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import "./era5.css";
+import "./Era5.css";
+import { API_URL } from "../../services/api";
 
 interface AreaCoords {
   north: number;
@@ -105,7 +106,7 @@ const Era5: React.FC = () => {
       };
 
       const response = await fetch(
-        "http://127.0.0.1:8000/api/era5/download",
+        `${API_URL}/api/era5/download`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

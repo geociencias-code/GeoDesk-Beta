@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useCallback } from "react";
 import JSZip from "jszip";
 import { fromArrayBuffer } from "geotiff";
-import "./Alaska_procesamiento.css"
+import "./AlaskaProcessing.css";
 
 /* ----------------------------------------------------------
    TIPOS
@@ -35,7 +35,7 @@ type Stats = {
 function niceDateFromText(text: string): string | undefined {
   const m = /(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)/.exec(text);
   if (!m) return undefined;
-  const [_, y, mo, d] = m;
+  const [, y, mo, d] = m;
   const dt = new Date(Number(y), Number(mo) - 1, Number(d));
   if (isNaN(dt.getTime())) return undefined;
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(
@@ -89,7 +89,8 @@ function computeStats(values: Float32Array | Float64Array | number[]): Stats {
 
   let vmin = Infinity,
     vmax = -Infinity;
-  for (let v of values as any) {
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
     if (!Number.isFinite(v)) continue;
     vmin = Math.min(vmin, v);
     vmax = Math.max(vmax, v);
@@ -107,7 +108,8 @@ function computeStats(values: Float32Array | Float64Array | number[]): Stats {
 
   const invRange = 1 / (vmax - vmin);
 
-  for (let v of values as any) {
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
     if (!Number.isFinite(v)) continue;
     min = Math.min(min, v);
     max = Math.max(max, v);
@@ -264,7 +266,7 @@ export default function AlaskaProcesamiento() {
 
       for (const f of entries) {
         try {
-          let kind: Kind =
+          const kind: Kind =
             f.name.includes("unw_phase")
               ? "fase"
               : f.name.includes("dem")
@@ -465,7 +467,7 @@ function CanvasPreview({
       drawToCanvas(ref.current, data01, width, height, kind, stats.min, stats.max);
       canvasesRef.current[id] = ref.current;
     }
-  }, [id, width, height, data01, kind, stats]);
+  }, [id, width, height, data01, kind, stats, canvasesRef]);
 
   return (
     <div className="canvas-wrapper">

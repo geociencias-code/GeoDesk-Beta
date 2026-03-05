@@ -1,5 +1,7 @@
 import React, { useState } from "react";
-import "./Era5_procesamiento_nc.css"
+import "./Era5ProcessingNc.css";
+import axios from "axios";
+import { API_URL } from "../../services/api";
 const Era5Procesamiento: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [dates, setDates] = useState<string[]>([]);
@@ -33,16 +35,9 @@ const Era5Procesamiento: React.FC = () => {
     formData.append("file", file);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/procesar_nc", {
-        method: "POST",
-        body: formData,
-      });
+      const res = await axios.post(`${API_URL}/procesar_nc`, formData);
 
-      if (!res.ok) {
-        throw new Error("Error al procesar el archivo.");
-      }
-
-      const data = await res.json();
+      const data = res.data;
       setDates(data.fechas);
       setImages(data.imagenes);
       setSelectedDateIndex(0);
@@ -112,7 +107,7 @@ const Era5Procesamiento: React.FC = () => {
 
           <div style={{ textAlign: "center", marginTop: "20px" }}>
             <img
-              src={`http://127.0.0.1:8000/${images[selectedDateIndex]}`}
+              src={`${API_URL}/${images[selectedDateIndex]}`}
               alt="Mapa de temperatura"
               style={{
                 maxWidth: "100%",

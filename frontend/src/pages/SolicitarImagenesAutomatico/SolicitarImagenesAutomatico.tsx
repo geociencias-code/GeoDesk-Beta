@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
-// import "../styles/solicitar_imagenes_automatico.css";
+import { API_URL } from "../../services/api";
 
 interface TimeWindow {
   start: string;
@@ -63,7 +63,7 @@ const SolicitarImagenesAutomatico: React.FC = () => {
 
       // Enviar la solicitud al backend para solicitar las imágenes
       const response = await axios.post<ResponseData>(
-        "http://localhost:8000/api/solicitar_imagenes",
+        `${API_URL}/api/solicitar_imagenes`,
         payload
       );
 

@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
+import axios from "axios";
+import { API_URL } from "../../services/api";
 
 export default function TempDeformUploader() {
   const [ncFile, setNcFile] = useState<File | null>(null);
@@ -32,18 +34,11 @@ export default function TempDeformUploader() {
     setError(null);
 
     try {
-      const resProcess = await fetch("http://localhost:8000/api/temperatura_deformacion", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!resProcess.ok) {
-        throw new Error(`Error del backend: ${resProcess.status}`);
-      }
+      await axios.post(`${API_URL}/api/v1/temperatura_deformacion`, formData);
 
       // Obtener lista de imágenes generadas
-      const res = await fetch("http://localhost:8000/api/temperatura_deformacion/list");
-      const data = await res.json();
+      const res = await axios.get(`${API_URL}/api/v1/temperatura_deformacion/list`);
+      const data = res.data;
 
       if (!data.images || data.images.length === 0) {
         setImages([]);
@@ -54,8 +49,12 @@ export default function TempDeformUploader() {
       setImages(data.images);
       setCurrentIndex(0);
 
-    } catch (err: any) {
-      setError(err.message || "Error inesperado");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Error inesperado");
+      }
       console.error(err);
     } finally {
       setLoading(false);
@@ -132,7 +131,7 @@ export default function TempDeformUploader() {
 
               {/* IMAGEN */}
               <img
-                src={`http://localhost:8000/${images[currentIndex]}`}
+                src={`${API_URL}/${images[currentIndex]}`}
                 alt="temp_def_graph"
                 className="rounded-xl shadow-md"
               />

@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import axios from "axios";
+import { API_URL } from "../../services/api";
 import "./Alaska_procesamiento_varios.css";
 
 type Manifest = {
@@ -16,23 +18,6 @@ export default function AlaskaViewer() {
   const [processing, setProcessing] = useState(false);
 
   // ===========================
-  // Cargar el manifest.json
-  // ===========================
-  const fetchManifest = async () => {
-    try {
-      const response = await fetch("/api/alaska/manifest");
-      if (!response.ok) {
-        throw new Error("Error al obtener el manifest");
-      }
-      const data = await response.json();
-      setManifest(data);
-    } catch (error) {
-      console.error(error);
-      alert("Error al cargar el manifest.");
-    }
-  };
-
-  // ===========================
   // Procesar archivos ZIP
   // ===========================
   const procesarZips = async () => {
@@ -47,16 +32,9 @@ export default function AlaskaViewer() {
     setProcessing(true);
 
     try {
-      const response = await fetch("/api/alaska/upload", {
-        method: "POST",
-        body: formData,
-      });
+      const response = await axios.post(`${API_URL}/api/alaska/upload`, formData);
 
-      if (!response.ok) {
-        throw new Error("Error procesando los ZIPs en el backend.");
-      }
-
-      const data = await response.json();
+      const data = response.data;
       setManifest(data); // Aquí el backend debe devolver un manifest con las imágenes generadas
       setIdx(0);
     } catch (error) {
@@ -141,7 +119,7 @@ export default function AlaskaViewer() {
 
       {/* Imagen correspondiente */}
       <div className="img-box">
-        {img ? <img src={img.replace(/\\/g, "/")} alt={view} /> : <p>No disponible</p>}
+        {img ? <img src={`${API_URL}/${img.replace(/\\/g, "/")}`} alt={view} /> : <p>No disponible</p>}
       </div>
     </div>
   );

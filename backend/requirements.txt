@@ -7,6 +7,7 @@ pydantic==2.13.0b2
 python-dotenv==1.0
 python-dateutil==2.9
 requests==2.32
+python-multipart==0.0.6
 
 # --- ASF / HyP3 ---
 asf-search==7,<8

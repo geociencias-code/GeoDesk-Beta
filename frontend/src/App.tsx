@@ -1,19 +1,19 @@
 import { useState, useRef, useEffect } from "react";
 import Navbar from "./components/Navbar";
 import BarraSuperior from "./components/BarraSuperior";
-import Era5 from "./pages/era5";
-import Era5Procesamiento from "./pages/Era5_procesamiento_nc";
+import Era5 from "./pages/Era5/Era5";
+import Era5Procesamiento from "./pages/Era5ProcessingNc/Era5ProcessingNc";
 import AlaskaSearch from "./pages/Alaska/AlaskaSearch";
 import SentinelDashboard from "./pages/Alaska/SentinelDashboard";
 import DownloadFiles from "./pages/Alaska/DownloadFiles";
-import Alaska_procesamiento from "./pages/Alaska_procesamiento";
-import SolicitarImagenesAutomatico from "./pages/solicitar_imagenes_automatico";
-import Alaska_procesamiento_varios from "./pages/deformacion";
-import Temperatura_deformacion from "./pages/temperatura_deformacion"
+import Alaska_procesamiento from "./pages/AlaskaProcessing/AlaskaProcessing";
+import SolicitarImagenesAutomatico from "./pages/SolicitarImagenesAutomatico/SolicitarImagenesAutomatico";
+import Alaska_procesamiento_varios from "./pages/Deformacion/Deformacion";
+import Temperatura_deformacion from "./pages/TemperatureDeformation/TemperatureDeformation"
 
-
-// ⬅️ NUEVO: importamos la portada
-import Inicio from "./pages/inicio";
+import Inicio from "./pages/Home/Home";
+import api, { API_URL } from "./services/api";
+import type { Scene } from "./pages/Alaska/AlaskaContent";
 
 const SIDEBAR_WIDTH = 300; // Ancho de la barra lateral
 const APP_BG = "var(--color-bg-main)"; // Color de fondo global del área principal (paleta)
@@ -41,7 +41,7 @@ const App: React.FC = () => {
   >("");
   const [polarization, setPolarization] = useState<string>("");
 
-  const [scenes, setScenes] = useState<any[]>([]); // Almacena las escenas encontradas
+  const [scenes, setScenes] = useState<Scene[]>([]); // Almacena las escenas encontradas
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastCount, setLastCount] = useState<number>(0);
@@ -100,18 +100,16 @@ const App: React.FC = () => {
         polarization: polarization || undefined,
       };
 
-      const res = await fetch("http://127.0.0.1:8000/api/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await api.post("/api/search", body);
 
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setScenes(data);
-      setLastCount(data.length);
-    } catch (e: any) {
-      setError(e.message || String(e));
+      setScenes(res.data);
+      setLastCount(res.data.length);
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        setError(e.message);
+      } else {
+        setError(String(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -153,7 +151,7 @@ const App: React.FC = () => {
             />
             <SentinelDashboard
               scenes={scenes}
-              backendUrl="http://127.0.0.1:8000"
+              backendUrl={API_URL}
               ruta={ruta}
               marco={marco}
             />

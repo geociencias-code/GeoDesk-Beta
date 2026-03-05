@@ -9,6 +9,20 @@ type NavbarProps = {
   onChangeSection: (section: string) => void;
 };
 
+type SubmenuItem = {
+  id: string;
+  label: string;
+};
+
+type ItemProps = {
+  id: string;
+  children: React.ReactNode;
+  hasSubmenu: boolean;
+  toggleSubmenu?: () => void;
+  submenuItems?: SubmenuItem[];
+  onChangeSection?: (section: string) => void;
+};
+
 export default function Navbar({ activeSection, onChangeSection }: NavbarProps) {
   const [isAlaskaOpen, setIsAlaskaOpen] = useState(false);
   const [isEra5Open, setIsEra5Open] = useState(false);
@@ -27,7 +41,7 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
     hasSubmenu,
     toggleSubmenu,
     submenuItems,
-  }: any) => (
+  }: ItemProps) => (
     <li
       role="button"
       tabIndex={0}
@@ -52,7 +66,7 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
             (id === "alaska" && isAlaskaOpen) || (id === "era5" && isEra5Open) ? "open" : undefined
           )}
         >
-          {submenuItems.map((sub: any) => (
+          {submenuItems.map((sub: SubmenuItem) => (
             <li
               key={sub.id}
               onClick={() => onChangeSection(sub.id)}

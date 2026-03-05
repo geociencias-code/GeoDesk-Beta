@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import "./download.css";
+import axios from "axios";
+import { API_URL } from "../../services/api";
 
 // Debe coincidir con lo que devuelve /api/project-files
 type FileEntry = {
@@ -24,10 +26,8 @@ const DownloadFiles: React.FC = () => {
   // Cargar lista de proyectos disponibles
   const fetchProjects = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/projects");
-      if (!res.ok) throw new Error("Error al cargar los proyectos");
-      const data = await res.json();
-      setProjects(data);
+      const res = await axios.get(`${API_URL}/api/projects`);
+      setProjects(res.data);
     } catch (e: unknown) {
       if (e instanceof Error) {
         setError("Error al cargar los proyectos: " + (e.message || "Error desconocido"));
@@ -44,18 +44,12 @@ const DownloadFiles: React.FC = () => {
     setError(null);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/project-files", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nombre_proyecto: projectName,
-          product_type: "INSAR_GAMMA",
-        }),
+      const res = await axios.post(`${API_URL}/api/project-files`, {
+        nombre_proyecto: projectName,
+        product_type: "INSAR_GAMMA",
       });
 
-      if (!res.ok) throw new Error(await res.text());
-
-      const data: FileEntry[] = await res.json();
+      const data: FileEntry[] = res.data;
       setFiles(data);
       setSelectedFiles(new Set()); // limpiar selección si cambias de proyecto
     } catch (e: unknown) {
@@ -100,22 +94,12 @@ const DownloadFiles: React.FC = () => {
 
     try {
       const downloadPromises = selectedItems.map(async (file) => {
-        const res = await fetch("http://127.0.0.1:8000/api/download", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            file_url: file.url,
-            file_name: file.file_name,
-          }),
+        const res = await axios.post(`${API_URL}/api/download`, {
+          file_url: file.url,
+          file_name: file.file_name,
         });
 
-        if (!res.ok) {
-          throw new Error(`Error descargando archivo: ${file.file_name}`);
-        }
-
-        const result = await res.json();
+        const result = res.data;
         console.log(result);
         return result;
       });

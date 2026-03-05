@@ -1,7 +1,7 @@
 # --- Core API ---
 fastapi==0.115
 uvicorn[standard]==0.30
-pydantic==2.7
+pydantic==2.13.0b2
 
 # --- Utilidades ---
 python-dotenv==1.0
@@ -12,6 +12,13 @@ requests==2.32
 asf-search==7,<8
 hyp3-sdk==3,<4
 
+# --- Procesamiento de Datos ---
 rasterio
 numpy
 matplotlib
+xarray
+netCDF4
+
+# --- Mapas Geoespaciales ---
+cartopy
+cdsapi

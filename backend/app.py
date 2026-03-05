@@ -2,9 +2,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 import os
-import shutil
 import zipfile
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -18,16 +16,15 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
 
-
 from .routes.alaska import router as alaska_router
 from .processing.Era5 import router as era5_router
 from .processing.Era5_procesamiento_nc import router as procesamiento_router
+#falta usar esto
 from .processing.solicitar_imagenes_automatico import solicitar_imagenes_automatico, SolicitudAutoIn
 from .processing.deformacion import router as deformacion_router
 
 # ← agregado
 import xarray as xr
-import matplotlib.pyplot as plt
 
 # Crear la aplicación FastAPI
 app = FastAPI(title="MyApp API", version="0.1.0")

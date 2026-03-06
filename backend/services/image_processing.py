@@ -65,10 +65,6 @@ def render_raster_tiff(in_path: Path, out_tiff: Path, title: str, cmap: str = "v
     return stats
 
 def generar_mapa_el_salvador(ruta_tif: Path, salida_png: Path):
-    """
-    Mapa base totalmente offline (sin descargas).
-    Usa stock_img() en lugar de LAND, OCEAN, etc.
-    """
     with rasterio.open(ruta_tif) as src:
         data = src.read(1)
         extent = [

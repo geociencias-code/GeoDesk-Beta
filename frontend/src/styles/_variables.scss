@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  /* Typography */
+  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  
+  /* Core Colors - Sleek Dark Theme */
+  --color-bg-main: #0b0d14;         /* Deep rich dark background */
+  --color-bg-card: #181b26;         /* Slightly lighter for cards/panels */
+  --color-bg-glass: rgba(24, 27, 38, 0.6); /* Glassmorphism background */
+  --color-bg-glass-hover: rgba(43, 48, 66, 0.8);
+  
+  --color-bg-soft: rgba(255, 255, 255, 0.08); /* Hover states, soft inputs */
+  
+  /* Text Colors */
+  --color-text-main: #f8fafc;       /* Crisp white/gray */
+  --color-text-muted: #94a3b8;      /* Dimmer gray for secondary text */
+  --color-text-inverse: #020617;    /* For text on primary buttons */
+  
+  /* Accent Colors */
+  --color-primary: #00e5ff;         /* Vibrant Cyan/Teal */
+  --color-primary-hover: #00c2d9;
+  --color-primary-soft: rgba(0, 229, 255, 0.12); /* For active backgrounds */
+  --color-primary-glow: rgba(0, 229, 255, 0.25);
+  
+  --color-secondary: #8b5cf6;       /* Vibrant Purple */
+  
+  /* Effects */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 15px var(--color-primary-glow);
+  
+  /* Borders & Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+  --border-glass: 1px solid rgba(255, 255, 255, 0.05);
+}

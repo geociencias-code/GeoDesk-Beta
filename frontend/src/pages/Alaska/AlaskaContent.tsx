@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import AlaskaSearch from "./AlaskaSearch";
 import SentinelDashboard from "./SentinelDashboard";
-import "./alaska.css";
 import axios from "axios";
 import { API_URL } from "../../services/api";
 

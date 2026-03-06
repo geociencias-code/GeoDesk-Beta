@@ -1,0 +1,114 @@
+@use "variables";
+@use "mixins";
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  font-family: var(--font-family);
+  background-color: var(--color-bg-main);
+  color: var(--color-text-main);
+  line-height: 1.5;
+  font-weight: 400;
+  min-width: 320px;
+  min-height: 100vh;
+  
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  @include mixins.scrollbar;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+}
+
+a {
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  @include mixins.hover-transition;
+
+  &:hover {
+    color: var(--color-text-main);
+  }
+}
+
+/* ===========================
+   GLOBAL BUTTONS
+   =========================== */
+button {
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-bg-soft);
+  padding: 0.6em 1.4em;
+  font-size: 0.95em;
+  font-weight: 600;
+  font-family: inherit;
+  
+  /* Primary Button Style (from index.css white button, made sleeker) */
+  background-color: var(--color-text-main);
+  color: var(--color-text-inverse);
+  
+  cursor: pointer;
+  @include mixins.hover-transition;
+  box-shadow: var(--shadow-sm);
+
+  &:hover {
+    background-color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+
+  &:focus, &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* Specific Era5 upload button generic class */
+.era5-uploadBtn {
+  background-color: var(--color-text-main);
+  color: var(--color-text-inverse);
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  border: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  @include mixins.hover-transition;
+
+  &:hover {
+    background-color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+/* Allow calendar inputs to show properly in dark mode */
+input[type="date"],
+input[type="number"],
+input[type="time"] {
+  color-scheme: dark; /* Adapting for modern browsers, instead of light forced */
+}

@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import "./download.css";
 import axios from "axios";
 import { API_URL } from "../../services/api";
 

@@ -1,0 +1,97 @@
+@use '../variables' as *;
+@use '../mixins' as *;
+
+/* Contenedor de los tres elementos del header */
+.cover-header {
+  @include flex-center;
+  flex-direction: row;     /* Alinea horizontalmente */
+  justify-content: flex-start;
+  gap: 2rem;               /* Espacio entre elementos */
+}
+
+/* Asegura que el título no rompa el layout */
+.cover-title {
+  @include flex-column;
+  justify-content: center;
+
+  h1 {
+    font-size: 3rem;    /* Tamaño del título */
+    font-weight: 800;
+  }
+
+  p {
+    font-size: 1rem;    /* Tamaño del subtítulo */
+    opacity: 0.8;
+    text-transform: uppercase;
+  }
+}
+
+/* Ajusta el logo */
+.cover-logo {
+  @include flex-center;
+  width: 150px;
+  height: 150px;
+  background: var(--color-bg-glass);
+}
+
+/* Ajusta la imagen */
+.cover-img {
+  width: 650px;
+  height: 350px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+.descripcion {
+  padding: 30px;
+}
+
+.btn-cta {
+  display: inline-block;
+  padding: 12px 32px;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
+  color: var(--color-text-inverse);
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  text-decoration: none;
+  @include hover-transition;
+  box-shadow: 0 4px 12px var(--color-primary-glow);
+
+  &:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 6px 18px var(--color-primary-glow);
+  }
+
+  &:active {
+    transform: translateY(0);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  }
+
+  &:focus {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 3px;
+  }
+}
+
+.seccion-contenido {
+  display: grid;
+  gap: 50px;
+}
+
+.info {
+  display: grid;
+  gap: 30px;
+}
+
+.card {
+  background-color: var(--color-bg-card); /* ejemplo: oscuro */
+  color: var(--color-text-main);          /* texto blanco para contraste */
+  border: var(--border-glass);
+}

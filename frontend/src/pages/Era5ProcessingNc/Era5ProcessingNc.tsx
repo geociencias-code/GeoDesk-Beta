@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import "./Era5ProcessingNc.css";
 import axios from "axios";
 import { API_URL } from "../../services/api";
 const Era5Procesamiento: React.FC = () => {

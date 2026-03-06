@@ -1,7 +1,15 @@
 import React, { useState } from "react";
-import "./navbar.css";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+  Home, 
+  Map, 
+  CloudRain, 
+  Settings, 
+  ChevronDown, 
+  Layers
+} from "lucide-react";
 
-const cx = (...classes: (string | undefined)[]) => classes.filter(Boolean).join(" ");
+const cx = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
 
 type NavbarProps = {
   activeSection: string;
@@ -15,11 +23,14 @@ type SubmenuItem = {
 
 type ItemProps = {
   id: string;
-  children: React.ReactNode;
+  label: string;
+  icon: React.ReactNode;
   hasSubmenu: boolean;
+  isOpen?: boolean;
   toggleSubmenu?: () => void;
   submenuItems?: SubmenuItem[];
   onChangeSection?: (section: string) => void;
+  activeSection: string;
 };
 
 export default function Navbar({ activeSection, onChangeSection }: NavbarProps) {
@@ -36,84 +47,133 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
 
   const Item = ({
     id,
-    children,
+    label,
+    icon,
     hasSubmenu,
+    isOpen,
     toggleSubmenu,
     submenuItems,
-  }: ItemProps) => (
-    <li
-      role="button"
-      tabIndex={0}
-      className={cx("sidebar__item", activeSection === id ? "is-active" : undefined)}
-      onClick={() => {
-        if (hasSubmenu && toggleSubmenu) toggleSubmenu();
-        else onChangeSection(id);
-      }}
-      onKeyDown={handleKey(id, toggleSubmenu)}
-      aria-current={activeSection === id ? "page" : undefined}
-    >
-      <span className="sidebar__marker" />
-      <span>{children}</span>
-
-      {hasSubmenu && submenuItems && (
-        <ul
-          className={cx(
-            "submenu",
-            (id === "alaska" && isAlaskaOpen) || (id === "era5" && isEra5Open) ? "open" : undefined
-          )}
+    activeSection,
+  }: ItemProps) => {
+    const isActive = activeSection === id || submenuItems?.some(s => s.id === activeSection);
+    
+    return (
+      <li className={cx("sidebar__item", isActive ? "is-active" : undefined)}>
+        <div
+          role="button"
+          tabIndex={0}
+          className="sidebar__item-header"
+          onClick={() => {
+            if (hasSubmenu && toggleSubmenu) toggleSubmenu();
+            else onChangeSection?.(id);
+          }}
+          onKeyDown={handleKey(id, toggleSubmenu)}
+          aria-expanded={isOpen}
         >
-          {submenuItems.map((sub: SubmenuItem) => (
-            <li
-              key={sub.id}
-              onClick={() => onChangeSection(sub.id)}
-              className={cx("submenu__item", activeSection === sub.id ? "is-active" : undefined)}
+          <div className="item-content">
+            {icon}
+            <span>{label}</span>
+          </div>
+          {hasSubmenu && (
+            <ChevronDown
+              className="chevron"
+              style={{ transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+            />
+          )}
+        </div>
+
+        <AnimatePresence initial={false}>
+          {hasSubmenu && isOpen && submenuItems && (
+            <motion.ul
+              className="submenu"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeInOut" }}
             >
-              {sub.label}
-            </li>
-          ))}
-        </ul>
-      )}
-    </li>
-  );
+              {submenuItems.map((sub: SubmenuItem) => (
+                <li
+                  key={sub.id}
+                  onClick={() => onChangeSection(sub.id)}
+                  className={cx(
+                    "submenu__item",
+                    activeSection === sub.id ? "is-active" : undefined
+                  )}
+                >
+                  {sub.label}
+                </li>
+              ))}
+            </motion.ul>
+          )}
+        </AnimatePresence>
+      </li>
+    );
+  };
 
   return (
     <aside className="sidebar" aria-label="Barra lateral de navegación">
-      <h2 className="sidebar__title">Navegación</h2>
-      <nav>
+      <div className="sidebar__brand">
+        <div className="icon-wrapper">
+          <Layers size={22} />
+        </div>
+        <span>GeoDesk Beta</span>
+      </div>
+      
+      <h3 className="sidebar__title">Navegación Principal</h3>
+      
+      <nav style={{ flex: 1 }}>
         <ul className="sidebar__list">
-          <Item id="inicio" hasSubmenu={false} submenuItems={[]} onChangeSection={onChangeSection}>
-            Inicio
-          </Item>
+          <Item 
+            id="inicio"
+            label="Inicio"
+            icon={<Home size={18} />}
+            hasSubmenu={false}
+            onChangeSection={onChangeSection}
+            activeSection={activeSection}
+          />
 
           <Item
             id="alaska"
+            label="Alaska SAR"
+            icon={<Map size={18} />}
             hasSubmenu={true}
+            isOpen={isAlaskaOpen}
             toggleSubmenu={() => setIsAlaskaOpen(!isAlaskaOpen)}
             submenuItems={[
-              { id: "solicitud-imagenes", label: "Solicitud de imágenes manual" },
-              { id: "solicitud-automatico", label: "Solicitud de imágenes automático"},
+              { id: "solicitud-imagenes", label: "Solicitud manual" },
+              { id: "solicitud-automatico", label: "Solicitud automático" },
               { id: "descarga-imagenes", label: "Descarga de imágenes" },
-              { id: "procesamiento-imagenes", label: "Procesamiento de imágenes"},
+              { id: "procesamiento-imagenes", label: "Procesamiento (SNAP)" },
             ]}
-          >
-            Alaska
-          </Item>
+            activeSection={activeSection}
+          />
 
           <Item
             id="era5"
+            label="Clima ERA5"
+            icon={<CloudRain size={18} />}
             hasSubmenu={true}
+            isOpen={isEra5Open}
             toggleSubmenu={() => setIsEra5Open(!isEra5Open)}
             submenuItems={[
               { id: "descargar-datos", label: "Descargar datos" },
-              { id: "analisis-datos", label: "Análisis de datos" },
+              { id: "analisis-datos", label: "Análisis y gráficos" },
             ]}
-          >
-            Era5
-          </Item>
+            activeSection={activeSection}
+          />
 
-          <Item id="otros-procesos" hasSubmenu={false} submenuItems={[]}>
-            Otros procesos
-          </Item>
+          {/* Spacer */}
+          <div style={{ margin: "16px 0" }} />
+          <h3 className="sidebar__title">Herramientas</h3>
+
+          <Item 
+            id="otros-procesos"
+            label="Otros procesos"
+            icon={<Settings size={18} />}
+            hasSubmenu={false}
+            onChangeSection={onChangeSection}
+            activeSection={activeSection}
+          />
         </ul>
       </nav>
     </aside>

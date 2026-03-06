@@ -30,7 +30,7 @@ interface ResponseData {
 const SolicitarImagenesAutomatico: React.FC = () => {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [projectName, setProjectName] = useState(""); // Nombre del proyecto que ingresa el usuario
+  const [projectName, setProjectName] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ResponseData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +40,6 @@ const SolicitarImagenesAutomatico: React.FC = () => {
     setError(null);
     setResult(null);
 
-    // Validación: asegurarse de que las fechas y el nombre estén completos
     if (!startDate || !endDate) {
       setError("Por favor, selecciona ambas fechas.");
       return;
@@ -54,14 +53,13 @@ const SolicitarImagenesAutomatico: React.FC = () => {
     try {
       setLoading(true);
 
-      // Preparar los datos para enviarlos al backend
+
       const payload = {
         start_date: startDate,
         end_date: endDate,
-        project_name: projectName.trim(), // Nombre del proyecto tal como el usuario lo ingresa
+        project_name: projectName.trim(),
       };
 
-      // Enviar la solicitud al backend para solicitar las imágenes
       const response = await axios.post<ResponseData>(
         `${API_URL}/api/solicitar_imagenes`,
         payload

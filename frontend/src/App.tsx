@@ -216,7 +216,6 @@ const App: React.FC = () => {
         backgroundColor: APP_BG,
       }}
     >
-      {/* NAVBAR lateral fija */}
       <div style={{ gridColumn: "1 / 2", gridRow: "1 / span 2" }}>
         <Navbar
           activeSection={activeSection}
@@ -242,7 +241,7 @@ const App: React.FC = () => {
           color: "var(--color-text-main)",
         }}
       >
-        {/* ⬅️ Ocultamos el título genérico en la portada */}
+
         {activeSection !== "inicio" && (
           <h2 style={{ marginTop: 0, marginBottom: "1rem", opacity: 0.9 }}>
             {activeSection.charAt(0).toUpperCase() + activeSection.slice(1)}

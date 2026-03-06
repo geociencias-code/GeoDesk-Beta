@@ -1,7 +1,6 @@
 import React, { useState } from "react";
-import "./navbar.css"; // Importa tu archivo CSS aquí
+import "./navbar.css";
 
-// Actualizamos cx para aceptar string | undefined
 const cx = (...classes: (string | undefined)[]) => classes.filter(Boolean).join(" ");
 
 type NavbarProps = {
@@ -30,7 +29,7 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
   const handleKey = (section: string, toggleSubmenu?: () => void) => (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      if (toggleSubmenu) toggleSubmenu(); // toggle submenú con teclado
+      if (toggleSubmenu) toggleSubmenu();
       else onChangeSection(section);
     }
   };
@@ -45,7 +44,6 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
     <li
       role="button"
       tabIndex={0}
-      // ← línea 1 corregida
       className={cx("sidebar__item", activeSection === id ? "is-active" : undefined)}
       onClick={() => {
         if (hasSubmenu && toggleSubmenu) toggleSubmenu();
@@ -57,10 +55,8 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
       <span className="sidebar__marker" />
       <span>{children}</span>
 
-      {/* Submenú */}
       {hasSubmenu && submenuItems && (
         <ul
-          // ← línea 2 corregida
           className={cx(
             "submenu",
             (id === "alaska" && isAlaskaOpen) || (id === "era5" && isEra5Open) ? "open" : undefined
@@ -70,7 +66,6 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
             <li
               key={sub.id}
               onClick={() => onChangeSection(sub.id)}
-              // ← línea 3 corregida
               className={cx("submenu__item", activeSection === sub.id ? "is-active" : undefined)}
             >
               {sub.label}

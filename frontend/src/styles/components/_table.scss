@@ -1,0 +1,75 @@
+@use "../variables" as *;
+@use "../mixins" as *;
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-lg);
+  border: var(--border-glass);
+  background: var(--color-bg-glass);
+  @include scrollbar;
+  margin-top: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.modern-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.95rem;
+
+  th,
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    white-space: nowrap;
+    color: var(--color-text-main);
+  }
+
+  th {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--color-text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(8px);
+  }
+
+  tbody tr {
+    @include hover-transition;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    &:last-child td {
+      border-bottom: none;
+    }
+  }
+
+  /* Specific cell style to limit width and scroll overflowing content */
+  .granule-cell {
+    max-width: 250px;
+    overflow-x: auto;
+    white-space: nowrap;
+
+    /* Make the inner scrollbar lighter/thinner so it's not ugly */
+    &::-webkit-scrollbar {
+      height: 4px;
+    }
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    &::-webkit-scrollbar-thumb {
+      background-color: rgba(255, 255, 255, 0.15);
+      border-radius: var(--radius-full);
+    }
+    &:hover::-webkit-scrollbar-thumb {
+      background-color: var(--color-primary-soft);
+    }
+  }
+}

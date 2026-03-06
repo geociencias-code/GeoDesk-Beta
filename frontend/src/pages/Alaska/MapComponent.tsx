@@ -6,7 +6,7 @@ import L from "leaflet";
 interface MapComponentProps {
   onPolygonChange: (polygonWkt: string) => void;
   height?: string;
-  className?: string; // <--- NUEVO: Permite estilos externos
+  className?: string;
 }
 
 const MapComponent: React.FC<MapComponentProps> = ({
@@ -58,10 +58,8 @@ const MapComponent: React.FC<MapComponentProps> = ({
 
   return (
     <div className={`alaska-map-container ${className}`}>
-      {/* Wrapper con estilos modernos */}
       <div className="alaska-map-card">
 
-        {/* Encabezado */}
         <div className="map-header">
           <h3>Área de interés</h3>
           <p>Dibuja un rectángulo con dos clics</p>
@@ -90,7 +88,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
           </MapContainer>
         </div>
 
-        {/* Footer */}
         <div className="alaska-map-footer">
           <button className="alaska-btn" onClick={reset}>Reiniciar área</button>
 

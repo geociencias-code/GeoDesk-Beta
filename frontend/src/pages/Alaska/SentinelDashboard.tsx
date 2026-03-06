@@ -15,9 +15,8 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState<null | "download">(null);
   const [error, setError] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState<string>("prueba_api");  // Estado para el nombre del proyecto
+  const [projectName, setProjectName] = useState<string>("prueba_api");
 
-  // reset selección cuando cambian las escenas
   useEffect(() => { setSelected({}); }, [scenes]);
 
   const allChecked = useMemo(
@@ -35,7 +34,6 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
   };
   const toggleOne = (g: string) => setSelected(p => ({ ...p, [g]: !p[g] }));
 
-  // ——— Descargar productos HyP3 (cuando download_url existe) ———
   async function downloadBatch(items: Scene[]) {
     setError(null);
     const targets = items
@@ -163,8 +161,9 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
             </button>
           </div>
 
-          <table>
-            <thead>
+          <div className="table-responsive">
+            <table className="modern-table">
+              <thead>
               <tr>
                 <th><input type="checkbox" checked={scenes.length>0 && scenes.every(s => selected[s.granule])} onChange={toggleAll} /></th>
                 <th>Granule</th>
@@ -188,7 +187,11 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
                       onChange={() => toggleOne(s.granule)}
                     />
                   </td>
-                  <td>{s.granule}</td>
+                  <td>
+                    <div className="granule-cell" title={s.granule}>
+                      {s.granule}
+                    </div>
+                  </td>
                   <td>{s.platform || "-"}</td>
 
                   {showRutaMarco && <td>{(s.ruta ?? "-") + "/" + (s.marco ?? "-")}</td>}
@@ -206,7 +209,8 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
 
           {error && <div style={{ color: "#ffb4b4", marginTop: 8 }}>{error}</div>}
         </>

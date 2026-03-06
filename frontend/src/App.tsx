@@ -15,21 +15,18 @@ import Inicio from "./pages/Home/Home";
 import api, { API_URL } from "./services/api";
 import type { Scene } from "./pages/Alaska/AlaskaContent";
 
-const SIDEBAR_WIDTH = 300; // Ancho de la barra lateral
-const APP_BG = "var(--color-bg-main)"; // Color de fondo global del área principal (paleta)
+const SIDEBAR_WIDTH = 300;
+const APP_BG = "var(--color-bg-main)";
 
 const App: React.FC = () => {
   const [activeSection, setActiveSection] = useState<string>("inicio");
   const [, setActivePage] = useState<string>("");
 
-  // 👉 NUEVO: controlamos si el header está oculto o no
   const [isHeaderHidden, setIsHeaderHidden] = useState<boolean>(false);
 
-  // 👉 NUEVO: referencia al contenedor que hace scroll
   const contentRef = useRef<HTMLDivElement | null>(null);
   const lastScrollTopRef = useRef<number>(0);
 
-  // Estado de los filtros de búsqueda
   const [polygonWKT, setPolygonWKT] = useState<string>("");
 
   const [startDate, setStartDate] = useState("2025-01-01");
@@ -41,18 +38,16 @@ const App: React.FC = () => {
   >("");
   const [polarization, setPolarization] = useState<string>("");
 
-  const [scenes, setScenes] = useState<Scene[]>([]); // Almacena las escenas encontradas
+  const [scenes, setScenes] = useState<Scene[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastCount, setLastCount] = useState<number>(0);
 
-  // Cambia la sección activa
   const handleChangeSection = (section: string) => {
     setActiveSection(section);
-    setActivePage(""); // Resetear página activa cuando se cambia de sección
+    setActivePage("");
   };
 
-  // 👉 NUEVO: efecto para ocultar/mostrar el header según el scroll del contenido
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
@@ -61,10 +56,8 @@ const App: React.FC = () => {
       const currentScroll = el.scrollTop;
 
       if (currentScroll > lastScrollTopRef.current && currentScroll > 50) {
-        // Scrolleando hacia abajo
         setIsHeaderHidden(true);
       } else {
-        // Scrolleando hacia arriba o muy arriba
         setIsHeaderHidden(false);
       }
 
@@ -75,7 +68,6 @@ const App: React.FC = () => {
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Función para realizar la búsqueda de escenas
   const searchScenes = async () => {
     try {
       setError(null);
@@ -115,11 +107,10 @@ const App: React.FC = () => {
     }
   };
 
-  // Renderizar contenido dependiendo de la sección activa
+
   const renderContent = () => {
     switch (activeSection) {
       case "inicio":
-        // ⬅️ Aquí usamos la portada nueva
         return <Inicio onNavigate={handleChangeSection} />;
 
       case "alaska":
@@ -146,7 +137,6 @@ const App: React.FC = () => {
               onSearch={searchScenes}
               loading={loading}
               error={error}
-              // ⬅️ aquí aprovechas el contador real
               lastCount={lastCount}
             />
             <SentinelDashboard
@@ -223,15 +213,12 @@ const App: React.FC = () => {
         />
       </div>
 
-      {/* Barra superior */}
       <div style={{ gridColumn: "2 / 3", gridRow: "1 / 2" }}>
-        {/* ⬅️ Le pasamos si debe ocultarse o no */}
         <BarraSuperior isHidden={isHeaderHidden} />
       </div>
 
-      {/* Contenido principal */}
       <div
-        ref={contentRef} // ⬅️ ESTE ES EL CONTENEDOR QUE SCROLLEA
+        ref={contentRef}
         style={{
           gridColumn: "2 / 3",
           gridRow: "2 / 3",

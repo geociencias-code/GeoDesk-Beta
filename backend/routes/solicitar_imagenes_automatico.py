@@ -217,7 +217,7 @@ def submit_jobs(
     for idx, (g1, g2) in enumerate(pairs, 1):
         job_name = f"{project_name}_{RUTA}_{MARCO}_{idx:02d}"
         try:
-            job = hyp3.submit_insar_job(
+            batch = hyp3.submit_insar_job(
                 granule1=g1,
                 granule2=g2,
                 name=job_name,
@@ -225,8 +225,9 @@ def submit_jobs(
                 include_look_vectors=INCLUDE_LOOK_VECTORS,
                 looks=LOOKS,
             )
-            job_id = getattr(job, "job_id", None) or getattr(job, "id", None)
-            status = getattr(job, "status", None)
+            job = batch[0] if len(batch) > 0 else None
+            job_id = getattr(job, "job_id", None) if job else None
+            status = getattr(job, "status_code", None) or getattr(job, "status", None) if job else None
             summaries.append(JobSummary(
                 job_id=str(job_id) if job_id else None,
                 name=job_name,

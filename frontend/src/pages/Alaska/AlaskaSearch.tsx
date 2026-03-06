@@ -47,7 +47,6 @@ const AlaskaSearch: React.FC<Props> = ({
           <input type="date" value={endDate} min={startDate}
                  onChange={e => setEndDate(e.target.value)} />
         </label>
-        {/* Contenedor para inputs pequeños (Ruta y Marco) */}
         <div className="small-inputs">
           <label>Ruta
             <input type="number" value={ruta} onChange={e => setRuta(Number(e.target.value))} />
@@ -87,7 +86,6 @@ const AlaskaSearch: React.FC<Props> = ({
         </label>
       </div>
 
-      {/* Mapa para dibujar el polígono */}
       <MapComponent onPolygonChange={setPolygonWKT} height="55vh" />
 
       <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>

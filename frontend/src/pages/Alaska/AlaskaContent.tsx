@@ -13,7 +13,7 @@ export type Scene = {
   beam_mode?: string | null;
   flight_direction?: string | null;
   polarization?: string | null;
-  download_url?: string | null;   // cuando sea producto HyP3
+  download_url?: string | null;
   size_mb?: number | null;
 };
 
@@ -25,7 +25,6 @@ function toIsoDayEnd(d: string)   { return `${d}T23:59:59Z`; }
 const DEFAULT_PROJECT = "prueba_api";
 
 const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
-  // —— estado compartido entre pestañas ——
   const [polygonWKT, setPolygonWKT] = useState<string>("");
   const [startDate, setStartDate] = useState("2025-01-01");
   const [endDate, setEndDate]     = useState("2025-01-15");
@@ -75,7 +74,6 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
     }
   }
 
-  // —— Cargar productos HyP3 listos por prefijo (Descargar) ——
   async function loadFromHyP3() {
     try {
       setError(null);
@@ -91,7 +89,6 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
     }
   }
 
-  // —— Renderizar el contenido basado en el estado de las páginas
   if (pageKey === "obtener_datos") {
     return (
       <AlaskaSearch

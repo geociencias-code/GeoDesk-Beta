@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Scene } from "./AlaskaContent";
+import { toast } from "sonner";
 
 type Props = {
   scenes: Scene[];
@@ -40,7 +41,7 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
       .filter(s => !!s.download_url)
       .map(s => ({ file_url: s.download_url!, file_name: `${s.granule}.zip` }));
     if (!targets.length) {
-      alert("No hay URLs de descarga disponibles (¿ya cargaste productos HyP3?).");
+      toast.error("No hay URLs de descarga disponibles (¿ya cargaste productos HyP3?).");
       return;
     }
     setLoading("download");
@@ -60,11 +61,15 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
         const msg = ok.slice(0, 6).map(d =>
           `✔ ${d.filename} (${((d.bytes || 0) / (1024*1024)).toFixed(1)} MB)`
         ).join("\n");
-        alert(`Descargados ${ok.length} archivo(s) en backend/alaska_descargas.\n${msg}${ok.length > 6 ? "\n…" : ""}`);
+        toast.success(`Descargados ${ok.length} archivo(s) en backend/alaska_descargas.\n${msg}${ok.length > 6 ? "\n…" : ""}`, {
+          duration: 5000,
+        });
       }
       if (fail.length) {
         const msg = fail.slice(0, 6).map(d => `✖ ${d.error || "error"}`).join("\n");
-        alert(`Algunos fallaron (${fail.length}).\n${msg}`);
+        toast.error(`Algunos fallaron (${fail.length}).\n${msg}`, {
+          duration: 5000,
+        });
       }
     } catch (e: unknown) {
       if (e instanceof Error) setError(e.message);
@@ -77,8 +82,8 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
   // ——— Procesar SLC seleccionadas (no tienen download_url) ———
   async function processWithHyP3(items: Scene[]) {
     const granules = items.map(s => s.granule);
-    if (!granules.length) { alert("No hay escenas seleccionadas."); return; }
-    if (ruta == null || marco == null) { alert("Ruta/Marco requeridos."); return; }
+    if (!granules.length) { toast.error("No hay escenas seleccionadas."); return; }
+    if (ruta == null || marco == null) { toast.error("Ruta/Marco requeridos."); return; }
 
     setLoading("download");
     try {
@@ -94,7 +99,9 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
       type SubmittedItem = { status?: string };
       const data = await res.json() as { submitted?: SubmittedItem[] };
       const ok = (data.submitted || []).filter(s => s.status === "submitted").length;
-      alert(`Se enviaron ${ok} job(s) a HyP3. Cuando estén listos, usa "Cargar productos HyP3" en este mismo tab para descargarlos.`);
+      toast.success(`Se enviaron ${ok} job(s) a HyP3. Cuando estén listos, usa "Cargar productos HyP3" en este mismo tab para descargarlos.`, {
+        duration: 5000,
+      });
     } catch (e: unknown) {
       if (e instanceof Error) setError(e.message);
       else setError(String(e));
@@ -128,7 +135,7 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
   };
 
   const handleUpdateProjectName = () => {
-    alert(`Nombre del proyecto actualizado a: ${projectName}`);
+    toast.success(`Nombre del proyecto actualizado a: ${projectName}`);
   };
 
   return (

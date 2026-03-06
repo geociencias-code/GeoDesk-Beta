@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_URL } from "../../services/api";
+import { toast } from "sonner";
 
 // Debe coincidir con lo que devuelve /api/project-files
 type FileEntry = {
@@ -105,7 +106,7 @@ const DownloadFiles: React.FC = () => {
 
       // Esperar que todas las descargas se completen
       await Promise.all(downloadPromises);
-      alert("Archivos descargados correctamente.");
+      toast.success("Archivos descargados correctamente.");
     } catch (e: unknown) {
       if (e instanceof Error) {
         setError(

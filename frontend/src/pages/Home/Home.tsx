@@ -13,10 +13,8 @@ type GeoDeskCoverProps = {
 export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.ReactNode {
   const year = new Date().getFullYear();
 
-  // ⬅️ CONTROLAMOS LA SUB-NAVEGACIÓN (si quisieras usarla después)
   const [currentPage, setCurrentPage] = useState<string | null>(null);
 
-  // RENDERIZADOR DE PÁGINAS INTERNAS (si se usan dentro del cover)
   const renderPage = () => {
     switch (currentPage) {
       case "procesamiento-imagenes":
@@ -72,7 +70,6 @@ export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.R
               </div>
             </div>
 
-            {/* DESCRIPCIÓN */}
             <div className="descripcion">
               <p className="prose-lg mb-6 opacity-90">
                 GeoDesk es una aplicación para el procesamiento y visualización de datos geoespaciales,
@@ -80,7 +77,7 @@ export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.R
               </p>
             </div>
 
-            {/* BOTÓN */}
+
             <div className="mt-8">
              <a
               className="btn-cta"

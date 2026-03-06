@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple, Iterable  # Importa Iterable
 from datetime import datetime, timezone
+from fastapi import APIRouter
 import os
 import re
 
 from dateutil import parser
 import asf_search as asf
 import hyp3_sdk as sdk
+
+router = APIRouter()
 
 USERNAME = "adalid_orantes"
 PASSWORD = "_&kgsmB92Zwtgr*"
@@ -242,6 +245,7 @@ def submit_jobs(
     return summaries
 
 
+@router.post("/api/solicitar_imagenes")
 def solicitar_imagenes_automatico(payload: SolicitudAutoIn) -> Dict[str, Any]:
     project_name = _sanear_nombre_proyecto(payload.project_name)
     base_dir = payload.output_folder or CARPETA_BASE_SALIDA

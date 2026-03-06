@@ -1,7 +1,6 @@
 import React, { useMemo, useRef, useState, useCallback } from "react";
 import JSZip from "jszip";
 import { fromArrayBuffer } from "geotiff";
-import "./AlaskaProcessing.css";
 
 /* ----------------------------------------------------------
    TIPOS

@@ -1,0 +1,387 @@
+@use '../variables' as *;
+@use '../mixins' as *;
+
+/* ============================================================
+   Alaska General Layout & Cards
+============================================================ */
+.alaska-container {
+  padding: 24px;
+}
+
+.card {
+  background: var(--color-bg-card);
+  border: var(--border-glass);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  margin: 20px auto;
+  box-shadow: var(--shadow-md);
+  max-width: 900px;
+  @include hover-transition;
+
+  &:hover {
+    box-shadow: var(--shadow-lg);
+    background: var(--color-bg-glass-hover);
+  }
+
+  h2, h3 {
+    margin: 0 0 16px;
+    font-weight: 700;
+    color: var(--color-text-main);
+    letter-spacing: 0.3px;
+  }
+  
+  h2 {
+    font-size: 1.5rem;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding-bottom: 12px;
+    text-align: center;
+  }
+
+  label {
+    @include flex-column;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+    margin-bottom: 6px;
+  }
+
+  input[type="date"],
+  input[type="number"],
+  select {
+    margin-top: 4px;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    border: var(--border-glass);
+    background-color: var(--color-bg-main);
+    color: var(--color-text-main);
+    font-size: 0.95rem;
+    width: 100%;
+    @include hover-transition;
+    
+    &:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 2px var(--color-primary-soft);
+    }
+  }
+
+  .small-inputs {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    
+    input[type="number"] {
+      width: 100px;
+    }
+  }
+
+  button {
+    margin-top: 12px;
+    width: 100%;
+    @media (min-width: 768px) {
+      width: auto;
+    }
+  }
+  
+  > div {
+    display: grid;
+    gap: 16px;
+    @media (min-width: 768px) {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  
+  .error-message {
+    font-size: 0.85rem;
+    color: #f87171;
+    background-color: rgba(248, 113, 113, 0.1);
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    margin-top: 12px;
+    grid-column: 1 / -1;
+  }
+}
+
+/* ============================================================
+   Alaska Map Component
+============================================================ */
+.alaska-map-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 16px 0;
+}
+
+.alaska-map-card {
+  width: 100%;
+  @include glassmorphism(12px);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-lg);
+  @include hover-transition;
+
+  &:hover {
+    box-shadow: 0 15px 38px rgba(0, 0, 0, 0.4);
+  }
+}
+
+.map-header {
+  margin-bottom: 16px;
+  
+  h3 {
+    font-size: 1.25rem;
+    color: var(--color-text-main);
+    margin-bottom: 4px;
+  }
+  
+  p {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+  }
+}
+
+.alaska-map-wrapper {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  border: var(--border-glass);
+  height: 480px;
+
+  .leaflet-container {
+    background: var(--color-bg-main) !important;
+    height: 100%;
+    width: 100%;
+  }
+}
+
+.alaska-map-footer {
+  margin-top: 16px;
+  @include flex-column;
+  gap: 8px;
+}
+
+.alaska-btn {
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  color: var(--color-text-inverse);
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  @include hover-transition;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-glow);
+  }
+}
+
+/* ============================================================
+   Alaska Downloads
+============================================================ */
+.download-panel {
+  @extend .card;
+  backdrop-filter: blur(8px);
+}
+
+.download-row {
+  select {
+    width: 100%;
+    max-width: 400px;
+  }
+}
+
+.download-list {
+  margin-top: 24px;
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  li {
+    margin-bottom: 10px;
+    padding: 12px 16px;
+    background: var(--color-bg-soft);
+    border-radius: var(--radius-md);
+    border: var(--border-glass);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    @include hover-transition;
+    
+    &:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+  }
+}
+
+.alaska-btn-dark {
+  background: var(--color-bg-main) !important;
+  color: var(--color-text-main) !important;
+  border: var(--border-glass) !important;
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  cursor: pointer;
+  @include hover-transition;
+
+  &:hover:not(:disabled) {
+    background: var(--color-bg-card) !important;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+/* ============================================================
+   Alaska Processing
+============================================================ */
+.raster-container {
+  h1 {
+    font-size: 2.4rem;
+    font-weight: 800;
+    margin-bottom: 12px;
+    @include text-gradient;
+  }
+
+  p.description {
+    margin-bottom: 30px;
+    color: var(--color-text-muted);
+    font-size: 1.1rem;
+    line-height: 1.6;
+  }
+}
+
+.input-wrapper {
+  margin: 24px 0;
+
+  input[type="file"] {
+    background: var(--color-bg-soft);
+    border: 1px dashed rgba(255, 255, 255, 0.3);
+    padding: 16px;
+    border-radius: var(--radius-lg);
+    width: 100%;
+    color: var(--color-text-main);
+    cursor: pointer;
+    @include hover-transition;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.6);
+    }
+
+    &::-webkit-file-upload-button {
+      background: var(--color-bg-card);
+      padding: 10px 18px;
+      border-radius: var(--radius-md);
+      border: var(--border-glass);
+      color: var(--color-text-main);
+      cursor: pointer;
+      @include hover-transition;
+      margin-right: 16px;
+
+      &:hover {
+        background: var(--color-bg-main);
+      }
+    }
+  }
+}
+
+.filter-buttons-container, .filter-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 32px 0;
+}
+
+.filter-btn, .filter-buttons button {
+  padding: 12px 24px;
+  font-size: 1rem;
+  font-weight: 500;
+  background: var(--color-bg-soft);
+  border: var(--border-glass);
+  color: var(--color-text-main);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  @include hover-transition;
+
+  &:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  &.active {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+    border-color: rgba(255, 255, 255, 0.4);
+    box-shadow: var(--shadow-glow);
+    color: var(--color-text-inverse);
+    font-weight: 600;
+  }
+}
+
+.result-box {
+  margin-top: 32px;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-glass);
+  border: var(--border-glass);
+  text-align: center;
+  font-size: 1rem;
+  color: var(--color-text-main);
+}
+
+/* ============================================================
+   Alaska Various Viewer
+============================================================ */
+.viewer-container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-top: 24px;
+}
+
+.slider-container {
+  margin: 24px 0;
+  
+  .slider-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9rem;
+    margin-top: 8px;
+    color: var(--color-text-muted);
+    
+    .active {
+      color: var(--color-primary);
+      font-weight: 600;
+    }
+  }
+}
+
+.images-grid {
+  margin-top: 32px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+
+  .img-box {
+    background: var(--color-bg-card);
+    padding: 16px;
+    border-radius: var(--radius-lg);
+    text-align: center;
+    border: var(--border-glass);
+    box-shadow: var(--shadow-md);
+    
+    img {
+      width: 100%;
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+    }
+  }
+}

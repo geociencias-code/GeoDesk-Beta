@@ -1,7 +1,6 @@
 import { useState } from "react";
 import axios from "axios";
 import { API_URL } from "../../services/api";
-import "./Alaska_procesamiento_varios.css";
 
 type Manifest = {
   fechas: string[];

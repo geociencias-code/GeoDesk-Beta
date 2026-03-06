@@ -1,8 +1,6 @@
 import React, { useState } from "react";
 import { MapContainer, TileLayer, Rectangle, useMapEvents } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import "./Era5.css";
 import { API_URL } from "../../services/api";
 
 interface AreaCoords {

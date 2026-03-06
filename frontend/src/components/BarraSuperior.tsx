@@ -1,5 +1,4 @@
 import React from "react";
-import "./BarraSuperior.css";
 
 type BarraSuperiorProps = {
   isHidden?: boolean;
@@ -10,20 +9,19 @@ const BarraSuperior: React.FC<BarraSuperiorProps> = ({ isHidden }) => {
   const logoAlt: string = "Logo Novalis Lab";
 
   return (
-    <header className={`barra-superior ${isHidden ? "hidden" : ""}`}>
-      {/* Logo */}
-      <img src={logoSrc} alt={logoAlt} />
+    <header className={`topbar ${isHidden ? "is-hidden" : ""}`}>
+      <div className="topbar__brand">
+        <img src={logoSrc} alt={logoAlt} />
+        <span className="title">GeoDesk</span>
+      </div>
 
-      {/* Nombre */}
-      <span className="titulo">GeoDesk Beta</span>
-
-      {/* Palabras clave */}
-      <span className="palabras">
-        Puedes obtener datos Alaska/ERA-5 
+      <span className="topbar__subtitle">
+        Procesamiento de datos Alaska & ERA-5
       </span>
 
-      {/* Tecnología */}
-      <span className="tecnologia">React Tecnology</span>
+      <span className="topbar__badge">
+        BETA SYSTEM
+      </span>
     </header>
   );
 };

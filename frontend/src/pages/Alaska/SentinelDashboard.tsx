@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Scene } from "./AlaskaContent";
-import "./alaska.css";
 
 type Props = {
   scenes: Scene[];

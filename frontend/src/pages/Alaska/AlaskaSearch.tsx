@@ -1,6 +1,5 @@
 import React from "react";
 import MapComponent from "./MapComponent";
-import "./AlaskaSearch.css";
 
 type Props = {
   polygonWKT: string;

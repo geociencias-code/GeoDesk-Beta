@@ -1,27 +1,17 @@
-# backend/routes/alaska.py
 from __future__ import annotations
-
 import math
-import os
 import re
 import pathlib
 import urllib.parse
 from typing import Any, Iterable, List, Optional, Tuple, Dict
 from datetime import datetime, timezone
-
 import requests
 from dateutil import parser
-from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-
 import asf_search as asf
 from asf_search import ASFSession
 import hyp3_sdk as sdk
-
-# =======================
-# CARGA DE CONFIG/SECRETOS
-# =======================
 
 ASF_USERNAME="adalid_orantes"
 ASF_PASSWORD="_&kgsmB92Zwtgr*"
@@ -37,14 +27,10 @@ if not ASF_USERNAME or not ASF_PASSWORD:
 else:
     print("ASF_USERNAME detectado (OK)")
 
-# =======================
-# ROUTER
-# =======================
 router = APIRouter()
 
-# =======================
+
 # MODELOS (I/O)
-# =======================
 class SearchParams(BaseModel):
     polygon: str = Field(
         default=(
@@ -64,10 +50,8 @@ class SearchParams(BaseModel):
     marco: int = 547
     beam_mode: str = "IW"
     processing_level: str = "SLC"
-    # filtros opcionales (para SLC)
-    flight_direction: Optional[str] = None   # ASCENDING | DESCENDING
-    polarization: Optional[str] = None       # VV, HH, VV+VH, HH+HV
-    # pares
+    flight_direction: Optional[str] = None # ASCENDING | DESCENDING
+    polarization: Optional[str] = None # VV, HH, VV+VH, HH+HV
     day_interval: int = 12
     same_platform: bool = True
 
@@ -80,7 +64,7 @@ class SceneOut(BaseModel):
     beam_mode: Optional[str] = None
     flight_direction: Optional[str] = None
     polarization: Optional[str] = None
-    download_url: Optional[str] = None  # (si fuese producto ya listo)
+    download_url: Optional[str] = None
 
 class PairOut(BaseModel):
     g1: str
@@ -113,7 +97,7 @@ class StatusRequest(BaseModel):
 
 class ProjectFileDownloadRequest(BaseModel):
     nombre_proyecto: str
-    product_type: str = "INSAR_GAMMA"  # Tipo de producto por defecto
+    product_type: str = "INSAR_GAMMA"
 
 class JobFile(BaseModel):
     file_name: str
@@ -130,7 +114,6 @@ class DownloadBody(BaseModel):
     file_url: str
     file_name: Optional[str] = None
 
-# —— Descargar lote
 class BatchItem(BaseModel):
     file_url: str
     file_name: Optional[str] = None
@@ -146,7 +129,6 @@ class BatchDownloadResult(BaseModel):
     bytes: Optional[int] = None
     error: Optional[str] = None
 
-# —— Listar HyP3 por prefijo
 class Hyp3ListRequest(BaseModel):
     nombre_proyecto: str = "prueba_api"
     product_type: str = "INSAR_GAMMA"  # o RTC_GAMMA
@@ -158,7 +140,6 @@ class Hyp3FileOut(BaseModel):
     download_url: str
     size_mb: Optional[float] = None
 
-# —— Enviar a HyP3 desde selección SLC
 class SubmitFromGranulesBody(BaseModel):
     granules: List[str]
     ruta: int
@@ -167,13 +148,9 @@ class SubmitFromGranulesBody(BaseModel):
     same_platform: bool = True
     options: JobOptions = JobOptions()
 
-# =======================
-# UTILITARIAS
-# =======================
+
+
 def update_project_name(new_name: str):
-    """
-    Actualiza el nombre del proyecto en los objetos relacionados.
-    """
     JobOptions.nombre_proyecto = new_name
     Hyp3ListRequest.nombre_proyecto = new_name
 
@@ -210,18 +187,20 @@ def acquire_date(scene: Any) -> Optional[datetime]:
         if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
         else: dt = dt.astimezone(timezone.utc)
         return dt
-    except Exception:
+    except (ValueError, TypeError):
         return None
 
 def get_ruta(scene: Any) -> Optional[int]:
     v = _get_prop(scene, "relativeOrbit", "pathNumber", "path")
     try: return int(v) if v is not None else None
-    except Exception: return None
+    except (ValueError, TypeError):
+        return None
 
 def get_marco(scene: Any) -> Optional[int]:
     v = _get_prop(scene, "frame", "FRAME")
     try: return int(v) if v is not None else None
-    except Exception: return None
+    except (ValueError, TypeError):
+        return None
 
 def get_download_url(scene: Any) -> Optional[str]:
     return _get_prop(scene, "url", "downloadUrl", "download_url", "fileURL", "link")
@@ -231,7 +210,7 @@ def get_size_mb_from_dict(d: Dict[str, Any]) -> Optional[float]:
     if not size: return None
     try:
         return round(float(size) / (1024 * 1024), 2)
-    except Exception:
+    except (ValueError, TypeError):
         return None
 
 def search_scenes(params: SearchParams) -> List[Any]:
@@ -273,7 +252,7 @@ def build_pairs_from_results(results: Iterable[Any], day_interval: int, same_pla
             pairs.append((g1, g2))
     return pairs
 
-# --- sesión ASF (EDL/URS) y descarga robusta ---
+
 def make_asf_session() -> ASFSession:
     s = ASFSession()
     if ASF_USERNAME and ASF_PASSWORD:
@@ -339,14 +318,10 @@ def pick_session_for(url: str) -> requests.Session:
         return make_asf_session()
     return requests.Session()
 
-# =======================
-# ENDPOINTS
-# =======================
+
+
 @router.post("/api/update-project-name")
 def api_update_project_name(new_name: str):
-    """
-    Endpoint para actualizar el nombre del proyecto.
-    """
     update_project_name(new_name)
     return {"ok": True, "new_name": new_name}
 
@@ -354,7 +329,6 @@ def api_update_project_name(new_name: str):
 def health():
     return {"ok": True, "service": "Sentinel-1 HyP3 API"}
 
-# --- BUSCAR SLC ---
 @router.post("/api/search", response_model=List[SceneOut])
 def api_search(params: SearchParams):
     try:
@@ -377,7 +351,6 @@ def api_search(params: SearchParams):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en búsqueda: {e}")
 
-# --- CONSTRUIR PARES (opcional) ---
 @router.post("/api/pairs", response_model=List[PairOut])
 def api_pairs(params: SearchParams):
     try:
@@ -387,7 +360,6 @@ def api_pairs(params: SearchParams):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error construyendo pares: {e}")
 
-# --- ENVIAR JOBS HyP3 DESDE PARES (flujo clásico) ---
 @router.post("/api/submit", response_model=SubmitResponse)
 def api_submit(body: SubmitRequest):
     if not HYP3_USERNAME or not HYP3_PASSWORD:
@@ -414,13 +386,11 @@ def api_submit(body: SubmitRequest):
 
     return SubmitResponse(submitted=submitted, total=len(submitted))
 
-# --- ENVIAR JOBS HyP3 DESDE LISTA DE GRANULES SLC (selección de la tabla) ---
 @router.post("/api/submit-from-granules", response_model=SubmitResponse)
 def api_submit_from_granules(body: SubmitFromGranulesBody):
     if not HYP3_USERNAME or not HYP3_PASSWORD:
         raise HTTPException(status_code=400, detail="Faltan HYP3_USERNAME/HYP3_PASSWORD en backend/.env")
 
-    # Recuperar metadatos de esos granules SLC
     try:
         try:
             results = list(asf.search(platform="Sentinel-1", processingLevel="SLC", granule_list=body.granules))
@@ -431,7 +401,6 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"No se pudieron leer metadatos de granules: {e}")
 
-    # Armar pares según reglas
     valid = []
     for r in results:
         g = get_granule_name(r)
@@ -450,7 +419,6 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
         if abs((d2 - d1).days) <= body.day_interval:
             pairs.append((g1, g2))
 
-    # Enviar a HyP3
     try:
         hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
     except Exception as e:
@@ -472,7 +440,6 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
             submitted.append(SubmitResult(index=idx, job_name=job_name, job_id=None, status=f"error: {e}"))
     return SubmitResponse(submitted=submitted, total=len(submitted))
 
-# --- LISTAR ARCHIVOS LISTOS EN HyP3 POR PREFIJO ---
 @router.post("/api/hyp3-files", response_model=List[Hyp3FileOut])
 def api_hyp3_files(body: Hyp3ListRequest):
     if not HYP3_USERNAME or not HYP3_PASSWORD:
@@ -480,7 +447,6 @@ def api_hyp3_files(body: Hyp3ListRequest):
     try:
         hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
 
-        # Buscar trabajos usando el prefijo del nombre del proyecto
         batch = (
             hyp3.find_jobs(job_type=body.product_type)
                 .filter_jobs(running=False, include_expired=False, succeeded=True)
@@ -491,8 +457,7 @@ def api_hyp3_files(body: Hyp3ListRequest):
             prefix = f"{body.nombre_proyecto}_{body.ruta}_{body.marco}_"
 
         out: List[Hyp3FileOut] = []
-        
-        # Filtrar trabajos por el prefijo del nombre del proyecto
+
         for job in batch.jobs:
             if prefix and not str(job.name or "").startswith(prefix):
                 continue
@@ -513,10 +478,8 @@ def api_hyp3_files(body: Hyp3ListRequest):
 
 @router.get("/api/projects")
 def get_projects():
-    """ Devuelve una lista de proyectos disponibles """
     try:
         hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
-        # Buscar trabajos disponibles para obtener los proyectos
         batch = hyp3.find_jobs().filter_jobs(running=False, include_expired=False, succeeded=True)
 
         projects = []
@@ -532,7 +495,6 @@ def get_projects():
 
 @router.post("/api/project-files", response_model=List[JobFile])
 def get_project_files(body: ProjectFileDownloadRequest):
-    """Obtiene los archivos de un proyecto específico basado en su nombre y tipo de producto."""
     nombre_proyecto = body.nombre_proyecto
     product_type = body.product_type
 
@@ -542,7 +504,6 @@ def get_project_files(body: ProjectFileDownloadRequest):
     try:
         hyp3 = sdk.HyP3(username=ASF_USERNAME, password=ASF_PASSWORD)
 
-        # Buscar trabajos de HyP3 usando el nombre del proyecto y tipo de producto
         batch = (
             hyp3.find_jobs(name=nombre_proyecto, job_type=product_type)
                 .filter_jobs(running=False, include_expired=False, succeeded=True)
@@ -577,7 +538,6 @@ def get_project_files(body: ProjectFileDownloadRequest):
         raise HTTPException(status_code=500, detail=f"Error al obtener los archivos del proyecto: {str(e)}")
 
 
-# --- DESCARGA A DISCO DEL SERVIDOR ---
 @router.post("/api/download")
 def api_download(body: DownloadBody):
     try:
@@ -601,10 +561,9 @@ def api_download_batch(body: BatchDownloadBody):
     results: List[BatchDownloadResult] = []
     downloads_dir = ensure_dir(pathlib.Path(__file__).resolve().parent.parent / "alaska_descargas")  # Define your directory for downloads
 
-    # Iterar sobre los archivos seleccionados
     for it in body.items:
         try:
-            sess = pick_session_for(it.file_url)  # Usar la sesión HTTP correcta
+            sess = pick_session_for(it.file_url)
             with sess.get(it.file_url, stream=True, allow_redirects=True, timeout=120) as r:
                 if r.status_code in (401, 403):
                     results.append(BatchDownloadResult(ok=False, file_url=it.file_url, error="403/401 (EDL/URS requerido)"))
@@ -612,9 +571,8 @@ def api_download_batch(body: BatchDownloadBody):
                 r.raise_for_status()
                 fname = (it.file_name or "").strip() or pick_filename_from_headers(r) or guess_filename_from_url(r.url)
                 fname = safe_filename(fname)
-                dst = downloads_dir / fname  # Guardar el archivo en la carpeta adecuada
+                dst = downloads_dir / fname
 
-                # Guardar el archivo en el servidor local
                 with open(dst, "wb") as f:
                     for chunk in r.iter_content(chunk_size=1024 * 1024):
                         if chunk:
@@ -627,8 +585,6 @@ def api_download_batch(body: BatchDownloadBody):
 
     return results
 
-
-# ---- Verificación de Earthdata Login/URS ----
 @router.get("/api/check-edl")
 def api_check_edl(test_url: str = Query("https://datapool.asf.alaska.edu/")):
     try:

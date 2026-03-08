@@ -1,0 +1,48 @@
+# Dependencias
+node_modules/
+
+# Build de producción
+dist/
+build/
+
+# Archivos de desarrollo y configuración local
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Caché
+.npm
+.eslintcache
+.vite/
+
+# IDE y editores
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker (evitar recursividad)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Tests
+coverage/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__/
+
+# Documentación
+README.md
+*.md

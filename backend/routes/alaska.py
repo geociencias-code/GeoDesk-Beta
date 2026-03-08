@@ -449,7 +449,7 @@ def get_projects():
 
 
 
-# endpoint duplicado, mismo propósito que /api/hyp3-files
+# Lista los archivos disponibles para un proyecto dado
 @router.post("/api/project-files", response_model=List[JobFile]) # usado
 def get_project_files(body: ProjectFileDownloadRequest):
     nombre_proyecto = body.nombre_proyecto

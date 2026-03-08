@@ -205,27 +205,7 @@ def search_scenes(params: SearchParams) -> List[Any]:
         kwargs["polarization"] = params.polarization
     return list(asf.search(**kwargs))
 
-def build_pairs_from_results(results: Iterable[Any], day_interval: int, same_platform: bool) -> List[Tuple[str, str]]:
-    valid = []
-    for r in results:
-        g = get_granule_name(r)
-        d = acquire_date(r)
-        if g and d:
-            valid.append((r, g, d))
-    if not valid: return []
-    valid.sort(key=lambda t: t[2])
 
-    pairs: List[Tuple[str, str]] = []
-    for i in range(len(valid) - 1):
-        r1, g1, d1 = valid[i]
-        r2, g2, d2 = valid[i + 1]
-        if same_platform:
-            p1, p2 = get_platform(r1), get_platform(r2)
-            if p1 and p2 and p1 != p2:
-                continue
-        if abs((d2 - d1).days) <= day_interval:
-            pairs.append((g1, g2))
-    return pairs
 
 
 def make_asf_session() -> ASFSession:
@@ -329,16 +309,6 @@ def api_search(params: SearchParams):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en búsqueda: {e}")
 
-# Construye pares de interferometría a partir de los resultados de búsqueda
-# No se está usando
-@router.post("/api/pairs", response_model=List[PairOut])
-def api_pairs(params: SearchParams):
-    try:
-        res = search_scenes(params)
-        pairs = build_pairs_from_results(res, params.day_interval, params.same_platform)
-        return [PairOut(g1=g1, g2=g2) for (g1, g2) in pairs]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error construyendo pares: {e}")
 
 
 # Envia trabajos de procesamiento a HyP3 para cada par dado, con las opciones especificadas

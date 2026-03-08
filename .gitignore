@@ -1,2 +1,5 @@
 backend/alaska_descargas/
 backend/__pycache__/
+
+# Variables de entorno
+.env

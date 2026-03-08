@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 import asf_search as asf
 import hyp3_sdk as sdk
 
-# Cargar variables de entorno desde .env
 load_dotenv()
 
 router = APIRouter()

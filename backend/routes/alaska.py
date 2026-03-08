@@ -320,15 +320,18 @@ def pick_session_for(url: str) -> requests.Session:
 
 
 
+# Actualiza el nombre del proyecto
 @router.post("/api/update-project-name")
 def api_update_project_name(new_name: str):
     update_project_name(new_name)
     return {"ok": True, "new_name": new_name}
 
+# Verifica que la API está corriendo
 @router.get("/health")
 def health():
     return {"ok": True, "service": "Sentinel-1 HyP3 API"}
 
+# Busca escenas de Sentinel-1 según los parámetros dados
 @router.post("/api/search", response_model=List[SceneOut])
 def api_search(params: SearchParams):
     try:
@@ -344,13 +347,14 @@ def api_search(params: SearchParams):
                 beam_mode=params.beam_mode,
                 flight_direction=params.flight_direction,
                 polarization=params.polarization,
-                download_url=None,
+                download_url=None,#??
             ))
         out.sort(key=lambda x: (x.date_utc or "", x.granule))
         return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en búsqueda: {e}")
 
+# Construye pares de interferometría a partir de los resultados de búsqueda
 @router.post("/api/pairs", response_model=List[PairOut])
 def api_pairs(params: SearchParams):
     try:
@@ -360,6 +364,8 @@ def api_pairs(params: SearchParams):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error construyendo pares: {e}")
 
+
+# Envia trabajos de procesamiento a HyP3 para cada par dado, con las opciones especificadas
 @router.post("/api/submit", response_model=SubmitResponse)
 def api_submit(body: SubmitRequest):
     if not HYP3_USERNAME or not HYP3_PASSWORD:
@@ -386,6 +392,9 @@ def api_submit(body: SubmitRequest):
 
     return SubmitResponse(submitted=submitted, total=len(submitted))
 
+
+
+# Permite enviar trabajos a HyP3 directamente a partir de una lista de granules, construyendo los pares internamente
 @router.post("/api/submit-from-granules", response_model=SubmitResponse)
 def api_submit_from_granules(body: SubmitFromGranulesBody):
     if not HYP3_USERNAME or not HYP3_PASSWORD:
@@ -440,7 +449,9 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
             submitted.append(SubmitResult(index=idx, job_name=job_name, job_id=None, status=f"error: {e}"))
     return SubmitResponse(submitted=submitted, total=len(submitted))
 
-@router.post("/api/hyp3-files", response_model=List[Hyp3FileOut])
+
+# Lista los archivos de salida de trabajos ya completados de un proyecto
+@router.post("/api/hyp3-files", response_model=List[Hyp3FileOut]) # no veo que se utilice
 def api_hyp3_files(body: Hyp3ListRequest):
     if not HYP3_USERNAME or not HYP3_PASSWORD:
         raise HTTPException(status_code=400, detail="Faltan HYP3_USERNAME/HYP3_PASSWORD en backend/.env")
@@ -476,6 +487,9 @@ def api_hyp3_files(body: Hyp3ListRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listando HyP3: {e}")
 
+
+
+# Lista los proyectos (trabajos ya completados) disponibles en HyP3
 @router.get("/api/projects")
 def get_projects():
     try:
@@ -493,7 +507,10 @@ def get_projects():
         raise HTTPException(status_code=500, detail=f"Error al obtener proyectos: {str(e)}")
 
 
-@router.post("/api/project-files", response_model=List[JobFile])
+
+
+# endpoint duplicado, mismo propósito que /api/hyp3-files
+@router.post("/api/project-files", response_model=List[JobFile]) # usado
 def get_project_files(body: ProjectFileDownloadRequest):
     nombre_proyecto = body.nombre_proyecto
     product_type = body.product_type
@@ -538,6 +555,7 @@ def get_project_files(body: ProjectFileDownloadRequest):
         raise HTTPException(status_code=500, detail=f"Error al obtener los archivos del proyecto: {str(e)}")
 
 
+# Descarga las imagenes procesadas
 @router.post("/api/download")
 def api_download(body: DownloadBody):
     try:
@@ -556,7 +574,8 @@ def api_download(body: DownloadBody):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al descargar: {e}")
 
-@router.post("/api/download-batch")
+# Permite descargar múltiples archivos a la vez
+@router.post("/api/download-batch") # no veo qeu se utilice
 def api_download_batch(body: BatchDownloadBody):
     results: List[BatchDownloadResult] = []
     downloads_dir = ensure_dir(pathlib.Path(__file__).resolve().parent.parent / "alaska_descargas")  # Define your directory for downloads
@@ -585,6 +604,7 @@ def api_download_batch(body: BatchDownloadBody):
 
     return results
 
+# Verifica la conectividad y permisos para acceder a los servidores de ASF
 @router.get("/api/check-edl")
 def api_check_edl(test_url: str = Query("https://datapool.asf.alaska.edu/")):
     try:

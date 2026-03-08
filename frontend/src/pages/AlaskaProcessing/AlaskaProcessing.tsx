@@ -2,9 +2,9 @@ import React, { useMemo, useRef, useState, useCallback } from "react";
 import JSZip from "jszip";
 import { fromArrayBuffer } from "geotiff";
 
-/* ----------------------------------------------------------
-   TIPOS
----------------------------------------------------------- */
+
+//Se debe usar los endpoints definidos en el backend como /api/v1/procesar_zip
+// /procesar_zip hace lo mismo pero tiene su propia instancia de FastAPI
 type Kind = "coherencia" | "fase" | "elevacion" | "desconocido";
 
 type RasterResult = {
@@ -28,9 +28,7 @@ type Stats = {
   count: number;
 };
 
-/* ----------------------------------------------------------
-   UTILS
----------------------------------------------------------- */
+
 function niceDateFromText(text: string): string | undefined {
   const m = /(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)/.exec(text);
   if (!m) return undefined;
@@ -51,9 +49,6 @@ function formatNumber(n: number, digits = 4): string {
   return Number(n).toFixed(digits);
 }
 
-/* ----------------------------------------------------------
-   ALGORITMOS / HISTOGRAMAS
----------------------------------------------------------- */
 
 function percentileFromHist(
   bins: Float64Array,
@@ -136,9 +131,6 @@ function computeStats(values: Float32Array | Float64Array | number[]): Stats {
   };
 }
 
-/* ----------------------------------------------------------
-   NORMALIZACIÓN Y CANVAS
----------------------------------------------------------- */
 function normalizeValues(values: Float32Array, vmin: number, vmax: number) {
   const out = new Float32Array(values.length);
   const range = vmax - vmin;
@@ -148,7 +140,6 @@ function normalizeValues(values: Float32Array, vmin: number, vmax: number) {
   return out;
 }
 
-/* PALLETES */
 function viridis(t: number): [number, number, number] {
   const a = [0.267, 0.005, 0.329];
   const b = [0.256, 0.319, 0.441];
@@ -209,7 +200,6 @@ function drawToCanvas(
   }
   ctx.putImageData(img, 0, 0);
 
-  /* SCALE BAR */
   const scaleWidth = 200;
   const scaleHeight = 20;
   const x = (w - scaleWidth) / 2;
@@ -237,9 +227,7 @@ function drawToCanvas(
   ctx.fillText(formatNumber(vmax), x + scaleWidth + 10, y + 14);
 }
 
-/* ----------------------------------------------------------
-   COMPONENTES UI
----------------------------------------------------------- */
+
 
 export default function AlaskaProcesamiento() {
   const [busy, setBusy] = useState(false);
@@ -252,7 +240,6 @@ export default function AlaskaProcesamiento() {
     [results, filter]
   );
 
-  /* ---------------- ZIP HANDLER ---------------- */
   const handleZipFile = useCallback(async (file: File) => {
     setBusy(true);
     try {
@@ -337,7 +324,6 @@ export default function AlaskaProcesamiento() {
 
   return (
     <div className="alaska-container">
-      {/* ---------------- HEADER ---------------- */}
       <header className="alaska-header">
         <h1>Procesamiento de Raster desde ZIP</h1>
         <p>
@@ -346,7 +332,6 @@ export default function AlaskaProcesamiento() {
         </p>
       </header>
 
-      {/* ---------------- FILE UPLOADER ---------------- */}
       <section className="upload-card">
         <label>Selecciona archivo .zip</label>
         <input
@@ -360,7 +345,6 @@ export default function AlaskaProcesamiento() {
         {busy && <p className="loading">Procesando ZIP…</p>}
       </section>
 
-      {/* ---------------- FILTER BAR ---------------- */}
       <div className="filter-buttons-container">
         {(["todos", "coherencia", "fase", "elevacion"] as const).map(k => (
           <button
@@ -374,7 +358,6 @@ export default function AlaskaProcesamiento() {
       </div>
 
 
-      {/* ---------------- RESULTS GRID ---------------- */}
       <section className="results-grid">
         {filtered.map(r => (
           <RasterCard
@@ -395,9 +378,6 @@ export default function AlaskaProcesamiento() {
   );
 }
 
-/* ----------------------------------------------------------
-   RASTER CARD
----------------------------------------------------------- */
 function RasterCard({
   r,
   canvasesRef,
@@ -439,9 +419,6 @@ function RasterCard({
   );
 }
 
-/* ----------------------------------------------------------
-   CANVAS PREVIEW
----------------------------------------------------------- */
 function CanvasPreview({
   id,
   width,
@@ -475,9 +452,6 @@ function CanvasPreview({
   );
 }
 
-/* ----------------------------------------------------------
-   STATS TABLE
----------------------------------------------------------- */
 function StatsTable({ stats, kind }: { stats: Stats; kind: Kind }) {
   const unit =
     kind === "coherencia"

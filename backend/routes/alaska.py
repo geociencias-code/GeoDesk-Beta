@@ -114,31 +114,7 @@ class DownloadBody(BaseModel):
     file_url: str
     file_name: Optional[str] = None
 
-class BatchItem(BaseModel):
-    file_url: str
-    file_name: Optional[str] = None
 
-class BatchDownloadBody(BaseModel):
-    items: List[BatchItem]
-
-class BatchDownloadResult(BaseModel):
-    ok: bool
-    file_url: str
-    filename: Optional[str] = None
-    saved_to: Optional[str] = None
-    bytes: Optional[int] = None
-    error: Optional[str] = None
-
-class Hyp3ListRequest(BaseModel):
-    nombre_proyecto: str = "prueba_api"
-    product_type: str = "INSAR_GAMMA"  # o RTC_GAMMA
-    ruta: Optional[int] = None
-    marco: Optional[int] = None
-
-class Hyp3FileOut(BaseModel):
-    granule: str
-    download_url: str
-    size_mb: Optional[float] = None
 
 class SubmitFromGranulesBody(BaseModel):
     granules: List[str]
@@ -152,7 +128,6 @@ class SubmitFromGranulesBody(BaseModel):
 
 def update_project_name(new_name: str):
     JobOptions.nombre_proyecto = new_name
-    Hyp3ListRequest.nombre_proyecto = new_name
 
 
 def _get_prop(scene: Any, *keys: str) -> Optional[Any]:
@@ -450,42 +425,7 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
     return SubmitResponse(submitted=submitted, total=len(submitted))
 
 
-# Lista los archivos de salida de trabajos ya completados de un proyecto
-@router.post("/api/hyp3-files", response_model=List[Hyp3FileOut]) # no veo que se utilice
-def api_hyp3_files(body: Hyp3ListRequest):
-    if not HYP3_USERNAME or not HYP3_PASSWORD:
-        raise HTTPException(status_code=400, detail="Faltan HYP3_USERNAME/HYP3_PASSWORD en backend/.env")
-    try:
-        hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
 
-        batch = (
-            hyp3.find_jobs(job_type=body.product_type)
-                .filter_jobs(running=False, include_expired=False, succeeded=True)
-        )
-
-        prefix = body.nombre_proyecto
-        if body.ruta is not None and body.marco is not None:
-            prefix = f"{body.nombre_proyecto}_{body.ruta}_{body.marco}_"
-
-        out: List[Hyp3FileOut] = []
-
-        for job in batch.jobs:
-            if prefix and not str(job.name or "").startswith(prefix):
-                continue
-            for f in (job.files or []):
-                url = f.get("url")
-                if not url: continue
-                name = f.get("name") or f.get("filename") or f.get("key") or "producto.zip"
-                out.append(Hyp3FileOut(
-                    granule=name,
-                    download_url=url,
-                    size_mb=get_size_mb_from_dict(f),
-                ))
-
-        out.sort(key=lambda x: x.granule)
-        return out
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error listando HyP3: {e}")
 
 
 
@@ -574,35 +514,7 @@ def api_download(body: DownloadBody):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al descargar: {e}")
 
-# Permite descargar múltiples archivos a la vez
-@router.post("/api/download-batch") # no veo qeu se utilice
-def api_download_batch(body: BatchDownloadBody):
-    results: List[BatchDownloadResult] = []
-    downloads_dir = ensure_dir(pathlib.Path(__file__).resolve().parent.parent / "alaska_descargas")  # Define your directory for downloads
 
-    for it in body.items:
-        try:
-            sess = pick_session_for(it.file_url)
-            with sess.get(it.file_url, stream=True, allow_redirects=True, timeout=120) as r:
-                if r.status_code in (401, 403):
-                    results.append(BatchDownloadResult(ok=False, file_url=it.file_url, error="403/401 (EDL/URS requerido)"))
-                    continue
-                r.raise_for_status()
-                fname = (it.file_name or "").strip() or pick_filename_from_headers(r) or guess_filename_from_url(r.url)
-                fname = safe_filename(fname)
-                dst = downloads_dir / fname
-
-                with open(dst, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1024 * 1024):
-                        if chunk:
-                            f.write(chunk)
-                results.append(BatchDownloadResult(ok=True, file_url=it.file_url, filename=fname, saved_to=str(dst), bytes=dst.stat().st_size))
-        except requests.HTTPError as ex:
-            results.append(BatchDownloadResult(ok=False, file_url=it.file_url, error=f"HTTP {ex.response.status_code}"))
-        except Exception as e:
-            results.append(BatchDownloadResult(ok=False, file_url=it.file_url, error=str(e)))
-
-    return results
 
 # Verifica la conectividad y permisos para acceder a los servidores de ASF
 @router.get("/api/check-edl")

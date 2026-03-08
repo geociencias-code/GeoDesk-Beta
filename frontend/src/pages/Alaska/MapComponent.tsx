@@ -54,7 +54,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
         }
       },
       mousemove(e) {
-        // dynamic drawing as ptr moves
         if (startPoint && !closed) {
           setEndPoint(e.latlng);
         }

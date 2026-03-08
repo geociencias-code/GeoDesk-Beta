@@ -12,7 +12,6 @@
   "dependencies": {
     "axios": "^1.13.2",
     "framer-motion": "^12.23.24",
-    "geotiff": "^2.1.4-beta.0",
     "jszip": "^3.10.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.554.0",

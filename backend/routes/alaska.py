@@ -15,7 +15,6 @@ from asf_search import ASFSession
 import hyp3_sdk as sdk
 from dotenv import load_dotenv
 
-# Cargar variables de entorno desde .env
 load_dotenv()
 
 ASF_USERNAME = os.getenv("ASF_USERNAME")

@@ -79,10 +79,13 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
     }
   }
 
-  // ——— Procesar SLC seleccionadas (no tienen download_url) ———
   async function processWithHyP3(items: Scene[]) {
     const granules = items.map(s => s.granule);
     if (!granules.length) { toast.error("No hay escenas seleccionadas."); return; }
+    if (granules.length < 2) {
+      toast.error("Se necesitan al menos 2 granules para crear pares de interferometría.");
+      return;
+    }
     if (ruta == null || marco == null) { toast.error("Ruta/Marco requeridos."); return; }
 
     setLoading("download");
@@ -99,6 +102,14 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
       type SubmittedItem = { status?: string };
       const data = await res.json() as { submitted?: SubmittedItem[] };
       const ok = (data.submitted || []).filter(s => s.status === "submitted").length;
+
+      if (ok === 0) {
+        toast.warning("No se pudieron crear pares válidos. Verifica que los granules sean consecutivos (≤12 días) y de la misma plataforma.", {
+          duration: 6000,
+        });
+        return;
+      }
+
       toast.success(`Se enviaron ${ok} job(s) a HyP3. Cuando estén listos, usa "Cargar productos HyP3" en este mismo tab para descargarlos.`, {
         duration: 5000,
       });
@@ -129,7 +140,6 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
   const showPol        = useMemo(() => scenes.some(r => !!r.polarization), [scenes]);
   const showSize       = useMemo(() => scenes.some(r => r.size_mb != null), [scenes]);
 
-  // Función para actualizar el nombre del proyecto
   const handleProjectNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setProjectName(e.target.value);
   };
@@ -142,7 +152,6 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
     <section className="card">
       <h2>Descargar / Procesar ({scenes.length})</h2>
 
-      {/* Campo para cambiar el nombre del proyecto */}
       <div style={{ marginBottom: 12 }}>
         <label>Nombre del Proyecto:
           <input

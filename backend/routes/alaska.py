@@ -330,6 +330,7 @@ def api_search(params: SearchParams):
         raise HTTPException(status_code=500, detail=f"Error en búsqueda: {e}")
 
 # Construye pares de interferometría a partir de los resultados de búsqueda
+# No se está usando
 @router.post("/api/pairs", response_model=List[PairOut])
 def api_pairs(params: SearchParams):
     try:

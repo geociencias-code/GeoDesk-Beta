@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import List
 
-from ..utils.file_handling import extract_zip, find_rasters
-from ..services.image_processing import classify_kind, render_raster_tiff, generar_mapa_el_salvador
+from utils.file_handling import extract_zip, find_rasters
+from services.image_processing import classify_kind, render_raster_tiff, generar_mapa_el_salvador
 
 router = APIRouter()
 

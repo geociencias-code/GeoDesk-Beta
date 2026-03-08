@@ -1,0 +1,60 @@
+# Ignorar contenido de carpetas de datos pesados
+alaska_descargas/*
+resultados_deformacion/*
+temperatura_deformacion/*
+temporal_nc/*
+
+!alaska_descargas/.gitkeep
+!resultados_deformacion/.gitkeep
+!temperatura_deformacion/.gitkeep
+!temporal_nc/.gitkeep
+
+# Entorno virtual de Python
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Archivos de configuración local
+.env
+.env.local
+.env.*.local
+
+# IDE y editores
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker (evitar recursividad)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Tests y cobertura
+.pytest_cache/
+coverage/
+htmlcov/
+.coverage
+*.test.py
+tests/
+
+# Logs y archivos temporales
+*.log
+*.tmp
+.DS_Store
+
+# Documentación
+README.md
+*.md
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/

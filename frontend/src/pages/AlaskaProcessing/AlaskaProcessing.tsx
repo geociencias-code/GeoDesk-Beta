@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback } from "react";
 import JSZip from "jszip";
 import { API_URL } from "../../services/api";
 
@@ -68,7 +68,7 @@ export default function AlaskaProcesamiento() {
       const zip = await JSZip.loadAsync(zipBlob);
 
       const statsFile = zip.file("stats.json");
-      let statsDict: Record<string, any> = {};
+      let statsDict: Record<string, Stats> = {};
       if (statsFile) {
         const statsStr = await statsFile.async("string");
         statsDict = JSON.parse(statsStr);
@@ -87,8 +87,8 @@ export default function AlaskaProcesamiento() {
 
           const stats = statsDict[f.name] || { min: 0, max: 0, mean: 0, std: 0, p2: 0, p98: 0, count: 0 };
           
-          let name = f.name.replace(/^(coherencia|fase|elevacion)_/, '');
-          
+          const name = f.name.replace(/^(coherencia|fase|elevacion)_/, '');
+
           const date =
             niceDateFromText(name) ||
             niceDateFromText(name.split("/").slice(0, -1).join("/"));
@@ -107,9 +107,10 @@ export default function AlaskaProcesamiento() {
       }
 
       setResults(out);
-    } catch (error: any) {
+    } catch (error: unknown) {
        console.error("Error unzipping or fetching from backend", error);
-       alert("Hubo un error al procesar el archivo: " + error.message);
+       const message = error instanceof Error ? error.message : String(error);
+       alert("Hubo un error al procesar el archivo: " + message);
     } finally {
       setBusy(false);
     }

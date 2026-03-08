@@ -8,13 +8,17 @@ import os
 import re
 
 from dateutil import parser
+from dotenv import load_dotenv
 import asf_search as asf
 import hyp3_sdk as sdk
 
+# Cargar variables de entorno desde .env
+load_dotenv()
+
 router = APIRouter()
 
-USERNAME = "adalid_orantes"
-PASSWORD = "_&kgsmB92Zwtgr*"
+USERNAME = os.getenv("HYP3_USERNAME")
+PASSWORD = os.getenv("HYP3_PASSWORD")
 
 NOMBRE_PROYECTO_POR_DEFECTO = "prueba_api_2023_01"
 

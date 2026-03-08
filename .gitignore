@@ -1,5 +1,14 @@
 backend/alaska_descargas/
-backend/__pycache__/
 
-# Variables de entorno
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Variables de entorno (NUNCA subir credenciales)
 .env
+.env.local
+.env.*.local
+
+# El archivo de ejemplo SÍ se puede subir
+!.env.example

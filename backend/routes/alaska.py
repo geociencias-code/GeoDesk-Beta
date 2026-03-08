@@ -1,5 +1,6 @@
 from __future__ import annotations
 import math
+import os
 import re
 import pathlib
 import urllib.parse
@@ -12,13 +13,17 @@ from pydantic import BaseModel, Field
 import asf_search as asf
 from asf_search import ASFSession
 import hyp3_sdk as sdk
+from dotenv import load_dotenv
 
-ASF_USERNAME="adalid_orantes"
-ASF_PASSWORD="_&kgsmB92Zwtgr*"
-HYP3_USERNAME="adalid_orantes"
-HYP3_PASSWORD="_&kgsmB92Zwtgr*"
-HYP3_PLUS_ENABLED=1
-HYP3_PLUS_URL="https://hyp3-plus.asf.alaska.edu"
+# Cargar variables de entorno desde .env
+load_dotenv()
+
+ASF_USERNAME = os.getenv("ASF_USERNAME")
+ASF_PASSWORD = os.getenv("ASF_PASSWORD")
+HYP3_USERNAME = os.getenv("HYP3_USERNAME")
+HYP3_PASSWORD = os.getenv("HYP3_PASSWORD")
+HYP3_PLUS_ENABLED = os.getenv("HYP3_PLUS_ENABLED")
+HYP3_PLUS_URL = os.getenv("HYP3_PLUS_URL")
 
 if not HYP3_USERNAME or not HYP3_PASSWORD:
     print("ADVERTENCIA: Faltan HYP3_USERNAME/HYP3_PASSWORD en backend/.env")

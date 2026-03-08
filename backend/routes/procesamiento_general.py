@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException
+import json
 from fastapi.responses import FileResponse
 import tempfile
 import zipfile
@@ -61,6 +62,7 @@ async def procesar_zip(
             raise HTTPException(status_code=400, detail="No se encontraron archivos .tif en el ZIP")
 
         results = []
+        stats_dict = {}
         for tif in tifs:
             kind = classify_kind(tif)
             if (kind == "coherencia" and not procesar_coherencia) or \
@@ -70,17 +72,24 @@ async def procesar_zip(
             
             # Map kind to the correct output folder
             out_folder = OUT_COH if kind == "coherencia" else (OUT_FAS if kind == "fase" else OUT_ELE)
+            out_name = f"{kind}_{tif.stem}.png"
             res = render_raster_tiff(
                 tif,
-                out_folder / f"{kind}_{tif.stem}.png",
+                out_folder / out_name,
                 f"{kind} {tif.stem}"
             )
+            stats_dict[out_name] = res
             results.append(res)
         
+        stats_path = temp_folder / "stats.json"
+        with open(stats_path, "w", encoding="utf-8") as f:
+            json.dump(stats_dict, f, ensure_ascii=False)
+
         zip_name = "procesados_imagenes.zip"
         zip_path = temp_folder / zip_name
         try:
             with zipfile.ZipFile(zip_path, 'w') as zipf:
+                zipf.write(stats_path, stats_path.name)
                 for folder in [OUT_COH, OUT_FAS, OUT_ELE]:
                     for file in folder.glob("*.png"):
                         zipf.write(file, file.name)

@@ -60,6 +60,7 @@ const SolicitarImagenesAutomatico: React.FC = () => {
         project_name: projectName.trim(),
       };
 
+      // Enviar la solicitud al backend
       const response = await axios.post<ResponseData>(
         `${API_URL}/api/solicitar_imagenes`,
         payload
@@ -67,19 +68,16 @@ const SolicitarImagenesAutomatico: React.FC = () => {
 
       const data = response.data;
 
-      // Si el backend devuelve un error (por ejemplo, nombre repetido)
       if (data.error) {
         setError(data.error.message || "Ocurrió un error en el backend.");
         setResult(null);
         return;
       }
 
-      // Si la solicitud fue exitosa, mostrar el resultado
       setResult(data);
     } catch (err: unknown) {
       console.error(err);
 
-      // Manejo de errores
       if (axios.isAxiosError(err)) {
         const detail =
           err.response?.data?.detail ||
@@ -99,7 +97,6 @@ const SolicitarImagenesAutomatico: React.FC = () => {
       <h1>🛰️ Solicitar Imágenes Automático</h1>
 
       <form className="auto-form" onSubmit={handleSubmit}>
-        {/* Campo para la fecha de inicio */}
         <div className="form-group">
           <label>Fecha de inicio:</label>
           <input
@@ -110,7 +107,6 @@ const SolicitarImagenesAutomatico: React.FC = () => {
           />
         </div>
 
-        {/* Campo para la fecha de fin */}
         <div className="form-group">
           <label>Fecha de fin:</label>
           <input
@@ -121,7 +117,6 @@ const SolicitarImagenesAutomatico: React.FC = () => {
           />
         </div>
 
-        {/* Campo para el nombre del proyecto */}
         <div className="form-group">
           <label>Nombre del proyecto / carpeta:</label>
           <input
@@ -137,16 +132,13 @@ const SolicitarImagenesAutomatico: React.FC = () => {
           </small>
         </div>
 
-        {/* Botón de envío */}
         <button type="submit" disabled={loading}>
           {loading ? "Procesando..." : "Solicitar Imágenes"}
         </button>
       </form>
 
-      {/* Mostrar error si ocurre */}
       {error && <p className="error-msg">{error}</p>}
 
-      {/* Mostrar el resultado si la solicitud fue exitosa */}
       {result && result.time_window && (
         <div className="result-card">
           <h2>✅ Resultado</h2>

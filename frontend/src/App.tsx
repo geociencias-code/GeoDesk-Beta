@@ -92,6 +92,7 @@ const App: React.FC = () => {
         polarization: polarization || undefined,
       };
 
+      // Llamada a la API para buscar escenas
       const res = await api.post("/api/search", body);
 
       setScenes(res.data);

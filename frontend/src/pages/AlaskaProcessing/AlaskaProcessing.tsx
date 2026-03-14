@@ -124,55 +124,105 @@ export default function AlaskaProcesamiento() {
   };
 
   return (
-    <div className="alaska-container">
-      <header className="alaska-header">
-        <h1>Procesamiento de Raster desde ZIP</h1>
-        <p>
-          Sube un archivo ZIP con GeoTIFFs. El backend procesará las imágenes y te devolverá las versiones coloreadas con sus estadísticas.
-        </p>
-      </header>
-
-      <section className="upload-card">
-        <label>Selecciona archivo .zip</label>
-        <input
-          type="file"
-          accept=".zip"
-          onChange={e => {
-            const f = e.target.files?.[0];
-            if (f) handleZipFile(f);
-          }}
-        />
-        {busy && <p className="loading">Procesando ZIP en el backend…</p>}
-      </section>
-
-      <div className="filter-buttons-container">
-        {(["todos", "coherencia", "fase", "elevacion"] as const).map(k => (
-          <button
-            key={k}
-            className={`filter-btn ${filter === k ? "active" : ""}`}
-            onClick={() => setFilter(k)}
-          >
-            {k}
-          </button>
-        ))}
+    <div className="page-container" style={{ padding: 0 }}>
+      <div className="header-section">
+        <div className="icon-wrapper">
+          <span style={{ fontSize: "1.5rem" }}>⚙️</span>
+        </div>
+        <div>
+          <h1 style={{ background: "linear-gradient(90deg, #8b5cf6, #3b82f6)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            Procesamiento de Raster
+          </h1>
+          <p>Descomprime y procesa automáticamente los productos SAR</p>
+        </div>
       </div>
 
+      <div className="layout-grid">
+        {/* Left Panel: Upload and Filters */}
+        <div className="upload-panel">
+          <div className="upload-card">
+            <label style={{ color: "var(--color-primary)", fontWeight: "bold", marginBottom: "8px", display: "inline-block" }}>
+              1. Cargar Proyecto (.zip)
+            </label>
+            <div className="dropzone" style={{ marginTop: "12px", borderStyle: "dashed", borderColor: "rgba(255,255,255,0.2)" }}>
+              <input
+                type="file"
+                accept=".zip"
+                onChange={e => {
+                  const f = e.target.files?.[0];
+                  if (f) handleZipFile(f);
+                }}
+                style={{ width: "100%", opacity: 0, position: "absolute", height: "100%", cursor: "pointer" }}
+              />
+              <div className="dropzone-content" style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
+                <span className="flex-1 text-center" style={{ color: "var(--color-text-muted)" }}>📂 Selecciona archivo .zip</span>
+                <span style={{ fontSize: "0.80rem", color: "var(--color-text-muted)", opacity: 0.7 }}>Extraerá matrices automáticamente</span>
+              </div>
+            </div>
+            
+            {busy && (
+              <div style={{ marginTop: "16px", padding: "12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", textAlign: "center", fontSize: "0.85rem", color: "var(--color-primary)" }}>
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                  <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                  </svg>
+                  Procesando ZIP en el backend…
+                </span>
+              </div>
+            )}
+          </div>
 
-      <section className="results-grid">
-        {filtered.map(r => (
-          <RasterCard
-            key={r.id}
-            r={r}
-            onDownload={handleDownload}
-          />
-        ))}
-      </section>
+          <div className="upload-card">
+            <label style={{ color: "var(--color-primary)", fontWeight: "bold", marginBottom: "12px", display: "inline-block" }}>
+              2. Filtro de Bandas
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              {(["todos", "coherencia", "fase", "elevacion"] as const).map(k => (
+                <button
+                  key={k}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: "20px",
+                    fontSize: "0.85rem",
+                    border: filter === k ? "2px solid var(--color-primary)" : "1px solid rgba(255,255,255,0.1)",
+                    background: filter === k ? "rgba(139, 92, 246, 0.2)" : "var(--color-bg-card)",
+                    color: filter === k ? "white" : "var(--color-text-muted)",
+                    cursor: "pointer",
+                    transition: "all 0.2s"
+                  }}
+                  onClick={() => setFilter(k)}
+                >
+                  {k.charAt(0).toUpperCase() + k.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
 
-      {filtered.length === 0 && !busy && (
-        <p className="no-results">
-          No hay resultados. Sube un ZIP para comenzar.
-        </p>
-      )}
+        {/* Right Panel: Raster Grids */}
+        <div className="results-panel">
+          <div className="data-widget" style={{ padding: "20px", minHeight: "500px" }}>
+            <h3 style={{ fontSize: "1.1rem", marginBottom: "20px", color: "white" }}>Resultados (Total: {filtered.length})</h3>
+            
+            {filtered.length === 0 && !busy ? (
+              <div style={{ textAlign: "center", padding: "60px", color: "var(--color-text-muted)" }}>
+                <span style={{ fontSize: "3rem", display: "block", marginBottom: "16px", opacity: 0.5 }}>📂</span>
+                Sube un ZIP de procesos HyP3 o ASF para comenzar a visualizar las gráficas.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "20px" }}>
+                {filtered.map(r => (
+                  <RasterCard
+                    key={r.id}
+                    r={r}
+                    onDownload={handleDownload}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

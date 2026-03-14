@@ -91,7 +91,7 @@ export default function Era5SentinelComparative() {
       initial={{ opacity: 0, y: 30 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: "easeOut" }}
-      className="era5-sentinel-container"
+      className="page-container"
     >
       <div className="header-section">
         <div className="icon-wrapper">
@@ -139,24 +139,37 @@ export default function Era5SentinelComparative() {
                 multiple
                 onChange={handleZipChange}
               />
-              <div className="dropzone-content">
-                <span className="flex-1 text-center">Seleccionar múltiples archivos .zip</span>
-                <FileUp className="w-5 h-5" />
+              <div className="dropzone-content" style={{ flexDirection: 'column', gap: '8px' }}>
+                {zipFiles.length > 0 ? (
+                  <>
+                    <span className="selected-file text-center">
+                      {zipFiles.length} {zipFiles.length === 1 ? 'archivo seleccionado' : 'archivos seleccionados'}
+                    </span>
+                    <ul className="file-list" style={{ width: '100%', marginTop: '0', background: 'transparent', padding: '0', border: 'none' }}>
+                      {zipFiles.map((file, i) => (
+                        <li key={i} style={{ background: 'rgba(0,0,0,0.3)', marginBottom: '4px' }}>
+                          <span className="truncate flex-1">{file.name}</span>
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              removeZipFile(i);
+                            }}
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex-1 text-center">Seleccionar múltiples archivos .zip</span>
+                    <FileUp className="w-5 h-5" />
+                  </>
+                )}
               </div>
             </div>
-
-            {zipFiles.length > 0 && (
-              <ul className="file-list">
-                {zipFiles.map((file, i) => (
-                  <li key={i}>
-                    <span className="truncate flex-1">{file.name}</span>
-                    <button onClick={() => removeZipFile(i)}>
-                      <X className="w-4 h-4" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
 
           <div className="pt-2">

@@ -5,7 +5,12 @@ import cdsapi
 import os
 import tempfile
 from datetime import datetime
+from dotenv import load_dotenv
 
+load_dotenv()
+
+ERA5_URL = os.getenv("ERA5_URL")
+ERA5_KEY = os.getenv("ERA5_KEY")
 router = APIRouter(prefix="/api/era5", tags=["ERA5"])
 
 class ERA5Request(BaseModel):
@@ -18,16 +23,13 @@ class ERA5Request(BaseModel):
     dataset: str = "reanalysis-era5-land"
     format: str = "netcdf"
 
-# tengo que mover esto a .env
-ERA5_URL = "https://cds.climate.copernicus.eu/api"
-ERA5_KEY = "f0546e0b-a487-4c2a-9b3b-fb7bcc449861"
+
 
 VALID_HOURS = ["00:00", "06:00", "12:00", "18:00"]
 
 @router.post("/download")
 def download_era5(req: ERA5Request):
     try:
-        # Validar horas
         for h in req.time:
             if h not in VALID_HOURS:
                 raise HTTPException(
@@ -58,7 +60,7 @@ def download_era5(req: ERA5Request):
         except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail=f"❌ Error en la descarga ERA5: {str(e)}"
+                detail=f"Error en la descarga ERA5: {str(e)}"
             )
 
         return FileResponse(
@@ -70,4 +72,4 @@ def download_era5(req: ERA5Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"❌ Error inesperado: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")

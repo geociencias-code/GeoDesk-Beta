@@ -14,7 +14,7 @@ if (typeof window !== "undefined") {
   (window as any).type = "";
 }
 
-function MapContent({ bounds, setDrawnBox }: { bounds: any, setDrawnBox: any }) {
+function MapContent({ bounds, drawnBox, setDrawnBox }: { bounds: any, drawnBox: any, setDrawnBox: any }) {
   const map = useMap();
   
   // Auto-hacer zoom a los bounds originales cuando se cargan
@@ -37,8 +37,8 @@ function MapContent({ bounds, setDrawnBox }: { bounds: any, setDrawnBox: any }) 
       lat_max: leafBounds.getNorth(),
       lon_max: leafBounds.getEast()
     });
-    // Permite un solo rectangulo a la vez
-    e.layer._leaflet_id = "recorte_activo";
+    // Removemos la capa cruda de leaflet-draw para controlarla desde React
+    map.removeLayer(layer);
   };
 
   return (
@@ -64,6 +64,15 @@ function MapContent({ bounds, setDrawnBox }: { bounds: any, setDrawnBox: any }) 
             [bounds.lat_max, bounds.lon_max]
           ]} 
           pathOptions={{ color: '#3b82f6', weight: 2, fillOpacity: 0.1, dashArray: '5, 5' }} 
+        />
+      )}
+      {drawnBox && (
+        <Rectangle 
+          bounds={[
+            [drawnBox.lat_min, drawnBox.lon_min],
+            [drawnBox.lat_max, drawnBox.lon_max]
+          ]} 
+          pathOptions={{ color: '#ef4444', weight: 2, fillColor: '#ef4444', fillOpacity: 0.2 }} 
         />
       )}
     </FeatureGroup>
@@ -231,6 +240,32 @@ export default function AlaskaProcesamiento() {
               </div>
             </div>
 
+            {drawnBox && !croppedZipUrl && (
+              <div style={{ marginTop: "16px", padding: "12px", background: "rgba(0,0,0,0.2)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)" }}>
+                <label style={{ color: "var(--color-primary)", fontWeight: "bold", fontSize: "0.85rem", display: "block", marginBottom: "8px" }}>
+                  Coordenadas de Selección Exactas
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "12px" }}>
+                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginBottom: "4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Lat Mín (Sur)</span>
+                    <input type="number" step="any" value={drawnBox.lat_min} onChange={e => setDrawnBox({...drawnBox, lat_min: parseFloat(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "6px", borderRadius: "4px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.05)", color: "white", fontSize: "0.80rem" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginBottom: "4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Lat Máx (Norte)</span>
+                    <input type="number" step="any" value={drawnBox.lat_max} onChange={e => setDrawnBox({...drawnBox, lat_max: parseFloat(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "6px", borderRadius: "4px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.05)", color: "white", fontSize: "0.80rem" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginBottom: "4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Lon Mín (Oeste)</span>
+                    <input type="number" step="any" value={drawnBox.lon_min} onChange={e => setDrawnBox({...drawnBox, lon_min: parseFloat(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "6px", borderRadius: "4px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.05)", color: "white", fontSize: "0.80rem" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginBottom: "4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Lon Máx (Este)</span>
+                    <input type="number" step="any" value={drawnBox.lon_max} onChange={e => setDrawnBox({...drawnBox, lon_max: parseFloat(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "6px", borderRadius: "4px", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.05)", color: "white", fontSize: "0.80rem" }} />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {bounds && !croppedZipUrl && (
               <button
                  onClick={handleCrop}
@@ -288,7 +323,7 @@ export default function AlaskaProcesamiento() {
               zoomControl={false}
             >
               <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-              <MapContent bounds={bounds} setDrawnBox={setDrawnBox} />
+              <MapContent bounds={bounds} drawnBox={drawnBox} setDrawnBox={setDrawnBox} />
             </MapContainer>
           </div>
 

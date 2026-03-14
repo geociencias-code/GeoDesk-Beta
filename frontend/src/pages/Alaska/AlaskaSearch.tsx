@@ -49,7 +49,6 @@ const AlaskaSearch: React.FC<Props> = ({
       </div>
 
       <div className="layout-grid">
-        {/* Left Panel: Search Params */}
         <div className="upload-panel">
           <div className="upload-card">
             <label style={{ color: "var(--color-primary)", fontWeight: "bold" }}>
@@ -172,7 +171,6 @@ const AlaskaSearch: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Right Panel: Map */}
         <div className="results-panel">
           <div className="data-widget" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", height: "100%" }}>
             <div style={{ padding: "16px 20px", background: "var(--color-bg-card)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>

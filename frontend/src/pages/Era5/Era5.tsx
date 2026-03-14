@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { MapContainer, TileLayer, Rectangle, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { API_URL } from "../../services/api";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
 interface AreaCoords {
   north: number;
@@ -37,7 +39,7 @@ const Era5: React.FC = () => {
           const west = bounds.getWest();
 
           if (Math.abs(north - south) < 0.01 || Math.abs(east - west) < 0.01) {
-            alert("⚠️ Dibuja un rectángulo con tamaño válido.");
+            alert("Dibuja un rectángulo con tamaño válido.");
             setStartPoint(null);
             setEndPoint(null);
             return;
@@ -58,17 +60,21 @@ const Era5: React.FC = () => {
 
 
   const handleDownload = async () => {
-    if (!area) return alert("⚠️ Selecciona un área en el mapa.");
+
+    //Debo cambiar el tipo de notificaciones a algo más elegante
+    if (!area) {
+      return toast.error("Dibuja un área en el mapa para habilitar la descarga.");
+      }
     if (!startDate || !endDate)
-      return alert("⚠️ Selecciona un rango de fechas válido.");
+      return toast.error("Selecciona una fecha de inicio y una fecha de fin.");
     if (hours.length === 0)
-      return alert("⚠️ Selecciona al menos una hora.");
+      return toast.error("Selecciona al menos una hora de captura para la descarga.");
 
     const start = new Date(startDate);
     const end = new Date(endDate);
 
     if (start.getFullYear() !== end.getFullYear()) {
-      alert("⚠️ Solo puedes seleccionar fechas dentro del mismo año.");
+      toast.error("Las fechas deben de estar dentro del mismo año")
       return;
     }
 
@@ -77,7 +83,6 @@ const Era5: React.FC = () => {
     try {
       const year = start.getFullYear().toString();
 
-      // Generar meses y días completos
       const monthSet = new Set<string>();
       const daySet = new Set<string>();
 
@@ -90,7 +95,7 @@ const Era5: React.FC = () => {
       const days = Array.from(daySet);
 
       const body = {
-        variable: ["2m_temperature"],
+        variable: ["2m_temperature"], //puede que convierta esto a un selected
         year: [year],
         month: months,
         day: days,
@@ -121,10 +126,10 @@ const Era5: React.FC = () => {
       a.remove();
       window.URL.revokeObjectURL(url);
 
-      alert("✅ Archivo descargado correctamente.");
+      toast.success("Archivo descargado correctamente.");
     } catch (err) {
       console.error(err);
-      alert("❌ Error al descargar datos ERA5.");
+      toast.error("Error al descargar el archivo. Intenta nuevamente.");
     } finally {
       setDownloading(false);
     }
@@ -146,7 +151,6 @@ const Era5: React.FC = () => {
       </div>
 
       <div className="layout-grid">
-        {/* Configuration Panel */}
         <div className="upload-panel">
           <div className="upload-card">
             <label>1. Parámetros de Descarga</label>
@@ -219,9 +223,7 @@ const Era5: React.FC = () => {
           >
             {downloading ? (
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                <svg className="spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                </svg>
+                <Loader2 className="animate-spin" size={20} />
                 Descargando...
               </span>
             ) : (
@@ -235,7 +237,7 @@ const Era5: React.FC = () => {
           <div className="data-widget" style={{ padding: '0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div className="era5-toolbar" style={{ padding: '16px 20px', background: 'var(--color-bg-card)', borderBottom: '1px solid rgba(255,255,255,0.05)', margin: 0, justifyContent: 'space-between' }}>
               <span className="era5-hint" style={{ fontWeight: 600, color: 'var(--color-text-main)' }}>
-                🗺️ Dibuja el área de trabajo
+                Dibuja el área de trabajo
               </span>
               <button 
                 className="era5-btnReset" 
@@ -247,6 +249,7 @@ const Era5: React.FC = () => {
             </div>
             
             <div className="era5-mapWrapper" style={{ margin: 0, borderRadius: 0, border: 'none', height: '500px' }}>
+              {/* Voy a cambiar la forma de como seleccionar */}
               <MapContainer center={[0, 0]} zoom={2} className="era5-map" style={{ height: '100%', width: '100%' }}>
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                 {rectangleBounds && (

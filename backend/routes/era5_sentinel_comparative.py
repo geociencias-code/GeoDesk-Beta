@@ -93,6 +93,12 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 continue
                 
             for tif_path in rasters:
+                # Filtrar solo Amplitud y Deformación (Fase)
+                if not (tif_path.name.endswith('amp.tif') or tif_path.name.endswith('unw_phase.tif')):
+                    continue
+                
+                layer_type = "Amplitud" if tif_path.name.endswith('amp.tif') else "Fase (Deformación)"
+                
                 # Extraer la fecha del nombre del archivo TIFF
                 tif_date = extract_date_from_filename(tif_path.name)
                 
@@ -146,9 +152,10 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 
                 # Agregar barra de color para la temperatura
                 cbar = plt.colorbar(heatmap, fraction=0.046, pad=0.04)
-                cbar.set_label("ERA5 Temperature (K) / Heatmap Overlay", rotation=270, labelpad=15)
+                cbar.set_label("ERA5 Temperature (K) / Heatmap Overlay", rotation=270, labelpad=15, color='white')
+                cbar.ax.yaxis.set_tick_params(color='white', labelcolor='white')
                 
-                plt.title(f"Alineación Espacio-Temporal:\nSentinel Base + ERA5 Heatmap ({tif_date.strftime('%Y-%m-%d')})", fontsize=14, fontweight='bold')
+                plt.title(f"Alineación Espacio-Temporal:\nSentinel Base [Capa: {layer_type}] + ERA5 Heatmap ({tif_date.strftime('%Y-%m-%d')})", fontsize=14, fontweight='bold', color='white')
                 plt.axis('off')
                 plt.tight_layout()
                 

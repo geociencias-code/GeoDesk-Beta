@@ -1,148 +1,211 @@
-import { useMemo, useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import JSZip from "jszip";
 import { API_URL } from "../../services/api";
+import axios from "axios";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle } from "react-leaflet";
+import { EditControl } from "react-leaflet-draw";
+import "leaflet-draw/dist/leaflet.draw.css";
 
-type Kind = "coherencia" | "fase" | "elevacion" | "desconocido";
-
-type RasterResult = {
-  id: string;
-  name: string;
-  kind: Kind;
-  date?: string;
-  stats: Stats;
-  objectUrl: string;
-};
-
-type Stats = {
-  min: number;
-  max: number;
-  mean: number;
-  std: number;
-  p2: number;
-  p98: number;
-  count: number;
-};
-
-function formatNumber(n: number, digits = 4): string {
-  if (!Number.isFinite(n)) return "-";
-  return Number(n).toFixed(digits);
+// Necesario para que leaflet-draw funcione bien con React
+if (typeof window !== "undefined") {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).type = "";
 }
 
-function niceDateFromText(text: string): string | undefined {
-  const m = /(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)/.exec(text);
-  if (!m) return undefined;
-  const [, y, mo, d] = m;
-  const dt = new Date(Number(y), Number(mo) - 1, Number(d));
-  if (isNaN(dt.getTime())) return undefined;
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(
-    dt.getDate()
-  ).padStart(2, "0")}`;
+function MapContent({ bounds, setDrawnBox }: { bounds: any, setDrawnBox: any }) {
+  const map = useMap();
+  
+  // Auto-hacer zoom a los bounds originales cuando se cargan
+  useEffect(() => {
+    if (bounds && bounds.lat_min !== undefined) {
+      const leafBounds = L.latLngBounds(
+        [bounds.lat_min, bounds.lon_min],
+        [bounds.lat_max, bounds.lon_max]
+      );
+      map.fitBounds(leafBounds, { padding: [50, 50] });
+    }
+  }, [bounds, map]);
+
+  const onCreated = (e: any) => {
+    const layer = e.layer;
+    const leafBounds = layer.getBounds();
+    setDrawnBox({
+      lat_min: leafBounds.getSouth(),
+      lon_min: leafBounds.getWest(),
+      lat_max: leafBounds.getNorth(),
+      lon_max: leafBounds.getEast()
+    });
+    // Permite un solo rectangulo a la vez
+    e.layer._leaflet_id = "recorte_activo";
+  };
+
+  return (
+    <FeatureGroup>
+      <EditControl
+        position="topright"
+        onCreated={onCreated}
+        onDeleted={() => setDrawnBox(null)}
+        draw={{
+          rectangle: true,
+          polygon: false,
+          circle: false,
+          circlemarker: false,
+          marker: false,
+          polyline: false,
+        }}
+        edit={{ edit: false, remove: true }}
+      />
+      {bounds && (
+        <Rectangle 
+          bounds={[
+            [bounds.lat_min, bounds.lon_min],
+            [bounds.lat_max, bounds.lon_max]
+          ]} 
+          pathOptions={{ color: '#3b82f6', weight: 2, fillOpacity: 0.1, dashArray: '5, 5' }} 
+        />
+      )}
+    </FeatureGroup>
+  );
 }
 
 export default function AlaskaProcesamiento() {
+  // Estados principales
+  const [zipFile, setZipFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [filter, setFilter] = useState<Kind | "todos">("todos");
-  const [results, setResults] = useState<RasterResult[]>([]);
+  const [message, setMessage] = useState("");
+  const [bounds, setBounds] = useState<{lat_min: number, lon_min: number, lat_max: number, lon_max: number} | null>(null);
+  
+  // Estados de recorte y dibujo
+  const [drawnBox, setDrawnBox] = useState<{lat_min: number, lon_min: number, lat_max: number, lon_max: number} | null>(null);
+  const [croppedZipUrl, setCroppedZipUrl] = useState<string | null>(null);
+  const [croppedFileName, setCroppedFileName] = useState<string>("");
 
-  const filtered = useMemo(
-    () => (filter === "todos" ? results : results.filter(r => r.kind === filter)),
-    [results, filter]
-  );
+  // Estados de cálculo de velocidad
+  const [velocityData, setVelocityData] = useState<any[]>([]);
+  const [velocityDias, setVelocityDias] = useState<number>(0);
+  const [velocityCsvUrl, setVelocityCsvUrl] = useState<string | null>(null);
 
-  const handleZipFile = useCallback(async (file: File) => {
+  const handleZipFile = async (file: File) => {
+    setZipFile(file);
     setBusy(true);
+    setMessage("⏳ Leyendo extensión del archivo...");
+    setBounds(null);
+    setDrawnBox(null);
+    setCroppedZipUrl(null);
+    setVelocityData([]);
+    setVelocityCsvUrl(null);
+
     try {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch(`${API_URL}/api/v1/procesar_zip`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        throw new Error(`Error en el procesamiento: ${res.statusText}`);
+      const res = await axios.post(`${API_URL}/api/v1/alaska/preview`, formData);
+      if (res.data.success) {
+        setBounds(res.data.bounds);
+        setMessage("✅ Extensión leída correctamente. Dibuja un rectángulo en el mapa para recortar.");
       }
-
-      const zipBlob = await res.blob();
-      const zip = await JSZip.loadAsync(zipBlob);
-
-      const statsFile = zip.file("stats.json");
-      let statsDict: Record<string, Stats> = {};
-      if (statsFile) {
-        const statsStr = await statsFile.async("string");
-        statsDict = JSON.parse(statsStr);
-      }
-
-      const out: RasterResult[] = [];
-      const imageFiles = Object.values(zip.files).filter(f => !f.dir && f.name.endsWith(".png"));
-
-      for (const f of imageFiles) {
-        try {
-          const kindMatch = f.name.match(/^(coherencia|fase|elevacion)_/);
-          const kind: Kind = kindMatch ? kindMatch[1] as Kind : "desconocido";
-
-          const blob = await f.async("blob");
-          const objectUrl = URL.createObjectURL(blob);
-
-          const stats = statsDict[f.name] || { min: 0, max: 0, mean: 0, std: 0, p2: 0, p98: 0, count: 0 };
-          
-          const name = f.name.replace(/^(coherencia|fase|elevacion)_/, '');
-
-          const date =
-            niceDateFromText(name) ||
-            niceDateFromText(name.split("/").slice(0, -1).join("/"));
-
-          out.push({
-            id: f.name,
-            name,
-            kind,
-            date,
-            stats,
-            objectUrl,
-          });
-        } catch (e) {
-          console.warn("Error leyendo ", f.name, e);
-        }
-      }
-
-      setResults(out);
     } catch (error: unknown) {
-       console.error("Error unzipping or fetching from backend", error);
-       const message = error instanceof Error ? error.message : String(error);
-       alert("Hubo un error al procesar el archivo: " + message);
+      console.error(error);
+      const msg = axios.isAxiosError(error) ? error.response?.data?.detail : String(error);
+      setMessage("❌ Error leyendo ZIP: " + msg);
     } finally {
       setBusy(false);
     }
-  }, []);
+  };
 
-  const handleDownload = (r: RasterResult) => {
-    const a = document.createElement("a");
-    a.href = r.objectUrl;
-    a.download = r.name; // the original png
-    a.click();
+  const handleCrop = async () => {
+    if (!zipFile || !drawnBox) return;
+
+    setBusy(true);
+    setMessage("✂️ Recortando rásteres. Por favor espera...");
+    try {
+      const formData = new FormData();
+      formData.append("file", zipFile);
+      
+      const res = await axios.post(
+        `${API_URL}/api/v1/alaska/crop?lat_min=${drawnBox.lat_min}&lon_min=${drawnBox.lon_min}&lat_max=${drawnBox.lat_max}&lon_max=${drawnBox.lon_max}`,
+        formData,
+        { responseType: 'blob' }
+      );
+
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      setCroppedZipUrl(url);
+      setCroppedFileName(`cropped_${zipFile.name}`);
+      setMessage("✅ Archivos recortados exitosamente.");
+    } catch(error) {
+      console.error(error);
+      setMessage("❌ Error recortando imágenes.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCalculateVelocity = async () => {
+    if (!croppedZipUrl || !zipFile) return;
+
+    setBusy(true);
+    setMessage("📈 Procesando fase y calculando vector de velocidad anual...");
+    try {
+      // Necesitamos re-descargar el blob recortado para enviarlo al backend de velocity (o usar el origin File pero queremos la porcion chica)
+      const blobRes = await fetch(croppedZipUrl);
+      const blob = await blobRes.blob();
+      
+      const formData = new FormData();
+      formData.append("file", blob, `cropped_${zipFile.name}`);
+
+      const res = await axios.post(`${API_URL}/api/v1/alaska/velocity`, formData, { responseType: 'blob' });
+      
+      // La respuesta es un ZIP conteniendo el CSV + JSON (Muestra UI)
+      const zipInstance = await JSZip.loadAsync(res.data);
+      
+      // 1. Extraer JSON UI
+      const uiDataStr = await zipInstance.file("ui_data.json")?.async("string");
+      if (uiDataStr) {
+        const uiData = JSON.parse(uiDataStr);
+        setVelocityData(uiData.sample);
+        setVelocityDias(uiData.dias);
+      }
+
+      // 2. Extraer CSV blob url para descarga (manteniendo el archivo en RAM client side)
+      const csvFile = Object.values(zipInstance.files).find(f => f.name.endsWith(".csv"));
+      if (csvFile) {
+        const csvBlob = await csvFile.async("blob");
+        setVelocityCsvUrl(window.URL.createObjectURL(csvBlob));
+      }
+      
+      setMessage("✅ Velocidad calculada de manera exitosa.");
+
+    } catch (error) {
+      console.error(error);
+      setMessage("❌ Ocurrió un error al calcular la velocidad.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="page-container" style={{ padding: 0 }}>
+      {/* Header */}
       <div className="header-section">
         <div className="icon-wrapper">
-          <span style={{ fontSize: "1.5rem" }}>⚙️</span>
+          <span style={{ fontSize: "1.5rem" }}>✂️</span>
         </div>
         <div>
           <h1 style={{ background: "linear-gradient(90deg, #8b5cf6, #3b82f6)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            Procesamiento de Raster
+            Recorte y Velocidad SNAP
           </h1>
-          <p>Descomprime y procesa automáticamente los productos SAR</p>
+          <p>Extrae regiones de interés de productos HyP3 y deriva modelos de velocidad</p>
         </div>
       </div>
 
       <div className="layout-grid">
-        {/* Left Panel: Upload and Filters */}
+        {/* Left Panel: Controles Principales */}
         <div className="upload-panel">
           <div className="upload-card">
             <label style={{ color: "var(--color-primary)", fontWeight: "bold", marginBottom: "8px", display: "inline-block" }}>
-              1. Cargar Proyecto (.zip)
+              1. Cargar Proyecto InSAR (.zip)
             </label>
             <div className="dropzone" style={{ marginTop: "12px", borderStyle: "dashed", borderColor: "rgba(255,255,255,0.2)" }}>
               <input
@@ -155,142 +218,141 @@ export default function AlaskaProcesamiento() {
                 style={{ width: "100%", opacity: 0, position: "absolute", height: "100%", cursor: "pointer" }}
               />
               <div className="dropzone-content" style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
-                <span className="flex-1 text-center" style={{ color: "var(--color-text-muted)" }}>📂 Selecciona archivo .zip</span>
-                <span style={{ fontSize: "0.80rem", color: "var(--color-text-muted)", opacity: 0.7 }}>Extraerá matrices automáticamente</span>
+                {zipFile ? (
+                   <span className="selected-file text-center" style={{ color: "var(--color-text-main)" }}>
+                     {zipFile.name}
+                   </span>
+                ) : (
+                  <>
+                    <span className="flex-1 text-center" style={{ color: "var(--color-text-muted)" }}>📂 Selecciona archivo .zip</span>
+                    <span style={{ fontSize: "0.80rem", color: "var(--color-text-muted)", opacity: 0.7 }}>Extrae georreferencia</span>
+                  </>
+                )}
               </div>
             </div>
-            
-            {busy && (
-              <div style={{ marginTop: "16px", padding: "12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", textAlign: "center", fontSize: "0.85rem", color: "var(--color-primary)" }}>
-                <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-                  <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                  </svg>
-                  Procesando ZIP en el backend…
-                </span>
+
+            {bounds && !croppedZipUrl && (
+              <button
+                 onClick={handleCrop}
+                 disabled={busy || !drawnBox}
+                 className="submit-btn"
+                 style={{ background: "linear-gradient(135deg, #3b82f6, #06b6d4)", marginTop: "16px" }}
+              >
+                 {busy ? "Procesando recorte..." : "Recortar Selección"}
+              </button>
+            )}
+
+            {croppedZipUrl && (
+              <div style={{ marginTop: "16px", display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <a
+                  href={croppedZipUrl}
+                  download={croppedFileName}
+                  className="submit-btn"
+                  style={{ display: "block", textAlign: "center", textDecoration: "none", background: "rgba(16, 185, 129, 0.2)", border: "1px solid #10b981", color: "#34d399", padding: "10px", borderRadius: "8px" }}
+                >
+                  ⬇️ Descargar Recorte ZIP
+                </a>
+                
+                <hr style={{ borderColor: "rgba(255,255,255,0.1)", margin: "8px 0" }} />
+                
+                <label style={{ color: "var(--color-primary)", fontWeight: "bold", fontSize: "0.9rem" }}>
+                  2. Estimación de Desplazamiento
+                </label>
+                <button
+                  onClick={handleCalculateVelocity}
+                  disabled={busy}
+                  className="submit-btn"
+                  style={{ background: "linear-gradient(135deg, #f59e0b, #ef4444)" }}
+                >
+                  {busy ? "Calculando..." : "Derivar Velocidad de Fase"}
+                </button>
               </div>
             )}
-          </div>
-
-          <div className="upload-card">
-            <label style={{ color: "var(--color-primary)", fontWeight: "bold", marginBottom: "12px", display: "inline-block" }}>
-              2. Filtro de Bandas
-            </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-              {(["todos", "coherencia", "fase", "elevacion"] as const).map(k => (
-                <button
-                  key={k}
-                  style={{
-                    padding: "8px 14px",
-                    borderRadius: "20px",
-                    fontSize: "0.85rem",
-                    border: filter === k ? "2px solid var(--color-primary)" : "1px solid rgba(255,255,255,0.1)",
-                    background: filter === k ? "rgba(139, 92, 246, 0.2)" : "var(--color-bg-card)",
-                    color: filter === k ? "white" : "var(--color-text-muted)",
-                    cursor: "pointer",
-                    transition: "all 0.2s"
-                  }}
-                  onClick={() => setFilter(k)}
-                >
-                  {k.charAt(0).toUpperCase() + k.slice(1)}
-                </button>
-              ))}
-            </div>
+            
+            {message && (
+              <div style={{ marginTop: "16px", padding: "12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", textAlign: "center", fontSize: "0.85rem", color: message.includes('❌') ? "#ffb4b4" : "var(--color-text-muted)" }}>
+                {message}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right Panel: Raster Grids */}
-        <div className="results-panel">
-          <div className="data-widget" style={{ padding: "20px", minHeight: "500px" }}>
-            <h3 style={{ fontSize: "1.1rem", marginBottom: "20px", color: "white" }}>Resultados (Total: {filtered.length})</h3>
-            
-            {filtered.length === 0 && !busy ? (
-              <div style={{ textAlign: "center", padding: "60px", color: "var(--color-text-muted)" }}>
-                <span style={{ fontSize: "3rem", display: "block", marginBottom: "16px", opacity: 0.5 }}>📂</span>
-                Sube un ZIP de procesos HyP3 o ASF para comenzar a visualizar las gráficas.
-              </div>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "20px" }}>
-                {filtered.map(r => (
-                  <RasterCard
-                    key={r.id}
-                    r={r}
-                    onDownload={handleDownload}
-                  />
-                ))}
-              </div>
-            )}
+        {/* Right Panel: Mapa Interactivo */}
+        <div className="results-panel" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          
+          <div className="data-widget" style={{ padding: "0", display: "flex", flexDirection: "column", height: "500px", borderRadius: "12px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <MapContainer 
+              center={[13.69, -89.22]} 
+              zoom={8} 
+              style={{ height: '100%', width: '100%', background: "#1a1a1a" }}
+              zoomControl={false}
+            >
+              <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+              <MapContent bounds={bounds} setDrawnBox={setDrawnBox} />
+            </MapContainer>
           </div>
+
+          {/* Tabla de Resultados Velocidad */}
+          {velocityData.length > 0 && (
+             <div className="data-widget" style={{ padding: "20px", background: "var(--color-bg-card)", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.05)" }}>
+               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                 <h3 style={{ fontSize: "1.1rem", color: "white", margin: 0 }}>Muestra de Velocidad (Δt = {velocityDias} días)</h3>
+                 {velocityCsvUrl && (
+                   <a
+                     href={velocityCsvUrl}
+                     download={`velocidad_${zipFile?.name.replace('.zip', '')}.csv`}
+                     style={{
+                       background: "linear-gradient(135deg, #10b981, #059669)",
+                       color: "white", padding: "8px 16px", borderRadius: "6px",
+                       fontSize: "0.85rem", fontWeight: "bold", textDecoration: "none",
+                       display: "inline-flex", alignItems: "center", gap: "6px"
+                     }}
+                   >
+                     <span>📊</span> Exportar 100% a Excel
+                   </a>
+                 )}
+               </div>
+
+               <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem", textAlign: "left" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.1)", color: "var(--color-text-muted)" }}>
+                        <th style={{ padding: "8px" }}>Latitud</th>
+                        <th style={{ padding: "8px" }}>Longitud</th>
+                        <th style={{ padding: "8px" }}>Velocidad Anual (mm/yr)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {velocityData.slice(0, 50).map((row, idx) => {
+                         // Color mapping para velocidad: rojo es hundimiento, azul elevacion
+                         let textColor = "white";
+                         if (row.vel < -5) textColor = "#fca5a5"; // Rojo
+                         else if (row.vel > 5) textColor = "#93c5fd"; // Azul
+                         else textColor = "#d1d5db"; // Gris/Estable
+
+                         return (
+                           <tr key={idx} style={{ borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
+                             <td style={{ padding: "8px", color: "var(--color-text-muted)" }}>{row.lat.toFixed(6)}</td>
+                             <td style={{ padding: "8px", color: "var(--color-text-muted)" }}>{row.lon.toFixed(6)}</td>
+                             <td style={{ padding: "8px", color: textColor, fontWeight: "bold" }}>
+                               {row.vel > 0 ? "+" : ""}{row.vel.toFixed(2)}
+                             </td>
+                           </tr>
+                         );
+                      })}
+                    </tbody>
+                  </table>
+                  {velocityData.length > 50 && (
+                     <div style={{ textAlign: "center", padding: "12px", color: "var(--color-text-muted)", fontSize: "0.8rem", fontStyle: "italic" }}>
+                        Mostrando solo las primeras 50 observaciones. Exporta a Excel para ver el dataset completo.
+                     </div>
+                  )}
+               </div>
+             </div>
+          )}
+
         </div>
       </div>
     </div>
-  );
-}
-
-function RasterCard({
-  r,
-  onDownload,
-}: {
-  r: RasterResult;
-  onDownload: (r: RasterResult) => void;
-}) {
-  return (
-    <article className="raster-card">
-      <div className="raster-header">
-        <div>
-          <h3>
-            {r.kind.toUpperCase()} — {r.name}
-          </h3>
-          {r.date && <span className="raster-date">{r.date}</span>}
-        </div>
-
-        <div className="download-buttons">
-          <button onClick={() => onDownload(r)}>Descargar PNG</button>
-        </div>
-      </div>
-
-      <div className="raster-body">
-        <div className="canvas-wrapper">
-          <img src={r.objectUrl} alt={r.name} style={{ maxWidth: '100%', height: 'auto' }} />
-        </div>
-        <StatsTable stats={r.stats} kind={r.kind} />
-      </div>
-    </article>
-  );
-}
-
-function StatsTable({ stats, kind }: { stats: Stats; kind: Kind }) {
-  const unit =
-    kind === "coherencia"
-      ? "dB"
-      : kind === "fase"
-      ? "rad"
-      : kind === "elevacion"
-      ? "m"
-      : "";
-
-  const rows: Array<[string, number]> = [
-    ["min", stats.min],
-    ["max", stats.max],
-    ["mean", stats.mean],
-    ["std", stats.std],
-    ["p2", stats.p2],
-    ["p98", stats.p98],
-    ["count", stats.count],
-  ];
-
-  return (
-    <table className="stats-table">
-      <tbody>
-        {rows.map(([k, v]) => (
-          <tr key={k}>
-            <td className="stat-key">{k}</td>
-            <td className="stat-value">
-              {k === "count" ? v : formatNumber(v)} {unit}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }

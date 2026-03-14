@@ -7,11 +7,18 @@ import xarray as xr
 import numpy as np
 import rasterio
 import matplotlib.pyplot as plt
+import pandas as pd
+import pyproj
 from pathlib import Path
 from typing import List
 
 from utils.file_handling import extract_zip, find_rasters
 from services.image_processing import classify_kind, render_raster_tiff, generar_mapa_el_salvador
+import datetime
+import math
+from shapely.geometry import box
+import geopandas as gpd
+from rasterio.mask import mask
 
 router = APIRouter()
 
@@ -40,7 +47,7 @@ async def procesar_zip(
         OUT_FAS.mkdir(exist_ok=True)
         OUT_ELE.mkdir(exist_ok=True)
 
-        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False, mode="wb") as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = Path(tmp.name)
@@ -106,3 +113,192 @@ async def procesar_zip(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error procesando ZIP: {str(e)}")
 
+
+@router.post("/api/v1/alaska/preview")
+async def preview_zip(file: UploadFile = File(...)):
+    """ Extrae el bounding box del zip original de HyP3. """
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp.write(await file.read())
+            tmp_path = Path(tmp.name)
+
+        temp_folder = Path(tempfile.mkdtemp(prefix="preview_"))
+        extract_zip(tmp_path, temp_folder)
+        tifs = find_rasters(temp_folder)
+        
+        if not tifs:
+            raise HTTPException(status_code=400, detail="No TIFs found in ZIP")
+        
+        # Leemos el primer TIF para sacar sus bounds (asumimos que todos comparten footprint)
+        unw_phase_tif = next((t for t in tifs if "unw_phase" in t.name), tifs[0])
+        
+        with rasterio.open(unw_phase_tif) as src:
+            # Transformamos los bordes del CRS original as WGS84 (EPSG:4326)
+            left, bottom, right, top = rasterio.warp.transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+            
+        tmp_path.unlink()
+        
+        return {
+            "success": True,
+            "filename": file.filename,
+            "bounds": {
+                "lat_min": bottom,
+                "lon_min": left,
+                "lat_max": top,
+                "lon_max": right
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/v1/alaska/crop")
+async def crop_zip(
+    file: UploadFile = File(...), 
+    lat_min: float = Query(...), 
+    lon_min: float = Query(...), 
+    lat_max: float = Query(...), 
+    lon_max: float = Query(...)
+):
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp.write(await file.read())
+            tmp_path = Path(tmp.name)
+
+        temp_folder = Path(tempfile.mkdtemp(prefix="crop_"))
+        out_folder = Path(tempfile.mkdtemp(prefix="crop_out_"))
+        extract_zip(tmp_path, temp_folder)
+        tifs = find_rasters(temp_folder)
+
+        # Crear el Bounding Box de shapely y pasarlo a GeoJSON
+        bbox = box(lon_min, lat_min, lon_max, lat_max)
+        geo = gpd.GeoDataFrame({'geometry': [bbox]}, crs="EPSG:4326")
+
+        for tif in tifs:
+            with rasterio.open(tif) as src:
+                # Reproyectar el bbox a la proyección nativa del raster respectivo (usualmente UTM)
+                geo_proj = geo.to_crs(src.crs)
+                shapes = [features["geometry"] for features in json.loads(geo_proj.to_json())['features']]
+                
+                out_image, out_transform = rasterio.mask.mask(src, shapes, crop=True)
+                out_meta = src.meta.copy()
+                
+                out_meta.update({
+                    "driver": "GTiff",
+                    "height": out_image.shape[1],
+                    "width": out_image.shape[2],
+                    "transform": out_transform
+                })
+                
+                # Guardar TIF recortado
+                out_tif_path = out_folder / tif.name
+                with rasterio.open(out_tif_path, "w", **out_meta) as dest:
+                    dest.write(out_image)
+
+        # Comprimir nuevamente los recortes
+        cropped_zip_path = Path(tempfile.gettempdir()) / f"cropped_{file.filename}"
+        with zipfile.ZipFile(cropped_zip_path, 'w') as zipf:
+            for cropped_tif in out_folder.glob("*.tif"):
+                zipf.write(cropped_tif, cropped_tif.name)
+
+        tmp_path.unlink()
+        return FileResponse(cropped_zip_path, media_type="application/zip", filename=f"cropped_{file.filename}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/v1/alaska/velocity")
+async def process_velocity(file: UploadFile = File(...)):
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp.write(await file.read())
+            tmp_path = Path(tmp.name)
+
+        temp_folder = Path(tempfile.mkdtemp(prefix="vel_"))
+        extract_zip(tmp_path, temp_folder)
+        tifs = find_rasters(temp_folder)
+
+        unw_phase_tif = next((t for t in tifs if "unw_phase" in t.name), None)
+        if not unw_phase_tif:
+            raise HTTPException(status_code=400, detail="No se encontró unw_phase.tif")
+
+        # Extraer fechas del nombre del archivo: ej S1AA_20250101T120000_20250113T120000_...
+        # Buscamos dos secuencias de 8 numeros consecutivas separadas por T o guion
+        import re
+        date_pattern = re.compile(r'(\d{8})T')
+        matches = date_pattern.findall(unw_phase_tif.name)
+        
+        if len(matches) >= 2:
+            d1 = datetime.datetime.strptime(matches[0], "%Y%m%d")
+            d2 = datetime.datetime.strptime(matches[1], "%Y%m%d")
+            diff_days = abs((d2 - d1).days)
+        else:
+            diff_days = 12  # Fallback a 12 días estándar de Sentinel-1
+
+        with rasterio.open(unw_phase_tif) as src:
+            fase = src.read(1)
+            transform = src.transform
+            nodata = src.nodata
+
+            # Transformar a desplazamiento (m)
+            # disp_m = (fase * lambda) / (-4 * pi) => Sentinel-1 lambda approx 0.05546576 m
+            # ignorar nulos
+            valid_mask = (fase != nodata) & np.isfinite(fase)
+            
+            fase_valid = fase[valid_mask]
+            
+            disp_m = (fase_valid * 0.05546576) / (-4 * math.pi)
+            
+            # Velocidad en mm/año
+            vel_mm_year = (disp_m / (diff_days / 365.25)) * 1000.0
+
+            rows, cols = np.where(valid_mask)
+            
+            # Cálculo vectorizado de coordenadas
+            xs, ys = transform * (cols, rows)
+            
+            if src.crs and src.crs.to_epsg() != 4326:
+                transformer = pyproj.Transformer.from_crs(src.crs, "EPSG:4326", always_xy=True)
+                lons, lats = transformer.transform(xs, ys)
+            else:
+                lons, lats = xs, ys
+            
+            # Guardamos el CSV vectorizado con pandas para máxima performance
+            csv_path = Path(tempfile.gettempdir()) / f"velocidad_{file.filename}.csv"
+            df = pd.DataFrame({
+                "Latitud": np.round(lats, 6),
+                "Longitud": np.round(lons, 6),
+                "Fase": np.round(fase_valid, 4),
+                "Desplazamiento_m": np.round(disp_m, 6),
+                "Velocidad_mm_año": np.round(vel_mm_year, 4)
+            })
+            df.to_csv(csv_path, index=False)
+            
+            # Submuestreo para el JSON de la interfaz (limitado a 100)
+            step = max(1, len(rows) // 100)
+            ui_sample = []
+            
+            for i in range(0, len(rows), step):
+                if len(ui_sample) >= 100:
+                    break
+                ui_sample.append({
+                    "lat": float(lats[i]),
+                    "lon": float(lons[i]),
+                    "vel": float(vel_mm_year[i])
+                })
+
+        # Comprimimos el CSV para enviarlo junto con el JSON
+        result_zip_path = Path(tempfile.gettempdir()) / f"velocity_result_{file.filename}.zip"
+        with zipfile.ZipFile(result_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(csv_path, f"velocidad_{file.filename}.csv")
+            # También devolvemos el json de la UI como un archivo de config dentro del zip
+            ui_json_path = Path(tempfile.gettempdir()) / "ui_data.json"
+            with open(ui_json_path, 'w') as jf:
+                json.dump({"sample": ui_sample, "dias": diff_days}, jf)
+            zipf.write(ui_json_path, "ui_data.json")
+
+        return FileResponse(result_zip_path, media_type="application/zip", filename=f"velocity_{file.filename}.zip")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

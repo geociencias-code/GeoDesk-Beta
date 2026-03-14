@@ -5,8 +5,6 @@ import numpy as np
 import xarray as xr
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, HTTPException
-
-# 👇 Previene el error de Tkinter ("main thread is not in main loop")
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt

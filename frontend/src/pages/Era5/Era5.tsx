@@ -56,9 +56,7 @@ const Era5: React.FC = () => {
     setArea(null);
   };
 
-  // ========================================
-  // DESCARGA DE ERA5 (misma lógica de siempre)
-  // ========================================
+
   const handleDownload = async () => {
     if (!area) return alert("⚠️ Selecciona un área en el mapa.");
     if (!startDate || !endDate)
@@ -69,7 +67,6 @@ const Era5: React.FC = () => {
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    // Validar que no se cruce el año
     if (start.getFullYear() !== end.getFullYear()) {
       alert("⚠️ Solo puedes seleccionar fechas dentro del mismo año.");
       return;

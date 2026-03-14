@@ -19,6 +19,8 @@ numpy
 matplotlib
 xarray
 netCDF4
+opencv-python-headless
+pandas
 
 # --- Mapas Geoespaciales ---
 cartopy

@@ -8,8 +8,7 @@ import SentinelDashboard from "./pages/Alaska/SentinelDashboard";
 import DownloadFiles from "./pages/Alaska/DownloadFiles";
 import Alaska_procesamiento from "./pages/AlaskaProcessing/AlaskaProcessing";
 import SolicitarImagenesAutomatico from "./pages/SolicitarImagenesAutomatico/SolicitarImagenesAutomatico";
-import Alaska_procesamiento_varios from "./pages/Deformacion/Deformacion";
-import Temperatura_deformacion from "./pages/TemperatureDeformation/TemperatureDeformation"
+import Era5SentinelComparative from "./pages/Era5SentinelComparative/Era5SentinelComparative";
 
 import Inicio from "./pages/Home/Home";
 import api, { API_URL } from "./services/api";
@@ -184,12 +183,12 @@ const App: React.FC = () => {
           </div>
         );
 
-      case "otros-procesos":
-        return <div>
-          <Alaska_procesamiento_varios/>
-          <Temperatura_deformacion/>
-          
-        </div>;
+      case "comparativa-era5-sentinel":
+        return (
+          <div>
+            <Era5SentinelComparative />
+          </div>
+        );
 
       default:
         return <div>Selecciona una opción del menú.</div>;

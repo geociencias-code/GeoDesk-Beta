@@ -7,7 +7,7 @@ import os
 from routes.alaska import router as alaska_router
 from routes.era5 import router as era5_router
 from routes.era5_procesamiento_nc import router as era5_nc_router
-from routes.deformacion import router as deformacion_router
+from routes.era5_sentinel_comparative import router as era5_sentinel_router
 from routes.procesamiento_general import router as proc_general_router
 from routes.solicitar_imagenes_automatico import router as solicitar_imagenes_router
 
@@ -27,25 +27,17 @@ app.add_middleware(
 os.makedirs("temporal_nc", exist_ok=True)
 app.mount("/temporal_nc", StaticFiles(directory="temporal_nc"), name="temporal_nc")
 
-os.makedirs("temperatura_deformacion", exist_ok=True)
+os.makedirs("resultados_comparativa", exist_ok=True)
 app.mount(
-    "/temperatura_deformacion",
-    StaticFiles(directory="temperatura_deformacion"),
-    name="temperatura_deformacion",
+    "/resultados_comparativa",
+    StaticFiles(directory="resultados_comparativa"),
+    name="resultados_comparativa",
 )
-
-os.makedirs("resultados_deformacion", exist_ok=True)
-app.mount(
-    "/resultados_deformacion",
-    StaticFiles(directory="resultados_deformacion"),
-    name="resultados_deformacion",
-)
-
 
 app.include_router(alaska_router)
 app.include_router(era5_router)
 app.include_router(era5_nc_router)
-app.include_router(deformacion_router)
+app.include_router(era5_sentinel_router)
 app.include_router(proc_general_router)
 app.include_router(solicitar_imagenes_router)
 

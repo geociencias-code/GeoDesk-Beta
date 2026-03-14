@@ -219,32 +219,20 @@ Con **3 granules consecutivos** (A, B, C) se generan **2 pares**: (A↔B) y (B�
 
 Es un **visor simplificado** para inspección rápida de resultados.
 
----
+### 4. Comparativa ERA5/Sentinel
 
-### 4. ERA5
+**Propósito:** Unificar y correlacionar la información meteorológica (ERA5) sobre imágenes satelitales de alta resolución (Sentinel). Esta herramienta superpone variables climáticas como mapas de calor interactivos encima de los contornos base del radar, permitiendo una contextualización visual robusta en la misma área.
 
-**Propósito:** Descargar datos meteorológicos de Copernicus Climate Data Store.
-
-**Cómo usar:**
-1. **Dibuja un rectángulo** en el mapa (2 clics)
-2. Selecciona **rango de fechas** (mismo año)
-3. Elige las **horas** de muestreo (00:00, 06:00, 12:00, 18:00)
-4. Descarga el archivo `.nc` (NetCDF)
-
-**Variables disponibles:** Temperatura a 2m (t2m)
-
----
-
-### 5. Temperatura + Deformación
-
-**Propósito:** Correlacionar datos de temperatura ERA5 con mapas de deformación InSAR.
+**Requisitos Críticos:**
+- **Misma Área Espacial:** El archivo `.nc` de ERA5 y los rásteres `.zip` de Sentinel deben cubrir aproximadamente la misma zona geográfica, de lo contrario la superposición visual no tendrá sentido sobre la grilla.
+- **Fechas Coincidentes:** Para que el algoritmo extraiga correctamente el dato (ej. una alta medición de temperatura) y lo asocie al ráster, el archivo `.nc` de ERA5 debe contener datos temporales que cubran (o estén muy cercanos) a las fechas de recolección de los datos de Sentinel.
 
 **Cómo usar:**
-1. Sube el archivo `.nc` de ERA5
-2. Sube uno o más `.zip` con productos de deformación
-3. Visualiza gráficas comparativas
-
----
+1. Ve a la pestaña **"Comparativa ERA5/Sentinel"** en la navegación.
+2. Sube un archivo **`.nc`** que contiene el Contexto Meteorológico (extraído de Copernicus).
+3. Sube uno o **múltiples** **`.zip`** que contienen los productos de deformación/SAR de Sentinel.
+4. Presiona el botón para procesar.
+5. El sistema alineará espacialmente la matriz ERA5 remuestreándola, le aplicará un filtro de color y transparencia (alpha), y generará una galería de imágenes comparativas navegables donde se evaluarán picos de temperatura o clima sobre la geografía base del ráster.
 
 ## Instalación y Ejecución
 

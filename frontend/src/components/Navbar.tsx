@@ -167,8 +167,8 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
           <h3 className="sidebar__title">Herramientas</h3>
 
           <Item 
-            id="otros-procesos"
-            label="Otros procesos"
+            id="comparativa-era5-sentinel"
+            label="Comparativa ERA5/Sentinel"
             icon={<Settings size={18} />}
             hasSubmenu={false}
             onChangeSection={onChangeSection}

@@ -175,11 +175,11 @@ const AlaskaSearch: React.FC<Props> = ({
           <div className="data-widget" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", height: "100%" }}>
             <div style={{ padding: "16px 20px", background: "var(--color-bg-card)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
               <span style={{ fontWeight: 600, color: "var(--color-text-main)", fontSize: "0.95rem" }}>
-                🗺️ Dibuja el área de búsqueda
+                Dibuja el área de búsqueda
               </span>
             </div>
             <div style={{ flex: 1, minHeight: "500px" }}>
-              <MapComponent onPolygonChange={setPolygonWKT} height="100%" />
+              <MapComponent onPolygonChange={setPolygonWKT}/>
             </div>
           </div>
         </div>

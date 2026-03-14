@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 import JSZip from "jszip";
 import { API_URL } from "../../services/api";
 import axios from "axios";
@@ -8,16 +8,31 @@ import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle } from "react-
 import { EditControl } from "react-leaflet-draw";
 import "leaflet-draw/dist/leaflet.draw.css";
 
-// Necesario para que leaflet-draw funcione bien con React
 if (typeof window !== "undefined") {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).type = "";
+  (window as unknown as Window & { type: string }).type = "";
 }
 
-function MapContent({ bounds, drawnBox, setDrawnBox }: { bounds: any, drawnBox: any, setDrawnBox: any }) {
+type BoundsType = {
+  lat_min: number;
+  lon_min: number;
+  lat_max: number;
+  lon_max: number;
+};
+
+type DrawEvent = {
+  layer: L.Rectangle | L.Polygon | L.Circle | L.CircleMarker | L.Marker | L.Polyline;
+};
+
+function MapContent({
+                      bounds,
+                      drawnBox,
+                      setDrawnBox }:
+                    { bounds: BoundsType | null,
+                      drawnBox: BoundsType | null,
+                      setDrawnBox: (box: BoundsType | null) => void
+                    }) {
   const map = useMap();
-  
-  // Auto-hacer zoom a los bounds originales cuando se cargan
+
   useEffect(() => {
     if (bounds && bounds.lat_min !== undefined) {
       const leafBounds = L.latLngBounds(
@@ -28,8 +43,12 @@ function MapContent({ bounds, drawnBox, setDrawnBox }: { bounds: any, drawnBox: 
     }
   }, [bounds, map]);
 
-  const onCreated = (e: any) => {
-    const layer = e.layer;
+  const onCreated = (e: DrawEvent) => {
+    if (!(e.layer instanceof L.Rectangle)) {
+      console.warn("Solo se aceptan rectángulos");
+      return;
+    }
+    const layer = e.layer as L.Rectangle;
     const leafBounds = layer.getBounds();
     setDrawnBox({
       lat_min: leafBounds.getSouth(),
@@ -37,7 +56,6 @@ function MapContent({ bounds, drawnBox, setDrawnBox }: { bounds: any, drawnBox: 
       lat_max: leafBounds.getNorth(),
       lon_max: leafBounds.getEast()
     });
-    // Removemos la capa cruda de leaflet-draw para controlarla desde React
     map.removeLayer(layer);
   };
 
@@ -92,7 +110,7 @@ export default function AlaskaProcesamiento() {
   const [croppedFileName, setCroppedFileName] = useState<string>("");
 
   // Estados de cálculo de velocidad
-  const [velocityData, setVelocityData] = useState<any[]>([]);
+  const [velocityData, setVelocityData] = useState<Array<{ lat: number; lon: number; vel:number }>>([]);
   const [velocityDias, setVelocityDias] = useState<number>(0);
   const [velocityCsvUrl, setVelocityCsvUrl] = useState<string | null>(null);
 
@@ -145,7 +163,7 @@ export default function AlaskaProcesamiento() {
       setMessage("✅ Archivos recortados exitosamente.");
     } catch(error) {
       console.error(error);
-      setMessage("❌ Error recortando imágenes.");
+      setMessage("Error recortando imágenes.");
     } finally {
       setBusy(false);
     }

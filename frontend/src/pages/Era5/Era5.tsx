@@ -61,7 +61,6 @@ const Era5: React.FC = () => {
 
   const handleDownload = async () => {
 
-    //Debo cambiar el tipo de notificaciones a algo más elegante
     if (!area) {
       return toast.error("Dibuja un área en el mapa para habilitar la descarga.");
       }
@@ -232,7 +231,6 @@ const Era5: React.FC = () => {
           </button>
         </div>
 
-        {/* Map Panel */}
         <div className="results-panel">
           <div className="data-widget" style={{ padding: '0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div className="era5-toolbar" style={{ padding: '16px 20px', background: 'var(--color-bg-card)', borderBottom: '1px solid rgba(255,255,255,0.05)', margin: 0, justifyContent: 'space-between' }}>

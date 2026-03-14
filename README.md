@@ -221,18 +221,23 @@ Es un **visor simplificado** para inspección rápida de resultados.
 
 ### 4. Comparativa ERA5/Sentinel
 
-**Propósito:** Unificar y correlacionar la información meteorológica (ERA5) sobre imágenes satelitales de alta resolución (Sentinel). Esta herramienta superpone variables climáticas como mapas de calor interactivos encima de los contornos base del radar, permitiendo una contextualización visual robusta en la misma área.
+**Propósito:** Unificar y correlacionar la información meteorológica (ERA5) sobre imágenes satelitales de alta resolución (Sentinel). Esta herramienta superpone variables climáticas (Temperatura) como mapas de calor interactivos encima de los contornos base del radar, calculando estadísticamente márgenes de error climáticos frente a las métricas del SAR.
+
+**¿Qué hace internamente?**
+El sistema extrae las coordenadas reales de Sentinel (Affines) a través del archivo de amplitud/fase correspondiente y localiza exactamente esos mismos píxeles sobre la matriz de temperatura descargada de Copernicus. Finalmente, descarta las zonas nulas y cálcula el _Factor de Error Climático_ basado en las variaciones de temperatura local en cada coordenada, mostrando una vista unificada.
 
 **Requisitos Críticos:**
-- **Misma Área Espacial:** El archivo `.nc` de ERA5 y los rásteres `.zip` de Sentinel deben cubrir aproximadamente la misma zona geográfica, de lo contrario la superposición visual no tendrá sentido sobre la grilla.
-- **Fechas Coincidentes:** Para que el algoritmo extraiga correctamente el dato (ej. una alta medición de temperatura) y lo asocie al ráster, el archivo `.nc` de ERA5 debe contener datos temporales que cubran (o estén muy cercanos) a las fechas de recolección de los datos de Sentinel.
+- **Misma Área Espacial:** El archivo `.nc` de ERA5 y los rásteres `.zip` de Sentinel deben cubrir **estrictamente** la misma zona geográfica, de lo contrario la extracción de temperaturas fallará silenciosamente debido a falta de datos rasterizados solapados.
+- **Fechas Coincidentes:** Para que la correlación adquiera validez científica, el archivo `.nc` de ERA5 debe contener registros temporales que coincidan o cubran la ventana de adquisición de Sentinel para que la influencia de las temperaturas sea fidedigna a las capas expuestas. Solo funciona si coinciden fechas y lugares.
 
 **Cómo usar:**
 1. Ve a la pestaña **"Comparativa ERA5/Sentinel"** en la navegación.
 2. Sube un archivo **`.nc`** que contiene el Contexto Meteorológico (extraído de Copernicus).
-3. Sube uno o **múltiples** **`.zip`** que contienen los productos de deformación/SAR de Sentinel.
-4. Presiona el botón para procesar.
-5. El sistema alineará espacialmente la matriz ERA5 remuestreándola, le aplicará un filtro de color y transparencia (alpha), y generará una galería de imágenes comparativas navegables donde se evaluarán picos de temperatura o clima sobre la geografía base del ráster.
+3. Sube uno o **múltiples** **`.zip`** que contienen los productos de deformación/SAR de Sentinel. (No es necesario descomprimirlos).
+4. Presiona el botón para generar la comparativa.
+5. Obtendrás un visor interactivo para **explorar mapas visuales** que demuestran qué áreas tienen anomalías climáticas registradas al momento del barrido.
+6. Debajo, podrás previsualizar la iteración espacial cruzada en una **tabla numérica detallada** conteniendo *Latitud*, *Longitud*, *Temperatura (K)*, y *Radar Base*.
+7. Para usos estadísticos profesionales o modelado posterior, haz click en el botón **"Exportar CSV"** que descargará todos los píxeles (muestras extraídas dinámicamente) de forma consolidada en formato hoja de cálculo.
 
 ## Instalación y Ejecución
 

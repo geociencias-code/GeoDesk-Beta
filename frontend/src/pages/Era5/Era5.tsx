@@ -134,107 +134,133 @@ const Era5: React.FC = () => {
     startPoint && endPoint ? L.latLngBounds(startPoint, endPoint) : null;
 
   return (
-    <div className="era5-container">
-      <h2 className="era5-title">🗺️ Selecciona el área de trabajo</h2>
-
-      <div className="era5-mapWrapper">
-        <MapContainer center={[0, 0]} zoom={2} className="era5-map">
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {rectangleBounds && (
-            <Rectangle
-              bounds={rectangleBounds}
-              pathOptions={{ color: "#5D5FEF", weight: 3, opacity: 0.7 }} // azul del rectángulo
-            />
-          )}
-          <MapEvents />
-        </MapContainer>
-      </div>
-
-      <div className="era5-toolbar">
-        <button className="era5-btnReset" onClick={resetArea}>
-          Reiniciar área
-        </button>
-        {!area && (
-          <small className="era5-hint">
-            Haz click para iniciar y finalizar el rectángulo.
-          </small>
-        )}
-        {area && (
-          <small className="era5-hint">Área seleccionada ✓</small>
-        )}
-      </div>
-
-      {area && (
-        <div className="era5-areaInfo">
-          <p>
-            <b>📦 Región seleccionada:</b>
-          </p>
-          <p>🔹 Norte: {area.north.toFixed(6)}</p>
-          <p>🔹 Sur: {area.south.toFixed(6)}</p>
-          <p>🔹 Oeste: {area.west.toFixed(6)}</p>
-          <p>🔹 Este: {area.east.toFixed(6)}</p>
+    <div className="page-container">
+      <div className="header-section">
+        <div className="icon-wrapper">
+          <span style={{ fontSize: "1.5rem" }}>☁️</span>
         </div>
-      )}
+        <div>
+          <h1>Descarga de Datos ERA5</h1>
+          <p>Modelos climáticos de reanálisis global</p>
+        </div>
+      </div>
 
-      {area && (
-        <>
-          <hr className="era5-divider" />
-          <h3 className="era5-subtitle">📅 Parámetros de descarga</h3>
+      <div className="layout-grid">
+        {/* Configuration Panel */}
+        <div className="upload-panel">
+          <div className="upload-card">
+            <label>1. Parámetros de Descarga</label>
+            
+            <div className="era5-dateRow">
+              <div className="era5-dateField">
+                <label>Fecha inicial:</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </div>
+              <div className="era5-dateField">
+                <label>Fecha final:</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
+            </div>
 
-          <div className="era5-dateRow">
-            <div className="era5-dateField">
-              <label>Fecha inicial:</label>
-              <br />
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
+            <div className="era5-hours" style={{ marginTop: '20px' }}>
+              <label>2. Horas de captura:</label>
+              <div className="era5-hoursList">
+                {availableHours.map((h) => (
+                  <label key={h} className="era5-checkboxLabel">
+                    <input
+                      type="checkbox"
+                      checked={hours.includes(h)}
+                      onChange={() =>
+                        setHours((prev) =>
+                          prev.includes(h)
+                            ? prev.filter((x) => x !== h)
+                            : [...prev, h]
+                        )
+                      }
+                    />
+                    {h}
+                  </label>
+                ))}
+              </div>
             </div>
-            <div className="era5-dateField">
-              <label>Fecha final:</label>
-              <br />
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="era5-hours">
-            <label>🕒 Selecciona horas:</label>
-            <div className="era5-hoursList">
-              {availableHours.map((h) => (
-                <label key={h} className="era5-checkboxLabel">
-                  <input
-                    type="checkbox"
-                    checked={hours.includes(h)}
-                    onChange={() =>
-                      setHours((prev) =>
-                        prev.includes(h)
-                          ? prev.filter((x) => x !== h)
-                          : [...prev, h]
-                      )
-                    }
-                  />
-                  {h}
-                </label>
-              ))}
-            </div>
+            
+            {area && (
+              <div className="era5-areaInfo" style={{ marginTop: '20px', padding: '16px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)' }}>
+                <p style={{ fontWeight: 'bold', marginBottom: '8px', color: 'var(--color-primary)' }}>3. Región Seleccionada (✓)</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.85rem' }}>
+                  <span>N: {area?.north.toFixed(4)}</span>
+                  <span>S: {area?.south.toFixed(4)}</span>
+                  <span>E: {area?.east.toFixed(4)}</span>
+                  <span>W: {area?.west.toFixed(4)}</span>
+                </div>
+              </div>
+            )}
+            
+            {!area && (
+              <div style={{ marginTop: '20px', padding: '16px', borderRadius: '12px', background: 'rgba(255,255,255,0.02)', textAlign: 'center', fontSize: '0.85rem', color: '#94a3b8' }}>
+                Dibuja un rectángulo en el mapa para habilitar la descarga.
+              </div>
+            )}
           </div>
 
           <button
             onClick={handleDownload}
-            disabled={downloading}
-            className={`era5-downloadBtn ${
-              downloading ? "is-disabled" : ""
-            }`}
+            disabled={downloading || !area}
+            className="submit-btn"
+            style={{ marginTop: '10px' }}
           >
-            {downloading ? "Descargando..." : "Iniciar descarga"}
+            {downloading ? (
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <svg className="spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                </svg>
+                Descargando...
+              </span>
+            ) : (
+              "Iniciar descarga"
+            )}
           </button>
-        </>
-      )}
+        </div>
+
+        {/* Map Panel */}
+        <div className="results-panel">
+          <div className="data-widget" style={{ padding: '0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div className="era5-toolbar" style={{ padding: '16px 20px', background: 'var(--color-bg-card)', borderBottom: '1px solid rgba(255,255,255,0.05)', margin: 0, justifyContent: 'space-between' }}>
+              <span className="era5-hint" style={{ fontWeight: 600, color: 'var(--color-text-main)' }}>
+                🗺️ Dibuja el área de trabajo
+              </span>
+              <button 
+                className="era5-btnReset" 
+                onClick={resetArea}
+                style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+              >
+                Reiniciar área
+              </button>
+            </div>
+            
+            <div className="era5-mapWrapper" style={{ margin: 0, borderRadius: 0, border: 'none', height: '500px' }}>
+              <MapContainer center={[0, 0]} zoom={2} className="era5-map" style={{ height: '100%', width: '100%' }}>
+                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                {rectangleBounds && (
+                  <Rectangle
+                    bounds={rectangleBounds as L.LatLngBoundsExpression}
+                    pathOptions={{ color: "#00e5ff", weight: 3, opacity: 0.8 }} 
+                  />
+                )}
+                <MapEvents />
+              </MapContainer>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

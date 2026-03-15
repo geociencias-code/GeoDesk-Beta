@@ -117,24 +117,51 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 
                 # Extraer datos ERA5
                 if time_idx is not None:
-                    era5_slice = ds[tvar].isel({time_var: time_idx}).values
+                    era5_slice = ds[tvar].isel({time_var: time_idx}).values.astype(np.float32)
                 else:
                     # Fallback si no hay match de fecha, usar la media temporal
-                    era5_slice = ds[tvar].mean(dim=time_var).values
+                    era5_slice = ds[tvar].mean(dim=time_var).values.astype(np.float32)
                 
-                # Re-muestrear ERA5 (baja resolución) al tamaño de Sentinel (alta resolución)
+                # Re-muestrear ERA5 usando coordenadas geográficas
                 target_shape = sentinel_data.shape
-                # Interpolación bicúbica usando opencv para un gradiente suave
-                era5_resized = cv2.resize(era5_slice, (target_shape[1], target_shape[0]), interpolation=cv2.INTER_CUBIC)
+                era5_reprojected = np.full(target_shape, np.nan, dtype=np.float32)
+                
+                # Calcular la transformación de ERA5
+                lons = ds[ds[tvar].dims[-1]].values  # Usualmente 'longitude'
+                lats = ds[ds[tvar].dims[-2]].values  # Usualmente 'latitude'
+                
+                dlon = (lons[-1] - lons[0]) / (len(lons) - 1) if len(lons) > 1 else 0.1
+                dlat = (lats[-1] - lats[0]) / (len(lats) - 1) if len(lats) > 1 else -0.1
+                
+                # Rasterio Affine: traslación al centro del píxel de la esquina superior izquierda
+                from rasterio.transform import Affine
+                from rasterio.warp import reproject, Resampling
+                
+                era5_transform = Affine.translation(lons[0] - dlon/2, lats[0] - dlat/2) * Affine.scale(dlon, dlat)
+                
+                reproject(
+                    source=era5_slice,
+                    destination=era5_reprojected,
+                    src_transform=era5_transform,
+                    src_crs="EPSG:4326",
+                    dst_transform=src.transform,
+                    dst_crs=src.crs,
+                    src_nodata=np.nan,
+                    dst_nodata=np.nan,
+                    resampling=Resampling.cubic
+                )
                 
                 # Crear máscara para las áreas sin datos (NaN o ceros en los bordes) en Sentinel
                 valid_mask = ~np.isnan(sentinel_data) & (sentinel_data != 0)
                 
-                # Aplicar la máscara a los datos ERA5 para que coincidan con la forma irregular del Sentinel
-                era5_masked = np.where(valid_mask, era5_resized, np.nan)
+                # Aplicar la máscara a los datos ERA5 re-proyectados
+                era5_masked = np.where(valid_mask, era5_reprojected, np.nan)
                 
                 # Promedios y estatus
-                temp_promedio = float(np.nanmean(era5_resized))
+                # Usamos np.nanmean ignorando advertencias de "Mean of empty slice" si resultara vacío
+                with np.errstate(invalid='ignore'):
+                    mean_val = np.nanmean(era5_reprojected)
+                temp_promedio = float(mean_val) if not np.isnan(mean_val) else 0.0
                 disp_min = float(s_min)
                 disp_max = float(s_max)
                 

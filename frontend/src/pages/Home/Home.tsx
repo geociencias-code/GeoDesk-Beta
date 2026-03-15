@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-import { Globe2, Layers, Cpu, CloudRain } from "lucide-react";
+import { Globe2 } from "lucide-react";
 import Globe from "react-globe.gl";
 import type { GlobeMethods } from "react-globe.gl";
 
@@ -11,7 +11,6 @@ type GeoDeskCoverProps = {
 };
 
 export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.ReactNode {
-  const year = new Date().getFullYear();
   const [currentPage, setCurrentPage] = useState<string | null>(null);
   const globeEl = useRef<GlobeMethods | undefined>(undefined);
 
@@ -96,51 +95,6 @@ export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.R
           </div>
         </div>
       </div>
-
-      {/* SECTION 2: CARDS / FEATURES */}
-      <div className="home-features">
-        <div className="home-feature-card">
-          <div className="feature-icon feature-insar">
-            <Cpu />
-          </div>
-          <h3>Alaska HyP3</h3>
-          <p>
-            Orquestación satelital en la nube. Procesa pares de imágenes Sentinel-1 para generar fase desenrollada y mapas de coherencia con precisión orbital.
-          </p>
-        </div>
-
-        <div className="home-feature-card">
-          <div className="feature-icon feature-velocidad">
-            <Layers />
-          </div>
-          <h3>Velocidad y Extracción</h3>
-          <p>
-            Herramienta interactiva para recortar geometrías espaciales sobre el globo. Convierte radianes interferométricos a una tabla de desplazamientos anuales (mm/yr).
-          </p>
-        </div>
-
-        <div className="home-feature-card">
-          <div className="feature-icon feature-clima">
-            <CloudRain />
-          </div>
-          <h3>Copernicus ERA5</h3>
-          <p>
-            Modelado climático. Mapea la temperatura térmica de NetCDFs europeos exactamente sobre los radares InSAR para correlacionar distorsiones atmosféricas.
-          </p>
-        </div>
-      </div>
-
-      {/* SECTION 3: FOOTER */}
-      <footer className="home-footer">
-        <p>© {year} GeoDesk Project. Diseñado con Three.js & React-Globe.</p>
-        <div className="footer-links">
-          <span>Sentinel-1</span>
-          <span>|</span>
-          <span>Copernicus</span>
-          <span>|</span>
-          <span>ASF</span>
-        </div>
-      </footer>
     </div>
   );
 }

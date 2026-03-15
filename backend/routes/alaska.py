@@ -34,7 +34,6 @@ else:
 router = APIRouter()
 
 
-# MODELOS (I/O)
 class SearchParams(BaseModel):
     polygon: str = Field(
         default=(
@@ -54,7 +53,7 @@ class SearchParams(BaseModel):
     marco: int = 547
     beam_mode: str = "IW"
     processing_level: str = "SLC"
-    flight_direction: Optional[str] = None # ASCENDING | DESCENDING
+    flight_direction: Optional[str] = None
     polarization: Optional[str] = None # VV, HH, VV+VH, HH+HV
     day_interval: int = 12
     same_platform: bool = True
@@ -279,18 +278,15 @@ def pick_session_for(url: str) -> requests.Session:
 
 
 
-# Actualiza el nombre del proyecto
 @router.post("/api/update-project-name")
 def api_update_project_name(new_name: str):
     update_project_name(new_name)
     return {"ok": True, "new_name": new_name}
 
-# Verifica que la API está corriendo
 @router.get("/health")
 def health():
     return {"ok": True, "service": "Sentinel-1 HyP3 API"}
 
-# Busca escenas de Sentinel-1 según los parámetros dados
 @router.post("/api/search", response_model=List[SceneOut])
 def api_search(params: SearchParams):
     try:
@@ -315,7 +311,6 @@ def api_search(params: SearchParams):
 
 
 
-# Envia trabajos de procesamiento a HyP3 para cada par dado, con las opciones especificadas
 @router.post("/api/submit", response_model=SubmitResponse)
 def api_submit(body: SubmitRequest):
     if not HYP3_USERNAME or not HYP3_PASSWORD:
@@ -344,7 +339,6 @@ def api_submit(body: SubmitRequest):
 
 
 
-# Permite enviar trabajos a HyP3 directamente a partir de una lista de granules, construyendo los pares internamente
 @router.post("/api/submit-from-granules", response_model=SubmitResponse)
 def api_submit_from_granules(body: SubmitFromGranulesBody):
     if not HYP3_USERNAME or not HYP3_PASSWORD:
@@ -401,10 +395,6 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
 
 
 
-
-
-
-# Lista los proyectos (trabajos ya completados) disponibles en HyP3
 @router.get("/api/projects")
 def get_projects():
     try:
@@ -423,8 +413,6 @@ def get_projects():
 
 
 
-
-# Lista los archivos disponibles para un proyecto dado
 @router.post("/api/project-files", response_model=List[JobFile]) # usado
 def get_project_files(body: ProjectFileDownloadRequest):
     nombre_proyecto = body.nombre_proyecto
@@ -470,7 +458,6 @@ def get_project_files(body: ProjectFileDownloadRequest):
         raise HTTPException(status_code=500, detail=f"Error al obtener los archivos del proyecto: {str(e)}")
 
 
-# Descarga las imagenes procesadas
 @router.post("/api/download")
 def api_download(body: DownloadBody):
     try:
@@ -491,7 +478,6 @@ def api_download(body: DownloadBody):
 
 
 
-# Verifica la conectividad y permisos para acceder a los servidores de ASF
 @router.get("/api/check-edl")
 def api_check_edl(test_url: str = Query("https://datapool.asf.alaska.edu/")):
     try:

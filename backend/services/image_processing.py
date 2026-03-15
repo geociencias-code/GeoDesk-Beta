@@ -6,6 +6,17 @@ import cartopy.crs as ccrs
 import datetime
 
 def classify_kind(filepath: Path) -> str:
+    """Classifies a raster file based on its filename.
+
+    Analyzes the filename to determine the type of raster data it contains.
+    Classification is based on keyword matching in the lowercase filename.
+
+    Args:
+        filepath: Path object pointing to the raster file to classify.
+
+    Returns:
+        A string indicating the file classification.
+    """
     name = filepath.name.lower()
     if any(k in name for k in ["unw_phase", "color_phase", "lv_phi", "lv_theta"]):
         return "fase"
@@ -20,6 +31,27 @@ def classify_kind(filepath: Path) -> str:
     return "desconocido"
 
 def compute_stats(arr: np.ndarray, nodata=None):
+    """Computes statistical measures for a raster array.
+
+    Calculates various statistical metrics from a NumPy array, handling
+    no-data values and non-finite numbers appropriately.
+
+    Args:
+        arr: NumPy array containing the raster data to analyze.
+        nodata: Optional value representing no-data pixels. If provided,
+        these values are treated as NaN before computing statistics.
+
+    Returns:
+        A dictionary containing statistical measures:
+        - "min": Minimum finite value in the array.
+        - "max": Maximum finite value in the array.
+        - "mean": Mean of finite values.
+        - "std": Standard deviation of finite values.
+        - "p2": 2nd percentile value.
+        - "p98": 98th percentile value.
+        - "count": Total count of finite values.
+        Returns an empty dictionary if no finite values are found.
+    """
     a = arr.astype(float)
     if nodata is not None:
         a = np.where(a == nodata, np.nan, a)
@@ -38,6 +70,27 @@ def compute_stats(arr: np.ndarray, nodata=None):
     }
 
 def render_raster_tiff(in_path: Path, out_tiff: Path, title: str, cmap: str = "viridis", vmin=None, vmax=None, nodata=None):
+    """Renders a raster file as a PNG image with color mapping.
+
+    Reads a raster file, applies statistical normalization and color mapping,
+    and saves the visualization as a PNG file with a colorbar.
+
+    Args:
+        in_path: Path to the input raster file to render.
+        out_tiff: Path where the output PNG image will be saved.
+        title: Title to display on the rendered image.
+        cmap: Matplotlib color map name to use for visualization. Default is "viridis".
+        vmin: Minimum value for color scaling. If None, uses the 2nd percentile
+            from computed statistics.
+        vmax: Maximum value for color scaling. If None, uses the 98th percentile
+            from computed statistics.
+        nodata: Value representing no-data pixels. If None, attempts to read from
+            raster metadata. These pixels are converted to NaN.
+
+    Returns:
+        A dictionary containing statistical measures of the raster data,
+        or an empty dictionary if no valid data is found.
+    """
     with rasterio.open(in_path) as ds:
         data = ds.read(1)
         if nodata is None and ds.nodata is not None:

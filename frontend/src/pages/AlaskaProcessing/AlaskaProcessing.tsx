@@ -98,18 +98,15 @@ function MapContent({
 }
 
 export default function AlaskaProcesamiento() {
-  // Estados principales
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [bounds, setBounds] = useState<{lat_min: number, lon_min: number, lat_max: number, lon_max: number} | null>(null);
-  
-  // Estados de recorte y dibujo
+
   const [drawnBox, setDrawnBox] = useState<{lat_min: number, lon_min: number, lat_max: number, lon_max: number} | null>(null);
   const [croppedZipUrl, setCroppedZipUrl] = useState<string | null>(null);
   const [croppedFileName, setCroppedFileName] = useState<string>("");
 
-  // Estados de cálculo de velocidad
   const [velocityData, setVelocityData] = useState<Array<{ lat: number; lon: number; vel:number }>>([]);
   const [velocityDias, setVelocityDias] = useState<number>(0);
   const [velocityCsvUrl, setVelocityCsvUrl] = useState<string | null>(null);
@@ -117,7 +114,7 @@ export default function AlaskaProcesamiento() {
   const handleZipFile = async (file: File) => {
     setZipFile(file);
     setBusy(true);
-    setMessage("⏳ Leyendo extensión del archivo...");
+    setMessage("Leyendo extensión del archivo...");
     setBounds(null);
     setDrawnBox(null);
     setCroppedZipUrl(null);
@@ -131,12 +128,12 @@ export default function AlaskaProcesamiento() {
       const res = await axios.post(`${API_URL}/api/v1/alaska/preview`, formData);
       if (res.data.success) {
         setBounds(res.data.bounds);
-        setMessage("✅ Extensión leída correctamente. Dibuja un rectángulo en el mapa para recortar.");
+        setMessage("Extensión leída correctamente. Dibuja un rectángulo en el mapa para recortar.");
       }
     } catch (error: unknown) {
       console.error(error);
       const msg = axios.isAxiosError(error) ? error.response?.data?.detail : String(error);
-      setMessage("❌ Error leyendo ZIP: " + msg);
+      setMessage("Error leyendo ZIP: " + msg);
     } finally {
       setBusy(false);
     }
@@ -146,7 +143,7 @@ export default function AlaskaProcesamiento() {
     if (!zipFile || !drawnBox) return;
 
     setBusy(true);
-    setMessage("✂️ Recortando rásteres. Por favor espera...");
+    setMessage("Recortando rásteres. Por favor espera...");
     try {
       const formData = new FormData();
       formData.append("file", zipFile);
@@ -160,7 +157,7 @@ export default function AlaskaProcesamiento() {
       const url = window.URL.createObjectURL(new Blob([res.data]));
       setCroppedZipUrl(url);
       setCroppedFileName(`cropped_${zipFile.name}`);
-      setMessage("✅ Archivos recortados exitosamente.");
+      setMessage("Archivos recortados exitosamente.");
     } catch(error) {
       console.error(error);
       setMessage("Error recortando imágenes.");
@@ -173,9 +170,8 @@ export default function AlaskaProcesamiento() {
     if (!croppedZipUrl || !zipFile) return;
 
     setBusy(true);
-    setMessage("📈 Procesando fase y calculando vector de velocidad anual...");
+    setMessage("Procesando fase y calculando vector de velocidad anual...");
     try {
-      // Necesitamos re-descargar el blob recortado para enviarlo al backend de velocity (o usar el origin File pero queremos la porcion chica)
       const blobRes = await fetch(croppedZipUrl);
       const blob = await blobRes.blob();
       
@@ -183,11 +179,9 @@ export default function AlaskaProcesamiento() {
       formData.append("file", blob, `cropped_${zipFile.name}`);
 
       const res = await axios.post(`${API_URL}/api/v1/alaska/velocity`, formData, { responseType: 'blob' });
-      
-      // La respuesta es un ZIP conteniendo el CSV + JSON (Muestra UI)
+
       const zipInstance = await JSZip.loadAsync(res.data);
-      
-      // 1. Extraer JSON UI
+
       const uiDataStr = await zipInstance.file("ui_data.json")?.async("string");
       if (uiDataStr) {
         const uiData = JSON.parse(uiDataStr);
@@ -195,18 +189,17 @@ export default function AlaskaProcesamiento() {
         setVelocityDias(uiData.dias);
       }
 
-      // 2. Extraer CSV blob url para descarga (manteniendo el archivo en RAM client side)
       const csvFile = Object.values(zipInstance.files).find(f => f.name.endsWith(".csv"));
       if (csvFile) {
         const csvBlob = await csvFile.async("blob");
         setVelocityCsvUrl(window.URL.createObjectURL(csvBlob));
       }
       
-      setMessage("✅ Velocidad calculada de manera exitosa.");
+      setMessage("Velocidad calculada de manera exitosa.");
 
     } catch (error) {
       console.error(error);
-      setMessage("❌ Ocurrió un error al calcular la velocidad.");
+      setMessage("Ocurrió un error al calcular la velocidad.");
     } finally {
       setBusy(false);
     }
@@ -228,7 +221,6 @@ export default function AlaskaProcesamiento() {
       </div>
 
       <div className="layout-grid">
-        {/* Left Panel: Controles Principales */}
         <div className="upload-panel">
           <div className="upload-card">
             <label style={{ color: "var(--color-primary)", fontWeight: "bold", marginBottom: "8px", display: "inline-block" }}>
@@ -330,7 +322,6 @@ export default function AlaskaProcesamiento() {
           </div>
         </div>
 
-        {/* Right Panel: Mapa Interactivo */}
         <div className="results-panel" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           
           <div className="data-widget" style={{ padding: "0", display: "flex", flexDirection: "column", height: "500px", borderRadius: "12px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}>
@@ -345,7 +336,6 @@ export default function AlaskaProcesamiento() {
             </MapContainer>
           </div>
 
-          {/* Tabla de Resultados Velocidad */}
           {velocityData.length > 0 && (
              <div className="data-widget" style={{ padding: "20px", background: "var(--color-bg-card)", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.05)" }}>
                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
@@ -377,11 +367,11 @@ export default function AlaskaProcesamiento() {
                     </thead>
                     <tbody>
                       {velocityData.slice(0, 50).map((row, idx) => {
-                         // Color mapping para velocidad: rojo es hundimiento, azul elevacion
+                         // rojo es hundimiento, azul elevacion
                          let textColor = "white";
-                         if (row.vel < -5) textColor = "#fca5a5"; // Rojo
-                         else if (row.vel > 5) textColor = "#93c5fd"; // Azul
-                         else textColor = "#d1d5db"; // Gris/Estable
+                         if (row.vel < -5) textColor = "#fca5a5";
+                         else if (row.vel > 5) textColor = "#93c5fd";
+                         else textColor = "#d1d5db";
 
                          return (
                            <tr key={idx} style={{ borderBottom: "1px solid rgba(255,255,255,0.02)" }}>

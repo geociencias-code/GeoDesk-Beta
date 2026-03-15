@@ -19,7 +19,7 @@ export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.R
   const bumpImageUrl = "//unpkg.com/three-globe/example/img/earth-topology.png";
 
   useEffect(() => {
-    // Configura la cámara inicial para que mire a Centro/Norte América con una perspectiva adecuada
+    // Cámara inicial para que mire a Centro/Norte América
     if (globeEl.current) {
       globeEl.current.pointOfView({ lat: 15, lng: -90, altitude: 2.0 });
       globeEl.current.controls().autoRotate = true;
@@ -46,7 +46,6 @@ export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.R
 
   return (
     <div className="home-wrapper">
-      {/* SECTION 1: GLOBE HERO */}
       <div className="home-hero">
         <div className="home-globe-container">
           <Globe
@@ -87,7 +86,7 @@ export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.R
               Iniciar Análisis InSAR
             </button>
             <button
-              onClick={() => onNavigate("comparativa-era5")}
+              onClick={() => onNavigate("descargar-datos")}
               className="btn-secondary"
             >
               Explorar Clima ERA5

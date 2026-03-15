@@ -1,186 +1,177 @@
-// Refactorized Cover.tsx
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { MapPin } from "lucide-react";
+import { Globe2, Layers, Cpu, CloudRain } from "lucide-react";
+import Globe from "react-globe.gl";
+import type { GlobeMethods } from "react-globe.gl";
 
 import Alaska_procesamiento from "../AlaskaProcessing/AlaskaProcessing";
 
 type GeoDeskCoverProps = {
-  onNavigate: (page: string) => void;   // ⬅️ ahora obligatorio
+  onNavigate: (page: string) => void;
 };
 
 export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.ReactNode {
   const year = new Date().getFullYear();
-
   const [currentPage, setCurrentPage] = useState<string | null>(null);
+  const globeEl = useRef<GlobeMethods | undefined>(undefined);
+
+  // Configuración de texturas para el globo
+  const globeImageUrl = "//unpkg.com/three-globe/example/img/earth-dark.jpg";
+  const bumpImageUrl = "//unpkg.com/three-globe/example/img/earth-topology.png";
+
+  useEffect(() => {
+    // Configura la cámara inicial para que mire a Centro/Norte América con una perspectiva adecuada
+    if (globeEl.current) {
+      globeEl.current.pointOfView({ lat: 15, lng: -90, altitude: 2.0 });
+      globeEl.current.controls().autoRotate = true;
+      globeEl.current.controls().autoRotateSpeed = 0.5;
+    }
+  }, []);
 
   const renderPage = () => {
     switch (currentPage) {
       case "procesamiento-imagenes":
         return (
           <div className="p-4">
-            <Alaska_procesamiento/>
+            <Alaska_procesamiento />
           </div>
         );
-
-      case "descarga-imagenes":
-        return <div className="p-4">(Aquí iría tu módulo de descargas)</div>;
-
       default:
         return null;
     }
   };
 
-  // SI currentPage EXISTE, MOSTRAR ESA PÁGINA Y NO LA PORTADA
   if (currentPage) {
     return <>{renderPage()}</>;
   }
 
-  // -------------------------
-  //       PORTADA
-  // -------------------------
   return (
-    <div className="min-h-screen flex items-center justify-center bg-container p-6">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.7 }}
-        className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-8 items-center"
-      >
-        {/* LEFT PANEL */}
-        <section className="p-8 rounded-2xl glass-card backdrop-blur-md">
-          <div className="seccion-contenido">
+    <div className="relative w-full h-screen bg-black overflow-hidden flex flex-col justify-between">
+      {/* 
+        ========================
+        Capa 1: Globo Terráqueo 3D
+        ========================
+      */}
+      <div className="absolute inset-0 z-0 opacity-80 cursor-grab active:cursor-grabbing">
+        <Globe
+          ref={globeEl}
+          globeImageUrl={globeImageUrl}
+          bumpImageUrl={bumpImageUrl}
+          backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
+          showAtmosphere={true}
+          atmosphereColor="#3b82f6"
+          atmosphereAltitude={0.15}
+        />
+        {/* Capa de nubes manual superpuesta usando HTML/CSS no soportado nativamente, pero podemos dejar el globo en rotación suave */}
+      </div>
+      
+      {/* Gradiente sutil para oscurecer los bordes del globo y destacar el texto */}
+      <div className="absolute inset-0 z-0 bg-gradient-to-t from-black via-transparent to-black pointer-events-none opacity-60"></div>
 
-            {/* HEADER */}
-            <div className="flex items-center gap-6 mb-8">
-              <div className="cover-header mb-8">
-                <div className="cover-logo rounded-2xl flex items-center justify-center">
-                  <MapPin className="w-8 h-8" />
-                </div>
+      {/* 
+        ========================
+        Capa 2: Interfaz de Usuario (Glassmorphism)
+        ========================
+      */}
+      <div className="absolute inset-0 z-20 w-full max-w-7xl mx-auto px-6 py-12 h-screen flex flex-col justify-between pointer-events-none">
+        
+        {/* HEADER / TITULO */}
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8 }}
+          className="mt-8 md:mt-16 pointer-events-auto max-w-2xl"
+        >
+          <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full border border-white/10 bg-white/5 backdrop-blur-md mb-6 shadow-[0_0_15px_rgba(59,130,246,0.2)]">
+            <Globe2 className="w-5 h-5 text-blue-400" />
+            <span className="text-sm font-medium tracking-wide text-blue-100">BETA SYSTEM V1.04</span>
+          </div>
 
-                <div className="cover-title">
-                  <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight">GeoDesk</h1>
-                  <p className="text-sm uppercase tracking-wide opacity-80">Plataforma de geoprocesamiento</p>
-                </div>
+          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-white mb-4 leading-tight">
+            Descifra la <br/>
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400">
+              Dinámica Terrestre
+            </span>
+          </h1>
 
-                <div className="cover-img bg-[var(--color-bg-soft)] border border-[var(--color-bg-soft)] shadow-md">
-                  <img src="/imagenes/mapaMundi.png" alt="Mapa_Mundi" />
-                </div>
-              </div>
-            </div>
+          <p className="text-lg md:text-xl text-gray-300 mb-10 leading-relaxed font-light">
+            GeoDesk es un entorno de geoprocesamiento avanzado. Combina el poder de la 
+            interferometría SAR (HyP3) y la reanudación meteorológica (ERA5) para 
+            analizar subsidencias, temperaturas y velocidades de deformación a nivel milimétrico.
+          </p>
 
-            <div className="descripcion">
-              <p className="prose-lg mb-6 opacity-90">
-                GeoDesk es una aplicación para el procesamiento y visualización de datos geoespaciales,
-                integrando herramientas como Alaska y Shiny Days para análisis, elevación y procesamiento de imágenes.
-              </p>
-            </div>
-
-
-            <div className="mt-8">
-             <a
-              className="btn-cta"
-              href="#"
-              onClick={(e) => {
-                e.preventDefault();
-                console.log("[Inicio] click — onNavigate:", typeof onNavigate, onNavigate);
-                try {
-                  setCurrentPage("procesamiento-imagenes");
-
-                } catch (err) {
-                  console.error("[Inicio] error calling onNavigate:", err);
-                }
-              }}
-              aria-label="Abrir proyecto GeoDesk"
+          <div className="flex flex-wrap gap-4">
+            <button
+              onClick={() => setCurrentPage("procesamiento-imagenes")}
+              className="px-8 py-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-lg shadow-[0_0_30px_rgba(79,70,229,0.4)] transition-all hover:scale-105 active:scale-95"
             >
-              Abrir proyecto
-              </a>
-            </div>
-    </div>
-
-          <div className="info">
-            {/* METADATOS */}
-            <div className="meta flex flex-wrap gap-4 items-center mt-6">
-              <h1> </h1>
-              <h1> </h1>
-              <h1> </h1>
-              <div className="chip">Proyecto: GeoDesk</div>
-              <div className="chip">Versión: 1.04</div>
-              <div className="chip">{year}</div>
-            </div>
-
-            {/* AUTORES */}
-            <div className="mt-8 text-sm opacity-80">
-              <strong>Autores:</strong>
-              <ul className="list-inside list-disc ml-4 mt-2">
-                <li>Usuario: Frank</li>
-                <li>Usuario: Joshua</li>
-                <li>Usuario: Stanley</li>
-                <li>Usuario: Adalid</li>
-              </ul>
-            </div>
-
+              Iniciar Análisis InSAR
+            </button>
+            <button
+              onClick={() => onNavigate("comparativa-era5")}
+              className="px-8 py-4 rounded-xl border border-white/20 bg-white/5 hover:bg-white/10 text-white font-medium text-lg backdrop-blur-md transition-all hover:scale-105"
+            >
+              Explorar Clima ERA5
+            </button>
           </div>
-        </section>
+        </motion.div>
 
-        {/* RIGHT PANEL */}
-        <aside className="p-6 rounded-2xl visual-card relative overflow-hidden">
-          <motion.div
-            initial={{ scale: 0.97 }}
-            animate={{ scale: 1 }}
-            transition={{ duration: 1 }}
-            className="absolute inset-0 pointer-events-none opacity-70"
-          >
-            <svg className="w-full h-full" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice">
-              <defs>
-                <linearGradient id="g1" x1="0" x2="1">
-                  <stop offset="0%" stopColor="#161616ff" stopOpacity="0.85" />
-                  <stop offset="100%" stopColor="#232324ff" stopOpacity="0.85" />
-                </linearGradient>
-              </defs>
+        <div className="flex-grow"></div>
 
-              <rect x="0" y="0" width="800" height="600" fill="url(#g1)" />
-
-              <g strokeOpacity="0.35" strokeWidth="1.2" fill="none">
-                <path stroke="#475569" d="M10 500 C150 420 300 520 480 390 S760 120 790 60" />
-                <path stroke="#64748b" d="M0 420 C120 360 260 460 420 350 S700 90 780 40" />
-                <path stroke="#334155" d="M20 560 C180 460 340 560 520 430 S780 140 800 80" />
-              </g>
-
-              <g transform="translate(60,60)">
-                <rect x="0" y="0" width="120" height="80" rx="8" fill="#ffffff0A" />
-                <rect x="140" y="30" width="160" height="100" rx="12" fill="#ffffff08" />
-                <rect x="340" y="10" width="180" height="120" rx="10" fill="#ffffff06" />
-              </g>
-            </svg>
-          </motion.div>
-
-          <div className="relative z-10 rounded-xl overflow-hidden shadow-xl mb-6 mt-2 image-slot">
-            <div className="flex items-center justify-center h-40 opacity-50 text-xs">
-
+        {/* CARDS / FEATURES BOTTOM */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1, delay: 0.4 }}
+          className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 pointer-events-auto"
+        >
+          {/* Card 1 */}
+          <div className="group border border-white/10 bg-black/40 backdrop-blur-xl p-6 rounded-2xl hover:bg-black/60 transition-all hover:-translate-y-1">
+            <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center mb-4 text-blue-400 group-hover:bg-blue-500 group-hover:text-white transition-colors">
+              <Cpu className="w-6 h-6" />
             </div>
+            <h3 className="text-xl font-bold text-white mb-2">Alaska HyP3</h3>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Orquestación satelital en la nube. Procesa pares de imágenes Sentinel-1 para generar fase desenrollada y mapas de coherencia con precisión orbital.
+            </p>
           </div>
 
-          <div className="datos">
-            <div className="card inline-block p-4 rounded-xl">
-              <h3 className="text-lg font-semibold">Procesamiento por lotes</h3>
-              <p className="text-sm opacity-80">Automatiza la extracción, filtrado y análisis de imágenes.</p>
+          {/* Card 2 */}
+          <div className="group border border-white/10 bg-black/40 backdrop-blur-xl p-6 rounded-2xl hover:bg-black/60 transition-all hover:-translate-y-1">
+            <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center mb-4 text-purple-400 group-hover:bg-purple-500 group-hover:text-white transition-colors">
+              <Layers className="w-6 h-6" />
             </div>
-
-            <div className="card inline-block p-4 rounded-xl">
-              <h3 className="text-lg font-semibold">Modelo de elevación</h3>
-              <p className="text-sm opacity-80">Visualiza DEMs y genera perfiles de elevación.</p>
-            </div>
-
-            <div className="card inline-block p-4 rounded-xl">
-              <h3 className="text-lg font-semibold">Integración Shiny</h3>
-              <p className="text-sm opacity-80">Dashboards interactivos para análisis exploratorio.</p>
-            </div>
+            <h3 className="text-xl font-bold text-white mb-2">Velocidad y Extracción</h3>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Herramienta interactiva para recortar geometrías espaciales sobre el globo. Convierte radianes interferométricos a una tabla de desplazamientos anuales (mm/yr).
+            </p>
           </div>
 
-          <div className="absolute bottom-6 right-6 text-xs opacity-50">GeoDesk • {year}</div>
-        </aside>
-      </motion.div>
+          {/* Card 3 */}
+          <div className="group border border-white/10 bg-black/40 backdrop-blur-xl p-6 rounded-2xl hover:bg-black/60 transition-all hover:-translate-y-1">
+            <div className="w-12 h-12 rounded-xl bg-teal-500/20 flex items-center justify-center mb-4 text-teal-400 group-hover:bg-teal-500 group-hover:text-white transition-colors">
+              <CloudRain className="w-6 h-6" />
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">Copernicus ERA5</h3>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Modelado climático. Mapea la temperatura térmica de NetCDFs europeos exactamente sobre los radares InSAR para correlacionar distorsiones atmosféricas.
+            </p>
+          </div>
+        </motion.div>
+
+        {/* FOOTER METADATA */}
+        <div className="flex items-center justify-between text-xs text-gray-500 border-t border-white/10 pt-4 pointer-events-auto">
+          <p>© {year} GeoDesk Project. Diseñado con Three.js & React-Globe.</p>
+          <div className="flex gap-4">
+            <span>Sentinel-1</span>
+            <span>|</span>
+            <span>Copernicus</span>
+            <span>|</span>
+            <span>ASF</span>
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }

@@ -223,7 +223,7 @@ const App: React.FC = () => {
           gridRow: "2 / 3",
           overflowY: "auto",
           minHeight: 0,
-          padding: "2rem",
+          padding: activeSection === "inicio" ? "0" : "2rem",
           color: "var(--color-text-main)",
         }}
       >

@@ -12,7 +12,7 @@ type GeoDeskCoverProps = {
 
 export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.ReactNode {
   const [currentPage, setCurrentPage] = useState<string | null>(null);
-  const globeEl = useRef<GlobeMethods | undefined>(undefined);
+  const globeEl = useRef<GlobeMethods>(null!);
 
   // Configuración de texturas para el globo
   const globeImageUrl = "//unpkg.com/three-globe/example/img/earth-dark.jpg";

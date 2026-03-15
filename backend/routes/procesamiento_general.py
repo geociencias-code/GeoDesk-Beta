@@ -3,14 +3,11 @@ import json
 from fastapi.responses import FileResponse
 import tempfile
 import zipfile
-import xarray as xr
 import numpy as np
 import rasterio
-import matplotlib.pyplot as plt
 import pandas as pd
 import pyproj
 from pathlib import Path
-from typing import List
 
 from utils.file_handling import extract_zip, find_rasters
 from services.image_processing import classify_kind, render_raster_tiff, generar_mapa_el_salvador
@@ -27,6 +24,20 @@ OUT_FAS = Path("resultados_fase")
 OUT_ELE = Path("resultados_elevacion")
 
 def limpiar_resultados():
+    """Cleans up all result directories by removing files and folders.
+
+    Removes all files from the output directories (coherencia, fase, and elevacion)
+    and then deletes the empty directories. This function is called at the start
+    of processing to ensure a clean state before generating new results.
+
+    The directories cleaned are:
+        - OUT_COH: Coherencia results
+        - OUT_FAS: Fase results
+        - OUT_ELE: Elevacion results
+
+    Raises:
+        OSError: If a file cannot be deleted or if the directory removal fails.
+    """
     for folder in [OUT_COH, OUT_FAS, OUT_ELE]:
         for file in folder.glob("*"):
             file.unlink()
@@ -40,6 +51,32 @@ async def procesar_zip(
     procesar_fase: bool = Query(True),
     procesar_elev: bool = Query(True)
 ):
+    """Processes a ZIP file containing TIFF images and generates PNG outputs.
+
+        Extracts TIFF images from an uploaded ZIP file, classifies them by type
+        (coherencia, fase, or elevacion), renders them as PNG images, and creates
+        a new ZIP file containing the processed images and their statistics.
+
+        Args:
+            file (UploadFile): The ZIP file to process containing TIFF images.
+            procesar_coherencia (bool, optional): Whether to process coherencia images.
+            procesar_fase (bool, optional): Whether to process fase images.
+            procesar_elev (bool, optional): Whether to process elevacion images.
+
+        Returns:
+            FileResponse: A ZIP file containing processed PNG images and stats.json
+                with image statistics and metadata.
+
+        Raises:
+            HTTPException: With status code 400 if:
+                - ZIP file cannot be saved temporarily
+                - No TIFF files are found in the ZIP
+            HTTPException: With status code 500 if:
+                - ZIP extraction fails
+                - ZIP creation fails
+                - Final ZIP file is not created properly
+                - Any unexpected error occurs during processing
+        """
     try:
         limpiar_resultados()
         
@@ -76,8 +113,7 @@ async def procesar_zip(
                (kind == "fase" and not procesar_fase) or \
                (kind == "elevacion" and not procesar_elev):
                 continue
-            
-            # Map kind to the correct output folder
+
             out_folder = OUT_COH if kind == "coherencia" else (OUT_FAS if kind == "fase" else OUT_ELE)
             out_name = f"{kind}_{tif.stem}.png"
             res = render_raster_tiff(

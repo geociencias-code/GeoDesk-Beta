@@ -4,7 +4,14 @@ import re
 from datetime import datetime
 
 def extract_zip(zip_path: Path, out_dir: Path):
-    """Extracts a zip file to the output directory and recursively extracts nested zips."""
+    """Extracts a zip file and its nested zip files to the specified directory.
+    Args:
+        zip_path: Path to the zip file to extract.
+        out_dir: Path to the output directory where files will be extracted.
+
+    Returns:
+        None
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, 'r') as z:
         z.extractall(out_dir)
@@ -18,7 +25,16 @@ def extract_zip(zip_path: Path, out_dir: Path):
         nz.unlink()
 
 def find_rasters(root: Path):
-    """Finds all .tif and .tiff files in a directory."""
+    """Finds all raster files in a directory and its subdirectories.
+    Searches recursively for raster image files with extensions .tif and .tiff
+    within the specified root directory.
+
+    Args:
+        root: Path to the root directory to search for raster files.
+
+    Returns:
+        A list of Path objects representing all found raster files.
+    """
     return list(root.rglob("*.tif")) + list(root.rglob("*.tiff"))
 
 def nice_date_from_text(text: str) -> str:

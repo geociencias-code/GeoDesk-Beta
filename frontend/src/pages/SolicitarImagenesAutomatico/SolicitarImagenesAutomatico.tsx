@@ -55,8 +55,8 @@ const SolicitarImagenesAutomatico: React.FC = () => {
 
 
       const payload = {
-        start_date: startDate,
-        end_date: endDate,
+        start_date: `${startDate}T00:00:00Z`,
+        end_date: `${endDate}T23:59:59Z`,
         project_name: projectName.trim(),
       };
 

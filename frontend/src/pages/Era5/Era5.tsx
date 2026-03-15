@@ -69,11 +69,11 @@ const Era5: React.FC = () => {
     if (hours.length === 0)
       return toast.error("Selecciona al menos una hora de captura para la descarga.");
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = new Date(`${startDate}T00:00:00`);
+    const end = new Date(`${endDate}T00:00:00`);
 
     if (start.getFullYear() !== end.getFullYear()) {
-      toast.error("Las fechas deben de estar dentro del mismo año")
+      toast.error(`Las fechas deben de estar dentro del mismo año. Años introducidos: ${start.getFullYear()} - ${end.getFullYear()}`);
       return;
     }
 

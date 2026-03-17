@@ -59,10 +59,11 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
     # 1. Guardar y abrir el archivo .nc de ERA5
     tmp_nc = tempfile.NamedTemporaryFile(delete=False, suffix=".nc")
     try:
+        from utils.era5_handler import safe_open_dataset
         content = await nc_file.read()
         tmp_nc.write(content)
         tmp_nc.close()
-        ds = xr.open_dataset(tmp_nc.name)
+        ds = safe_open_dataset(tmp_nc.name)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error leyendo archivo .nc: {e}")
 

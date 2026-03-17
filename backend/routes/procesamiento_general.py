@@ -348,6 +348,7 @@ async def apply_era5_filter(
     try:
         import xarray as xr
         from dateutil.parser import parse as parse_date
+        from utils.era5_handler import safe_open_dataset
         
         csv_path = Path(tempfile.gettempdir()) / f"temp_{csv_file.filename}"
         nc_path = Path(tempfile.gettempdir()) / f"temp_{nc_file.filename}"
@@ -358,7 +359,7 @@ async def apply_era5_filter(
             f.write(await nc_file.read())
             
         df = pd.read_csv(csv_path)
-        ds = xr.open_dataset(nc_path)
+        ds = safe_open_dataset(str(nc_path))
         
         pwv_var = 'tcwv' if 'tcwv' in ds else ('total_column_water_vapour' if 'total_column_water_vapour' in ds else None)
         t_var = 't2m' if 't2m' in ds else ('temperature' if 'temperature' in ds else None)

@@ -4,7 +4,7 @@ import { API_URL } from "../../services/api";
 import axios from "axios";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle } from "react-leaflet";
+import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle, CircleMarker, Tooltip } from "react-leaflet";
 import { EditControl } from "react-leaflet-draw";
 import "leaflet-draw/dist/leaflet.draw.css";
 
@@ -19,6 +19,17 @@ type BoundsType = {
   lon_max: number;
 };
 
+interface DeformationResults {
+  dias: number;
+  start_date?: string;
+  end_date?: string;
+  sample: Array<{
+    lat: number;
+    lon: number;
+    def: number;
+  }>;
+}
+
 type DrawEvent = {
   layer: L.Rectangle | L.Polygon | L.Circle | L.CircleMarker | L.Marker | L.Polyline;
 };
@@ -26,10 +37,12 @@ type DrawEvent = {
 function MapContent({
                       bounds,
                       drawnBox,
-                      setDrawnBox }:
+                      setDrawnBox,
+                      deformationData = [] }:
                     { bounds: BoundsType | null,
                       drawnBox: BoundsType | null,
-                      setDrawnBox: (box: BoundsType | null) => void
+                      setDrawnBox: (box: BoundsType | null) => void,
+                      deformationData?: Array<{ lat: number, lon: number, def: number }>
                     }) {
   const map = useMap();
 
@@ -93,6 +106,26 @@ function MapContent({
           pathOptions={{ color: '#ef4444', weight: 2, fillColor: '#ef4444', fillOpacity: 0.2 }} 
         />
       )}
+      {deformationData.map((pt, i) => {
+        return (
+          <CircleMarker 
+            key={i} 
+            center={[pt.lat, pt.lon]} 
+            radius={3}
+            pathOptions={{ 
+              fillColor: pt.def > 0 ? '#ff4b4b' : '#4caf50',
+              color: pt.def > 0 ? '#ff4b4b' : '#4caf50',
+              weight: 1,
+              opacity: 0.8,
+              fillOpacity: 0.6
+            }}
+          >
+            <Tooltip>
+              <span>Def: {pt.def.toFixed(2)} mm</span>
+            </Tooltip>
+          </CircleMarker>
+        );
+      })}
     </FeatureGroup>
   );
 }
@@ -107,9 +140,12 @@ export default function AlaskaProcesamiento() {
   const [croppedZipUrl, setCroppedZipUrl] = useState<string | null>(null);
   const [croppedFileName, setCroppedFileName] = useState<string>("");
 
-  const [velocityData, setVelocityData] = useState<Array<{ lat: number; lon: number; vel:number }>>([]);
-  const [velocityDias, setVelocityDias] = useState<number>(0);
-  const [velocityCsvUrl, setVelocityCsvUrl] = useState<string | null>(null);
+  const [results, setResults] = useState<DeformationResults | null>(null);
+  const [deformationCsvUrl, setDeformationCsvUrl] = useState<string | null>(null);
+  const [deformationCsvBlob, setDeformationCsvBlob] = useState<Blob | null>(null);
+  const [era5File, setEra5File] = useState<File | null>(null);
+  const [filterBusy, setFilterBusy] = useState(false);
+  const [isFiltered, setIsFiltered] = useState(false);
 
   const handleZipFile = async (file: File) => {
     setZipFile(file);
@@ -118,8 +154,11 @@ export default function AlaskaProcesamiento() {
     setBounds(null);
     setDrawnBox(null);
     setCroppedZipUrl(null);
-    setVelocityData([]);
-    setVelocityCsvUrl(null);
+    setResults(null);
+    setDeformationCsvUrl(null);
+    setDeformationCsvBlob(null);
+    setIsFiltered(false);
+    setEra5File(null);
 
     try {
       const formData = new FormData();
@@ -166,11 +205,11 @@ export default function AlaskaProcesamiento() {
     }
   };
 
-  const handleCalculateVelocity = async () => {
+  const handleCalculateDeformation = async () => {
     if (!croppedZipUrl || !zipFile) return;
 
     setBusy(true);
-    setMessage("Procesando fase y calculando vector de velocidad anual...");
+    setMessage("Procesando fase y calculando vector de deformación anual...");
     try {
       const blobRes = await fetch(croppedZipUrl);
       const blob = await blobRes.blob();
@@ -178,30 +217,72 @@ export default function AlaskaProcesamiento() {
       const formData = new FormData();
       formData.append("file", blob, `cropped_${zipFile.name}`);
 
-      const res = await axios.post(`${API_URL}/api/v1/alaska/velocity`, formData, { responseType: 'blob' });
+      const res = await axios.post(`${API_URL}/api/v1/alaska/velocity`, formData, { responseType: 'blob' }); // Endpoint still 'velocity'
 
       const zipInstance = await JSZip.loadAsync(res.data);
 
       const uiDataStr = await zipInstance.file("ui_data.json")?.async("string");
       if (uiDataStr) {
-        const uiData = JSON.parse(uiDataStr);
-        setVelocityData(uiData.sample);
-        setVelocityDias(uiData.dias);
+        const parsedData: DeformationResults = JSON.parse(uiDataStr);
+        setResults(parsedData);
       }
 
       const csvFile = Object.values(zipInstance.files).find(f => f.name.endsWith(".csv"));
       if (csvFile) {
         const csvBlob = await csvFile.async("blob");
-        setVelocityCsvUrl(window.URL.createObjectURL(csvBlob));
+        setDeformationCsvUrl(window.URL.createObjectURL(csvBlob));
+        setDeformationCsvBlob(csvBlob);
       }
       
-      setMessage("Velocidad calculada de manera exitosa.");
+      setMessage("Deformación calculada de manera exitosa.");
 
     } catch (error) {
       console.error(error);
-      setMessage("Ocurrió un error al calcular la velocidad.");
+      setMessage("Ocurrió un error al calcular la deformación.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleApplyFilter = async () => {
+    if (!deformationCsvBlob || !era5File || !results?.start_date || !results?.end_date) return;
+
+    setFilterBusy(true);
+    setMessage("Aplicando corrección ERA5 (esto puede tomar unos segundos)...");
+    
+    try {
+      const formData = new FormData();
+      formData.append("csv_file", deformationCsvBlob, `deformacion_${zipFile?.name.replace('.zip', '')}.csv`);
+      formData.append("nc_file", era5File, era5File.name);
+      formData.append("start_date", results.start_date);
+      formData.append("end_date", results.end_date);
+
+      const res = await axios.post(`${API_URL}/api/v1/alaska/apply_era5_filter`, formData, { responseType: 'blob' });
+      
+      const zipInstance = await JSZip.loadAsync(res.data);
+      
+      const uiDataFile = Object.values(zipInstance.files).find(f => f.name.endsWith("ui_data.json"));
+      if (uiDataFile) {
+        const uiDataStr = await uiDataFile.async("string");
+        const parsedData: DeformationResults = JSON.parse(uiDataStr);
+        setResults(parsedData);
+      }
+      
+      const csvFile = Object.values(zipInstance.files).find(f => f.name.endsWith(".csv"));
+      if (csvFile) {
+        const csvBlob = await csvFile.async("blob");
+        setDeformationCsvUrl(window.URL.createObjectURL(csvBlob));
+        setDeformationCsvBlob(csvBlob);
+      }
+      
+      setIsFiltered(true);
+      setMessage("✅ Filtro ERA5 aplicado con éxito.");
+      
+    } catch (error) {
+      console.error(error);
+      setMessage("❌ Ocurrió un error al aplicar el filtro ERA5.");
+    } finally {
+      setFilterBusy(false);
     }
   };
 
@@ -214,9 +295,9 @@ export default function AlaskaProcesamiento() {
         </div>
         <div>
           <h1 style={{ background: "linear-gradient(90deg, #8b5cf6, #3b82f6)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            Recorte y Velocidad SNAP
+            Recorte y Deformación SNAP
           </h1>
-          <p>Extrae regiones de interés de productos HyP3 y deriva modelos de velocidad</p>
+          <p>Extrae regiones de interés de productos HyP3 y deriva modelos de deformación</p>
         </div>
       </div>
 
@@ -304,12 +385,12 @@ export default function AlaskaProcesamiento() {
                   2. Estimación de Desplazamiento
                 </label>
                 <button
-                  onClick={handleCalculateVelocity}
+                  onClick={handleCalculateDeformation}
                   disabled={busy}
                   className="submit-btn"
                   style={{ background: "linear-gradient(135deg, #f59e0b, #ef4444)" }}
                 >
-                  {busy ? "Calculando..." : "Derivar Velocidad de Fase"}
+                  {busy ? "Calculando..." : "Derivar Deformación de Fase"}
                 </button>
               </div>
             )}
@@ -317,6 +398,33 @@ export default function AlaskaProcesamiento() {
             {message && (
               <div style={{ marginTop: "16px", padding: "12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", textAlign: "center", fontSize: "0.85rem", color: message.includes('❌') ? "#ffb4b4" : "var(--color-text-muted)" }}>
                 {message}
+              </div>
+            )}
+            
+            {results && deformationCsvBlob && !isFiltered && (
+              <div style={{ marginTop: "24px", padding: "12px", borderRadius: "8px", background: "rgba(59, 130, 246, 0.1)", border: "1px solid rgba(59, 130, 246, 0.3)" }}>
+                <label style={{ color: "#93c5fd", fontWeight: "bold", fontSize: "0.9rem", display: "block", marginBottom: "8px" }}>
+                  3. Corrección Atmosférica (Opcional)
+                </label>
+                <p style={{ fontSize: "0.8rem", color: "var(--color-text-muted)", marginBottom: "12px" }}>
+                  Sube un archivo ERA5 (.nc) que cubra el rango de fechas para mitigar errores por retardo troposférico (PWV y T).
+                </p>
+                
+                <input
+                  type="file"
+                  accept=".nc"
+                  onChange={e => setEra5File(e.target.files?.[0] || null)}
+                  style={{ marginBottom: "12px", fontSize: "0.8rem", color: "white" }}
+                />
+                
+                <button
+                  onClick={handleApplyFilter}
+                  disabled={filterBusy || !era5File}
+                  className="submit-btn"
+                  style={{ background: "linear-gradient(135deg, #10b981, #059669)", width: "100%", opacity: (!era5File || filterBusy) ? 0.5 : 1 }}
+                >
+                  {filterBusy ? "Aplicando Filtro..." : "Aplicar Filtro ERA5"}
+                </button>
               </div>
             )}
           </div>
@@ -332,18 +440,21 @@ export default function AlaskaProcesamiento() {
               zoomControl={false}
             >
               <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-              <MapContent bounds={bounds} drawnBox={drawnBox} setDrawnBox={setDrawnBox} />
+              <MapContent bounds={bounds} drawnBox={drawnBox} setDrawnBox={setDrawnBox} deformationData={results?.sample || []} />
             </MapContainer>
           </div>
 
-          {velocityData.length > 0 && (
+          {results && results.sample.length > 0 && (
              <div className="data-widget" style={{ padding: "20px", background: "var(--color-bg-card)", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.05)" }}>
                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                 <h3 style={{ fontSize: "1.1rem", color: "white", margin: 0 }}>Muestra de Velocidad (Δt = {velocityDias} días)</h3>
-                 {velocityCsvUrl && (
+                 <h3 style={{ fontSize: "1.1rem", color: "white", margin: 0 }}>
+                   Muestra de Deformación (Δt = {results.dias} días)
+                   {isFiltered && <span style={{ marginLeft: "10px", fontSize: "0.8rem", background: "#059669", padding: "2px 6px", borderRadius: "4px" }}>ERA5 Filtrado</span>}
+                 </h3>
+                 {deformationCsvUrl && (
                    <a
-                     href={velocityCsvUrl}
-                     download={`velocidad_${zipFile?.name.replace('.zip', '')}.csv`}
+                     href={deformationCsvUrl}
+                     download={isFiltered ? `filtered_deformacion_${zipFile?.name.replace('.zip', '')}.csv` : `deformacion_${zipFile?.name.replace('.zip', '')}.csv`}
                      style={{
                        background: "linear-gradient(135deg, #10b981, #059669)",
                        color: "white", padding: "8px 16px", borderRadius: "6px",
@@ -362,15 +473,15 @@ export default function AlaskaProcesamiento() {
                       <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.1)", color: "var(--color-text-muted)" }}>
                         <th style={{ padding: "8px" }}>Latitud</th>
                         <th style={{ padding: "8px" }}>Longitud</th>
-                        <th style={{ padding: "8px" }}>Velocidad Anual (mm/yr)</th>
+                        <th style={{ padding: "8px" }}>Deformación (mm)</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {velocityData.slice(0, 50).map((row, idx) => {
+                      {results.sample.slice(0, 50).map((row: { lat: number, lon: number, def: number }, idx: number) => {
                          // rojo es hundimiento, azul elevacion
                          let textColor = "white";
-                         if (row.vel < -5) textColor = "#fca5a5";
-                         else if (row.vel > 5) textColor = "#93c5fd";
+                         if (row.def < -5) textColor = "#fca5a5"; // subsidence (negative deformation)
+                         else if (row.def > 5) textColor = "#93c5fd"; // uplift (positive deformation)
                          else textColor = "#d1d5db";
 
                          return (
@@ -378,14 +489,14 @@ export default function AlaskaProcesamiento() {
                              <td style={{ padding: "8px", color: "var(--color-text-muted)" }}>{row.lat.toFixed(6)}</td>
                              <td style={{ padding: "8px", color: "var(--color-text-muted)" }}>{row.lon.toFixed(6)}</td>
                              <td style={{ padding: "8px", color: textColor, fontWeight: "bold" }}>
-                               {row.vel > 0 ? "+" : ""}{row.vel.toFixed(2)}
+                               {row.def > 0 ? "+" : ""}{row.def.toFixed(2)}
                              </td>
                            </tr>
                          );
                       })}
                     </tbody>
                   </table>
-                  {velocityData.length > 50 && (
+                  {results.sample.length > 50 && (
                      <div style={{ textAlign: "center", padding: "12px", color: "var(--color-text-muted)", fontSize: "0.8rem", fontStyle: "italic" }}>
                         Mostrando solo las primeras 50 observaciones. Exporta a Excel para ver el dataset completo.
                      </div>

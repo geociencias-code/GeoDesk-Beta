@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Query, HTTPException
+from fastapi import APIRouter, UploadFile, File, Query, HTTPException, Form
 import json
 from fastapi.responses import FileResponse
 import tempfile
@@ -149,7 +149,6 @@ async def procesar_zip(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error procesando ZIP: {str(e)}")
 
-
 @router.post("/api/v1/alaska/preview")
 async def preview_zip(file: UploadFile = File(...)):
     """ Extrae el bounding box del zip original de HyP3. """
@@ -157,7 +156,7 @@ async def preview_zip(file: UploadFile = File(...)):
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp.write(await file.read())
             tmp_path = Path(tmp.name)
-
+        
         temp_folder = Path(tempfile.mkdtemp(prefix="preview_"))
         extract_zip(tmp_path, temp_folder)
         tifs = find_rasters(temp_folder)
@@ -284,8 +283,8 @@ async def process_velocity(file: UploadFile = File(...)):
             
             disp_m = (fase_valid * 0.05546576) / (-4 * math.pi)
             
-            # Velocidad en mm/año
-            vel_mm_year = (disp_m / (diff_days / 365.25)) * 1000.0
+            # Deformación en mm
+            deformacion_mm = disp_m * 1000.0
 
             rows, cols = np.where(valid_mask)
             
@@ -305,7 +304,7 @@ async def process_velocity(file: UploadFile = File(...)):
                 "Longitud": np.round(lons, 6),
                 "Fase": np.round(fase_valid, 4),
                 "Desplazamiento_m": np.round(disp_m, 6),
-                "Velocidad_mm_año": np.round(vel_mm_year, 4)
+                "Deformacion_mm": np.round(deformacion_mm, 4)
             })
             df.to_csv(csv_path, index=False)
             
@@ -319,21 +318,131 @@ async def process_velocity(file: UploadFile = File(...)):
                 ui_sample.append({
                     "lat": float(lats[i]),
                     "lon": float(lons[i]),
-                    "vel": float(vel_mm_year[i])
+                    "def": float(deformacion_mm[i])
                 })
 
         # Comprimimos el CSV para enviarlo junto con el JSON
-        result_zip_path = Path(tempfile.gettempdir()) / f"velocity_result_{file.filename}.zip"
+        result_zip_path = Path(tempfile.gettempdir()) / f"deformation_result_{file.filename}.zip"
         with zipfile.ZipFile(result_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            zipf.write(csv_path, f"velocidad_{file.filename}.csv")
+            zipf.write(csv_path, f"deformacion_{file.filename}.csv")
             # También devolvemos el json de la UI como un archivo de config dentro del zip
             ui_json_path = Path(tempfile.gettempdir()) / "ui_data.json"
             with open(ui_json_path, 'w') as jf:
-                json.dump({"sample": ui_sample, "dias": diff_days}, jf)
+                json.dump({"sample": ui_sample, "dias": diff_days, "start_date": matches[0] if len(matches) > 0 else None, "end_date": matches[1] if len(matches) > 1 else None}, jf)
             zipf.write(ui_json_path, "ui_data.json")
 
-        return FileResponse(result_zip_path, media_type="application/zip", filename=f"velocity_{file.filename}.zip")
+        return FileResponse(result_zip_path, media_type="application/zip", filename=f"deformacion_{file.filename}.zip")
 
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/v1/alaska/apply_era5_filter")
+async def apply_era5_filter(
+    csv_file: UploadFile = File(...),
+    nc_file: UploadFile = File(...),
+    start_date: str = Form(...),
+    end_date: str = Form(...)
+):
+    try:
+        import xarray as xr
+        from dateutil.parser import parse as parse_date
+        
+        csv_path = Path(tempfile.gettempdir()) / f"temp_{csv_file.filename}"
+        nc_path = Path(tempfile.gettempdir()) / f"temp_{nc_file.filename}"
+        
+        with open(csv_path, "wb") as f:
+            f.write(await csv_file.read())
+        with open(nc_path, "wb") as f:
+            f.write(await nc_file.read())
+            
+        df = pd.read_csv(csv_path)
+        ds = xr.open_dataset(nc_path)
+        
+        pwv_var = 'tcwv' if 'tcwv' in ds else ('total_column_water_vapour' if 'total_column_water_vapour' in ds else None)
+        t_var = 't2m' if 't2m' in ds else ('temperature' if 'temperature' in ds else None)
+        time_var = 'time' if 'time' in ds else ('valid_time' if 'valid_time' in ds else None)
+        
+        if not pwv_var:
+            raise HTTPException(status_code=400, detail="El archivo ERA5 proporcionado no contiene la variable 'Vapor de agua en toda la columna' (tcwv o total_column_water_vapour). Es necesaria para el filtro.")
+        
+        if not t_var:
+            raise HTTPException(status_code=400, detail="El archivo ERA5 proporcionado no contiene la variable de 'Temperatura' (t2m o temperature). Es necesaria para el filtro.")
+            
+        if not time_var:
+            raise HTTPException(status_code=400, detail="El archivo ERA5 proporcionado no contiene una dimensión de tiempo válida (time o valid_time).")
+        
+        lon_var = [d for d in ds.dims if 'lon' in d.lower()][0]
+        lat_var = [d for d in ds.dims if 'lat' in d.lower()][0]
+        
+        if ds[lon_var].max() > 180:
+            ds = ds.assign_coords(**{lon_var: (((ds[lon_var] + 180) % 360) - 180)})
+            ds = ds.sortby(lon_var)
+            
+        start_dt = parse_date(start_date)
+        end_dt = parse_date(end_date)
+        
+        times = pd.to_datetime(ds[time_var].values)
+        
+        def nearest_idx(target_dt):
+            return np.argmin(np.abs(times - target_dt))
+            
+        idx_start = nearest_idx(start_dt)
+        idx_end = nearest_idx(end_dt)
+        
+        ds_start = ds.isel({time_var: idx_start})
+        ds_end = ds.isel({time_var: idx_end})
+        
+        lats_csv = xr.DataArray(df['Latitud'], dims='points')
+        lons_csv = xr.DataArray(df['Longitud'], dims='points')
+        
+        pwv_start = ds_start[pwv_var].interp({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
+        pwv_end = ds_end[pwv_var].interp({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
+        
+        t_start = ds_start[t_var].interp({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
+        t_end = ds_end[t_var].interp({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
+        
+        delta_pwv = np.nan_to_num(pwv_end - pwv_start, nan=0.0)
+        delta_t = np.nan_to_num(t_end - t_start, nan=0.0)
+        
+        error_tropo = 0.238 * delta_pwv + 0.035 * delta_t
+        
+        df['Deformacion_mm'] = df['Deformacion_mm'] - error_tropo
+        df['Deformacion_mm'] = df['Deformacion_mm'].round(4)
+        
+        out_csv_path = Path(tempfile.gettempdir()) / f"filtered_{csv_file.filename}"
+        df.to_csv(out_csv_path, index=False)
+        
+        step = max(1, len(df) // 100)
+        ui_sample = []
+        for i in range(0, len(df), step):
+            if len(ui_sample) >= 100:
+                break
+            ui_sample.append({
+                "lat": float(df.iloc[i]['Latitud']),
+                "lon": float(df.iloc[i]['Longitud']),
+                "def": float(df.iloc[i]['Deformacion_mm'])
+            })
+            
+        result_zip_path = Path(tempfile.gettempdir()) / f"filtered_result.zip"
+        with zipfile.ZipFile(result_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(out_csv_path, f"filtered_{csv_file.filename}")
+            
+            ui_json_path = Path(tempfile.gettempdir()) / "ui_data.json"
+            with open(ui_json_path, 'w') as jf:
+                json.dump({
+                    "sample": ui_sample, 
+                    "dias": (end_dt - start_dt).days, 
+                    "start_date": start_date, 
+                    "end_date": end_date
+                }, jf)
+            zipf.write(ui_json_path, "ui_data.json")
+            
+        ds.close()
+        
+        return FileResponse(result_zip_path, media_type="application/zip", filename="filtered_result.zip")
+        
     except Exception as e:
         import traceback
         traceback.print_exc()

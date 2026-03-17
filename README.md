@@ -213,10 +213,16 @@ Con **3 granules consecutivos** (A, B, C) se generan **2 pares**: (A↔B) y (B�
    - Usa la herramienta de dibujo en el mapa para trazar un rectángulo exacto sobre tu región de interés (por ejemplo, una ciudad entera).
    - Opcionalmente, usa el panel de **Coordenadas de Selección Exactas** para ingresar manualmente las coordenadas de Latitud/Longitud y lograr un control milimétrico (ideal para recortes reproducibles a través de múltiples fechas).
 3. **Recortar y Descargar:** Haz clic en "Recortar Selección" para enmascarar todos los archivos TIFF internos y descargar un nuevo archivo ZIP ligero enfocado solo en el área de estudio.
-4. **Calcular Velocidad de Fase:** Al tener un ráster recortado, haz clic en "Derivar Velocidad de Fase". El sistema traducirá los radianes del archivo `_unw_phase.tif` a desplazamiento físico en milímetros y luego a velocidad (mm/año), generando una tabla numérica con los resultados.
+4. **Calcular Velocidad de Fase:** Al tener un ráster recortado, haz clic en "Derivar Deformación de Fase". El sistema traducirá los radianes del archivo `_unw_phase.tif` a desplazamiento físico en milímetros, generando una tabla numérica con los resultados.
    - Puedes exportar el 100% de esta tabla a `.csv` para alimentar modelos matemáticos o de series de tiempo (SBAS).
+5. **Corrección Atmosférica (Filtro ERA5):**
+   - La señal de radar es susceptible a retrasos al cruzar la tropósfera, especialmente debido al vapor de agua. Estos retardos introducen errores en la estimación de la deformación.
+   - GeoDesk permite aplicar una mitigación de error troposférico cargando un archivo meteorológico `.nc` (Copernicus ERA5) que coincida espacial y temporalmente con el interferograma.
+   - **Física del Filtro:** El modelo utilizado para estimar el error por fase atmosférica se fundamenta en las variaciones del Vapor de Agua (PWV) y la Temperatura (T). Se aplica la siguiente corrección empírica derivada de Bevis & Brown (1987):
+     `Error (mm) = 0.238 * Δ(PWV) + 0.035 * Δ(T)`
+     Donde `Δ` representa el cambio temporal entre la fecha final y la fecha inicial del interferograma. Este error calculado se resta de la deformación InSAR observada, aislando mejor el verdadero movimiento del terreno.
 
-### 4. Comparativa ERA5/Sentinel
+### 4. Cálculo de Velocidad desde Excel
 
 **Propósito:** Unificar y correlacionar la información meteorológica (ERA5) sobre imágenes satelitales de alta resolución (Sentinel). Esta herramienta superpone variables climáticas (Temperatura) como mapas de visualización interactivos encima de los contornos base del radar.
 

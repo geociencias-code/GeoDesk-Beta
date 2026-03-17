@@ -18,27 +18,35 @@ router = APIRouter()
 
 OUT_DIR = Path("resultados_comparativa")
 
-def get_closest_time_index(ds_times, target_date: datetime):
-    # Encontrar la fecha más cercana en el xarray (solo por día)
+def get_closest_time_indices(ds_times, start_date: datetime, end_date: datetime):
+    # Encontrar índices que caigan dentro del rango
+    start_dt = np.datetime64(start_date.date())
+    end_dt = np.datetime64(end_date.date())
+    
+    indices = []
     for i, t in enumerate(ds_times):
-        # Manejar diferentes tipos de tiempo de numpy/pandas
         try:
-            # Si es np.datetime64
-            dt = np.datetime64(t).astype("datetime64[s]").astype(datetime)
-            if dt.date() == target_date.date():
-                return i
+            dt = np.datetime64(t).astype("datetime64[D]")
+            if start_dt <= dt <= end_dt:
+                indices.append(i)
         except Exception:
             pass
-    return None
+    return indices
 
-def extract_date_from_filename(filename: str) -> datetime:
+def extract_dates_from_filename(filename: str):
     import re
     # Buscar formato YYYYMMDD
-    m = re.search(r"(20\d{2})([01]\d)([0-3]\d)", filename)
-    if m:
+    matches = re.finditer(r"(20\d{2})([01]\d)([0-3]\d)", filename)
+    dates = []
+    for m in matches:
         y, mo, d = m.groups()
-        return datetime(int(y), int(mo), int(d))
-    return datetime.now()  # fallback
+        dates.append(datetime(int(y), int(mo), int(d)))
+    
+    if len(dates) >= 2:
+        return dates[0], dates[1]
+    elif len(dates) == 1:
+        return dates[0], dates[0]
+    return datetime.now(), datetime.now()  # fallback
 
 @router.post("/api/v1/era5_sentinel_comparative")
 async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List[UploadFile] = File(...)):
@@ -58,17 +66,15 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error leyendo archivo .nc: {e}")
 
-    # Verificar que exista t2m
-    if "t2m" not in ds and "temperature" not in ds and "air_temperature" not in ds:
+    tvar = next((v for v in ["t2m", "temperature", "air_temperature"] if v in ds), None)
+    if not tvar:
          raise HTTPException(status_code=400, detail="El archivo .nc no contiene variable de temperatura (t2m).")
          
-    tvar = "t2m" if "t2m" in ds else ("temperature" if "temperature" in ds else "air_temperature")
+    t10_var = next((v for v in ["skt", "skin_temperature", "t10m", "10m_temperature"] if v in ds), None)
+    tcwv_var = next((v for v in ["tcwv", "total_column_water_vapour"] if v in ds), None)
+    d2m_var = next((v for v in ["d2m", "2m_dewpoint_temperature"] if v in ds), None)
     
-    time_var = None
-    for cand in ["time", "valid_time", "times"]:
-        if cand in ds:
-            time_var = cand
-            break
+    time_var = next((cand for cand in ["time", "valid_time", "times"] if cand in ds), None)
             
     if not time_var:
         raise HTTPException(status_code=400, detail="El archivo .nc no tiene variable temporal 'time' ni 'valid_time'.")
@@ -99,11 +105,11 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 
                 layer_type = "Amplitud" if tif_path.name.endswith('amp.tif') else "Fase (Deformación)"
                 
-                # Extraer la fecha del nombre del archivo TIFF
-                tif_date = extract_date_from_filename(tif_path.name)
+                # Extraer la fechas de inicio y fin del nombre del archivo TIFF
+                start_date, end_date = extract_dates_from_filename(tif_path.name)
                 
-                # Encontrar el índice temporal correpondiente en ERA5
-                time_idx = get_closest_time_index(ds_times, tif_date)
+                # Encontrar el rango temporal correpondiente en ERA5
+                time_indices = get_closest_time_indices(ds_times, start_date, end_date)
                 
                 # Leer el raster de Sentinel
                 with rasterio.open(tif_path) as src:
@@ -115,41 +121,48 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                     else:
                         sentinel_norm = np.zeros_like(sentinel_data)
                 
-                # Extraer datos ERA5
-                if time_idx is not None:
-                    era5_slice = ds[tvar].isel({time_var: time_idx}).values.astype(np.float32)
-                else:
-                    # Fallback si no hay match de fecha, usar la media temporal
-                    era5_slice = ds[tvar].mean(dim=time_var).values.astype(np.float32)
-                
-                # Re-muestrear ERA5 usando coordenadas geográficas
                 target_shape = sentinel_data.shape
-                era5_reprojected = np.full(target_shape, np.nan, dtype=np.float32)
                 
-                # Calcular la transformación de ERA5
-                lons = ds[ds[tvar].dims[-1]].values  # Usualmente 'longitude'
-                lats = ds[ds[tvar].dims[-2]].values  # Usualmente 'latitude'
-                
-                dlon = (lons[-1] - lons[0]) / (len(lons) - 1) if len(lons) > 1 else 0.1
-                dlat = (lats[-1] - lats[0]) / (len(lats) - 1) if len(lats) > 1 else -0.1
-                
-                # Rasterio Affine: traslación al centro del píxel de la esquina superior izquierda
-                from rasterio.transform import Affine
-                from rasterio.warp import reproject, Resampling
-                
-                era5_transform = Affine.translation(lons[0] - dlon/2, lats[0] - dlat/2) * Affine.scale(dlon, dlat)
-                
-                reproject(
-                    source=era5_slice,
-                    destination=era5_reprojected,
-                    src_transform=era5_transform,
-                    src_crs="EPSG:4326",
-                    dst_transform=src.transform,
-                    dst_crs=src.crs,
-                    src_nodata=np.nan,
-                    dst_nodata=np.nan,
-                    resampling=Resampling.cubic
-                )
+                def extract_and_reproject(var_name):
+                    if not var_name or var_name not in ds:
+                        return None
+                    if time_indices:
+                        # Promedio temporal por píxel dentro del rango
+                        slice_data = ds[var_name].isel({time_var: time_indices}).mean(dim=time_var).values.astype(np.float32)
+                    else:
+                        # Fallback si no hay match de fecha, usar la media temporal de todo el dataset
+                        slice_data = ds[var_name].mean(dim=time_var).values.astype(np.float32)
+                        
+                    reprojected = np.full(target_shape, np.nan, dtype=np.float32)
+                    
+                    lons = ds[ds[var_name].dims[-1]].values
+                    lats = ds[ds[var_name].dims[-2]].values
+                    
+                    dlon = (lons[-1] - lons[0]) / (len(lons) - 1) if len(lons) > 1 else 0.1
+                    dlat = (lats[-1] - lats[0]) / (len(lats) - 1) if len(lats) > 1 else -0.1
+                    
+                    from rasterio.transform import Affine
+                    from rasterio.warp import reproject, Resampling
+                    
+                    transform = Affine.translation(lons[0] - dlon/2, lats[0] - dlat/2) * Affine.scale(dlon, dlat)
+                    
+                    reproject(
+                        source=slice_data,
+                        destination=reprojected,
+                        src_transform=transform,
+                        src_crs="EPSG:4326",
+                        dst_transform=src.transform,
+                        dst_crs=src.crs,
+                        src_nodata=np.nan,
+                        dst_nodata=np.nan,
+                        resampling=Resampling.cubic
+                    )
+                    return reprojected
+
+                era5_reprojected = extract_and_reproject(tvar)
+                t10_reprojected = extract_and_reproject(t10_var)
+                tcwv_reprojected = extract_and_reproject(tcwv_var)
+                d2m_reprojected = extract_and_reproject(d2m_var)
                 
                 # Crear máscara para las áreas sin datos (NaN o ceros en los bordes) en Sentinel
                 valid_mask = ~np.isnan(sentinel_data) & (sentinel_data != 0)
@@ -157,11 +170,10 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 # Aplicar la máscara a los datos ERA5 re-proyectados
                 era5_masked = np.where(valid_mask, era5_reprojected, np.nan)
                 
-                # Promedios y estatus
-                # Usamos np.nanmean ignorando advertencias de "Mean of empty slice" si resultara vacío
+                # Convertir a Celsius el promedio general para UI
                 with np.errstate(invalid='ignore'):
                     mean_val = np.nanmean(era5_reprojected)
-                temp_promedio = float(mean_val) if not np.isnan(mean_val) else 0.0
+                temp_promedio = float(mean_val) - 273.15 if not np.isnan(mean_val) else 0.0
                 disp_min = float(s_min)
                 disp_max = float(s_max)
                 
@@ -182,7 +194,7 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 cbar.set_label("ERA5 Temperature (K) / Heatmap Overlay", rotation=270, labelpad=15, color='white')
                 cbar.ax.yaxis.set_tick_params(color='white', labelcolor='white')
                 
-                plt.title(f"Alineación Espacio-Temporal:\nSentinel Base [Capa: {layer_type}] + ERA5 Heatmap ({tif_date.strftime('%Y-%m-%d')})", fontsize=14, fontweight='bold', color='white')
+                plt.title(f"Alineación Espacio-Temporal:\nSentinel Base [Capa: {layer_type}] + ERA5 Heatmap ({start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')})", fontsize=14, fontweight='bold', color='white')
                 plt.axis('off')
                 plt.tight_layout()
                 
@@ -214,17 +226,33 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                             
                         lon, lat = transform * (c, r)
                         
-                        # Un factor intuitivo: Asumiendo mayor temperatura genera mayor distorsión atmosférica (o al revés,
-                        # normalizado al 100% como un diferencial relativo a los valores del área cargada)
                         error_factor = ((e_val - era5_min_val) / temp_range) * 100.0
                         
-                        csv_data.append({
+                        # Calculate components for current pixel
+                        temp_10m = float(t10_reprojected[r, c]) - 273.15 if t10_reprojected is not None and not np.isnan(t10_reprojected[r, c]) else None
+                        tcwv = float(tcwv_reprojected[r, c]) if tcwv_reprojected is not None and not np.isnan(tcwv_reprojected[r, c]) else None
+                        
+                        # RH Calculation
+                        rh = None
+                        if d2m_reprojected is not None and not np.isnan(d2m_reprojected[r, c]):
+                            T_c = e_val - 273.15
+                            Td_c = float(d2m_reprojected[r, c]) - 273.15
+                            # Magnus formula for RH
+                            numerator = np.exp((17.625 * Td_c) / (243.04 + Td_c))
+                            denominator = np.exp((17.625 * T_c) / (243.04 + T_c))
+                            rh = 100.0 * (numerator / denominator)
+                        
+                        row_data = {
                             "Latitud": round(lat, 5),
                             "Longitud": round(lon, 5),
                             "Valor_Sentinel": round(float(s_val), 4),
-                            "Temp_ERA5_(K)": round(float(e_val), 2),
+                            "Temp_2m_ERA5_(C)": round(float(e_val - 273.15), 2),
+                            "Temp_10m_ERA5_(C)": round(temp_10m, 2) if temp_10m is not None else "N/A",
+                            "Vapor_Agua_(mm)": round(tcwv, 2) if tcwv is not None else "N/A",
+                            "Humedad_Relativa_(%)": round(rh, 2) if rh is not None else "N/A",
                             "Factor_Error_(%)": round(float(error_factor), 2)
-                        })
+                        }
+                        csv_data.append(row_data)
                 
                 df = pd.DataFrame(csv_data)
                 csv_filename = f"datos_{len(resultados)}.csv"
@@ -234,7 +262,7 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 data_preview = df.head(100).to_dict('records')
                 
                 resultados.append({
-                    "fecha": tif_date.strftime("%Y-%m-%d"),
+                    "fecha": f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
                     "disp_min": disp_min,
                     "disp_max": disp_max,
                     "temp_promedio": temp_promedio,

@@ -143,7 +143,8 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
               { id: "solicitud-imagenes", label: "Solicitud manual" },
               { id: "solicitud-automatico", label: "Solicitud automático" },
               { id: "descarga-imagenes", label: "Descarga de imágenes" },
-              { id: "procesamiento-imagenes", label: "Procesamiento (SNAP)" },
+              { id: "procesamiento-imagenes", label: "Recorte y deformación" },
+              { id: "alaska-velocity-excel", label: "Velocidad desde Excel" },
             ]}
             activeSection={activeSection}
           />

@@ -15,7 +15,10 @@ type AnalysisResult = {
     Latitud: number;
     Longitud: number;
     Valor_Sentinel: number;
-    "Temp_ERA5_(K)": number;
+    "Temp_2m_ERA5_(C)": number | string;
+    "Temp_10m_ERA5_(C)": number | string;
+    "Vapor_Agua_(mm)": number | string;
+    "Humedad_Relativa_(%)": number | string;
     "Factor_Error_(%)": number;
   }>;
 };
@@ -287,8 +290,11 @@ export default function Era5SentinelComparative() {
                         <tr>
                           <th>Latitud</th>
                           <th>Longitud</th>
-                          <th style={{textAlign: 'center'}}>Temp ERA5 (K)</th>
                           <th style={{textAlign: 'center'}}>Sentinel (Base)</th>
+                          <th style={{textAlign: 'center'}}>Temp 2m (°C)</th>
+                          <th style={{textAlign: 'center'}}>Temp 10m (°C)</th>
+                          <th style={{textAlign: 'center'}}>Vapor (mm)</th>
+                          <th style={{textAlign: 'center'}}>HR (%)</th>
                           <th style={{textAlign: 'right'}}>Factor Error (%)</th>
                         </tr>
                       </thead>
@@ -297,10 +303,13 @@ export default function Era5SentinelComparative() {
                           <tr key={i}>
                             <td>{row.Latitud.toFixed(5)}</td>
                             <td>{row.Longitud.toFixed(5)}</td>
-                            <td style={{textAlign: 'center'}}>{row["Temp_ERA5_(K)"].toFixed(2)}</td>
-                            <td style={{textAlign: 'center', color: 'var(--color-text-muted)'}}>{row.Valor_Sentinel.toFixed(4)}</td>
-                            <td className="error-col" style={{ color: `hsl(${120 - (row["Factor_Error_(%)"] * 1.2)}, 70%, 45%)` }}>
-                              {row["Factor_Error_(%)"].toFixed(2)}%
+                            <td style={{textAlign: 'center', color: 'var(--color-text-muted)'}}>{typeof row.Valor_Sentinel === 'number' ? row.Valor_Sentinel.toFixed(4) : row.Valor_Sentinel}</td>
+                            <td style={{textAlign: 'center'}}>{typeof row["Temp_2m_ERA5_(C)"] === 'number' ? row["Temp_2m_ERA5_(C)"].toFixed(2) : row["Temp_2m_ERA5_(C)"]}</td>
+                            <td style={{textAlign: 'center', color: 'var(--color-text-muted)'}}>{typeof row["Temp_10m_ERA5_(C)"] === 'number' ? row["Temp_10m_ERA5_(C)"].toFixed(2) : row["Temp_10m_ERA5_(C)"]}</td>
+                            <td style={{textAlign: 'center', color: 'var(--color-text-muted)'}}>{typeof row["Vapor_Agua_(mm)"] === 'number' ? row["Vapor_Agua_(mm)"].toFixed(2) : row["Vapor_Agua_(mm)"]}</td>
+                            <td style={{textAlign: 'center', color: 'var(--color-text-muted)'}}>{typeof row["Humedad_Relativa_(%)"] === 'number' ? row["Humedad_Relativa_(%)"].toFixed(2) : row["Humedad_Relativa_(%)"]}</td>
+                            <td className="error-col" style={{ color: `hsl(${120 - ((typeof row["Factor_Error_(%)"] === 'number' ? row["Factor_Error_(%)"] : 0) * 1.2)}, 70%, 45%)` }}>
+                              {typeof row["Factor_Error_(%)"] === 'number' ? row["Factor_Error_(%)"].toFixed(2) : row["Factor_Error_(%)"]}%
                             </td>
                           </tr>
                         ))}

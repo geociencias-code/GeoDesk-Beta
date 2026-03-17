@@ -6,6 +6,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 RUN npm ci
+# Install react-globe.gl explicitly as requested to avoid issues with package.json
+RUN npm install react-globe.gl three
 
 COPY . .
 

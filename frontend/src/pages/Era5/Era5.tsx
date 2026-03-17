@@ -94,7 +94,12 @@ const Era5: React.FC = () => {
       const days = Array.from(daySet);
 
       const body = {
-        variable: ["2m_temperature"], //puede que convierta esto a un selected
+        variable: [
+          "2m_temperature",
+          "skin_temperature",
+          "total_column_water_vapour",
+          "2m_dewpoint_temperature"
+        ],
         year: [year],
         month: months,
         day: days,

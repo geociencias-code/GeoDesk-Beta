@@ -9,6 +9,7 @@ import DownloadFiles from "./pages/Alaska/DownloadFiles";
 import Alaska_procesamiento from "./pages/AlaskaProcessing/AlaskaProcessing";
 import SolicitarImagenesAutomatico from "./pages/SolicitarImagenesAutomatico/SolicitarImagenesAutomatico";
 import Era5SentinelComparative from "./pages/Era5SentinelComparative/Era5SentinelComparative";
+import AlaskaVelocityExcel from "./pages/AlaskaVelocityExcel";
 
 import Inicio from "./pages/Home/Home";
 import api, { API_URL } from "./services/api";
@@ -158,6 +159,13 @@ const App: React.FC = () => {
         return (
           <div>
             <Alaska_procesamiento />
+          </div>
+        );
+
+      case "alaska-velocity-excel":
+        return (
+          <div>
+            <AlaskaVelocityExcel />
           </div>
         );
 

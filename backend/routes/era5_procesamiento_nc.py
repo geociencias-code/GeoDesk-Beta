@@ -53,7 +53,8 @@ async def procesar_nc(file: UploadFile = File(...)):
         # ----------------------------
         # 3. Cargar con xarray
         # ----------------------------
-        dataset = xr.open_dataset(ruta_local)
+        from utils.era5_handler import safe_open_dataset
+        dataset = safe_open_dataset(str(ruta_local))
 
         # Buscar variable principal (t2m o similar)
         var_nombre = None

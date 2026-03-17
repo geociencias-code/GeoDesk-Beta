@@ -50,8 +50,8 @@ def download_era5(req: ERA5Request):
             "day": req.day,
             "time": req.time,
             "area": req.area,
-            "data_format": "netcdf",
-            "download_format": "unarchived"
+            "product_type": "reanalysis",
+            "format": "netcdf",
         }
 
         try:

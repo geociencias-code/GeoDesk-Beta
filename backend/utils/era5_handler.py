@@ -1,6 +1,3 @@
-"""
-Utilidades para manejar archivos ERA5 en diferentes formatos
-"""
 import tempfile
 import os
 import xarray as xr

@@ -167,15 +167,37 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
       {scenes.length > 0 && (
         <>
           <div style={{ marginBottom: 8, display: "flex", gap: 8 }}>
-            <button onClick={primaryAction} disabled={loading === "download"}>
+            <button onClick={primaryAction} disabled={loading !== null}>
               {loading === "download" ? "Procesando…" :
                 (hasDownloadURLs ? "Descargar seleccionadas" : "Procesar seleccionadas (HyP3)")}
             </button>
-            <button onClick={primaryAll} disabled={loading === "download"}>
+            <button onClick={primaryAll} disabled={loading !== null}>
               {loading === "download" ? "Procesando…" :
                 (hasDownloadURLs ? "Descargar todas" : "Procesar todas (HyP3)")}
             </button>
           </div>
+
+          {loading === "download" && (
+            <div style={{ marginTop: "1rem", marginBottom: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                <span style={{ fontSize: "0.9rem", color: "#ccc" }}>
+                  {hasDownloadURLs ? "Descargando escenas en el servidor..." : "Enviando procesamiento a HyP3..."}
+                </span>
+                <span style={{ fontSize: "0.9rem", color: "#ccc" }}>Procesando...</span>
+              </div>
+              <div style={{ width: "100%", height: "8px", backgroundColor: "#333", borderRadius: "4px", overflow: "hidden" }}>
+                <div 
+                  style={{ 
+                    height: "100%", 
+                    backgroundColor: "#007bff", 
+                    width: "100%",
+                    animation: "indeterminate 1.5s infinite linear",
+                    transformOrigin: "left"
+                  }} 
+                />
+              </div>
+            </div>
+          )}
 
           <div className="table-responsive">
             <table className="modern-table">

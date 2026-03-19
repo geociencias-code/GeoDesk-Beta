@@ -1,8 +1,10 @@
 import React, { useState } from "react";
 import { MapContainer, TileLayer, Rectangle, useMapEvents } from "react-leaflet";
 import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { API_URL } from "../../services/api";
 import { toast } from "sonner";
+import axios from "axios";
 import { Loader2 } from "lucide-react";
 
 interface AreaCoords {
@@ -16,8 +18,9 @@ const Era5: React.FC = () => {
   const [area, setArea] = useState<AreaCoords | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [hours, setHours] = useState<string[]>(["00:00", "12:00"]);
+  const [hours, setHours] = useState<string[]>([]);
   const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
 
   const availableHours = ["00:00", "06:00", "12:00", "18:00"];
 
@@ -78,6 +81,7 @@ const Era5: React.FC = () => {
     }
 
     setDownloading(true);
+    setDownloadProgress(0);
 
     try {
       const year = start.getFullYear().toString();
@@ -109,18 +113,20 @@ const Era5: React.FC = () => {
         format: "netcdf",
       };
 
-      const response = await fetch(
-        `${API_URL}/api/era5/download`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      );
+      const response = await axios.post(`${API_URL}/api/era5/download`, body, {
+        responseType: "blob",
+        onDownloadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setDownloadProgress(percent);
+          } else {
+            // Indeterminate
+            setDownloadProgress(null);
+          }
+        },
+      });
 
-      if (!response.ok) throw new Error("Error al procesar la solicitud.");
-
-      const blob = await response.blob();
+      const blob = response.data;
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -131,11 +137,12 @@ const Era5: React.FC = () => {
       window.URL.revokeObjectURL(url);
 
       toast.success("Archivo descargado correctamente.");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error("Error al descargar el archivo. Intenta nuevamente.");
+      toast.error(err.response?.data?.detail || "Error al descargar el archivo. Intenta nuevamente.");
     } finally {
       setDownloading(false);
+      setDownloadProgress(null);
     }
   };
 
@@ -234,6 +241,32 @@ const Era5: React.FC = () => {
               "Iniciar descarga"
             )}
           </button>
+          
+          {downloading && (
+            <div style={{ marginTop: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                <span>Descargando archivo ERA5...</span>
+                <span>{downloadProgress !== null ? `${downloadProgress}%` : "Iniciando..."}</span>
+              </div>
+              <div style={{ width: "100%", height: "8px", backgroundColor: "#333", borderRadius: "4px", overflow: "hidden" }}>
+                <div 
+                  style={{ 
+                    height: "100%", 
+                    backgroundColor: "#007bff", 
+                    width: downloadProgress !== null ? `${downloadProgress}%` : "100%",
+                    transition: "width 0.3s ease",
+                    animation: downloadProgress === null ? "indeterminate 1.5s infinite linear" : "none"
+                  }} 
+                />
+              </div>
+              <style>{`
+                @keyframes indeterminate {
+                  0% { transform: translateX(-100%); }
+                  100% { transform: translateX(100%); }
+                }
+              `}</style>
+            </div>
+          )}
         </div>
 
         <div className="results-panel">

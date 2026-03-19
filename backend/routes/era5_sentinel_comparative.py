@@ -168,8 +168,8 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 # Crear máscara para las áreas sin datos (NaN o ceros en los bordes) en Sentinel
                 valid_mask = ~np.isnan(sentinel_data) & (sentinel_data != 0)
                 
-                # Aplicar la máscara a los datos ERA5 re-proyectados
-                era5_masked = np.where(valid_mask, era5_reprojected, np.nan)
+                # Aplicar la máscara a los datos ERA5 re-proyectados y convertir a Celsius
+                era5_masked_celsius = np.where(valid_mask, era5_reprojected - 273.15, np.nan)
                 
                 # Convertir a Celsius el promedio general para UI
                 with np.errstate(invalid='ignore'):
@@ -188,11 +188,11 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 
                 # Superponer ERA5 como mapa de calor (Heatmap) con alpha
                 # Al tener NaNs, matplotlib no pintará esas esquinas/cuadros
-                heatmap = plt.imshow(era5_masked, cmap='jet', alpha=0.4, extent=[0, target_shape[1], 0, target_shape[0]])
+                heatmap = plt.imshow(era5_masked_celsius, cmap='jet', alpha=0.4, extent=[0, target_shape[1], 0, target_shape[0]])
                 
                 # Agregar barra de color para la temperatura
                 cbar = plt.colorbar(heatmap, fraction=0.046, pad=0.04)
-                cbar.set_label("ERA5 Temperature (K) / Heatmap Overlay", rotation=270, labelpad=15, color='white')
+                cbar.set_label("ERA5 Temperature (°C) / Heatmap Overlay", rotation=270, labelpad=15, color='white')
                 cbar.ax.yaxis.set_tick_params(color='white', labelcolor='white')
                 
                 plt.title(f"Alineación Espacio-Temporal:\nSentinel Base [Capa: {layer_type}] + ERA5 Heatmap ({start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')})", fontsize=14, fontweight='bold', color='white')
@@ -213,19 +213,23 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                 csv_data = []
                 transform = src.transform
                 
-                era5_min_val = np.nanmin(era5_masked)
-                era5_max_val = np.nanmax(era5_masked)
+                from pyproj import Transformer
+                transformer = Transformer.from_crs(src.crs, "EPSG:4326", always_xy=True)
+                
+                era5_min_val = np.nanmin(era5_masked_celsius)
+                era5_max_val = np.nanmax(era5_masked_celsius)
                 temp_range = max(1e-5, float(era5_max_val - era5_min_val))
                 
                 for r in downsample_y:
                     for c in downsample_x:
                         s_val = sentinel_data[r, c]
-                        e_val = era5_masked[r, c]
+                        e_val = era5_masked_celsius[r, c]
                         
                         if np.isnan(e_val) or np.isnan(s_val) or s_val == 0:
                             continue
                             
-                        lon, lat = transform * (c, r)
+                        x_coord, y_coord = transform * (c, r)
+                        lon, lat = transformer.transform(x_coord, y_coord)
                         
                         error_factor = ((e_val - era5_min_val) / temp_range) * 100.0
                         
@@ -236,7 +240,7 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                         # RH Calculation
                         rh = None
                         if d2m_reprojected is not None and not np.isnan(d2m_reprojected[r, c]):
-                            T_c = e_val - 273.15
+                            T_c = e_val
                             Td_c = float(d2m_reprojected[r, c]) - 273.15
                             # Magnus formula for RH
                             numerator = np.exp((17.625 * Td_c) / (243.04 + Td_c))
@@ -247,7 +251,7 @@ async def process_era5_sentinel(nc_file: UploadFile = File(...), zip_files: List
                             "Latitud": round(lat, 5),
                             "Longitud": round(lon, 5),
                             "Valor_Sentinel": round(float(s_val), 4),
-                            "Temp_2m_ERA5_(C)": round(float(e_val - 273.15), 2),
+                            "Temp_2m_ERA5_(C)": round(float(e_val), 2),
                             "Temp_10m_ERA5_(C)": round(temp_10m, 2) if temp_10m is not None else "N/A",
                             "Vapor_Agua_(mm)": round(tcwv, 2) if tcwv is not None else "N/A",
                             "Humedad_Relativa_(%)": round(rh, 2) if rh is not None else "N/A",

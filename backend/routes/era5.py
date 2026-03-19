@@ -20,7 +20,7 @@ class ERA5Request(BaseModel):
     day: list[str]
     time: list[str]
     area: list[float]
-    dataset: str = "reanalysis-era5-land"
+    dataset: str = "reanalysis-era5-single-levels"
     format: str = "netcdf"
 
 
@@ -34,7 +34,7 @@ def download_era5(req: ERA5Request):
             if h not in VALID_HOURS:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Hora inválida para ERA5-Land: {h}. Horas válidas: {VALID_HOURS}"
+                    detail=f"Hora inválida para ERA5: {h}. Horas válidas seleccionables: {VALID_HOURS}"
                 )
 
         c = cdsapi.Client(url=ERA5_URL, key=ERA5_KEY, verify=True, quiet=False)

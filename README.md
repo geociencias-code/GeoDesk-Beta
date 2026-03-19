@@ -1,257 +1,192 @@
 # GeoDesk
 
-Plataforma de geoprocesamiento para análisis de imágenes satelitales Sentinel-1 mediante interferometría SAR (InSAR), extracción de datos meteorológicos ERA5 y visualización de deformación terrestre.
+Plataforma de geoprocesamiento para análisis interferométrico de imágenes Sentinel-1, corrección atmosférica con datos ERA5 y visualización de deformación terrestre.
 
 ---
 
 ## Tabla de Contenidos
 
-1. [Conceptos Fundamentales](#conceptos-fundamentales)
-2. [Flujo Completo de la Aplicación](#flujo-completo-de-la-aplicación)
-3. [Guía de Uso por Sección](#guía-de-uso-por-sección)
-4. [Instalación y Ejecución](#instalación-y-ejecución)
+1. [Tecnologías de base](#tecnologías-de-base)
+2. [Interferometría SAR (InSAR)](#interferometría-sar-insar)
+3. [HyP3 — Procesamiento en la nube](#hyp3--procesamiento-en-la-nube)
+4. [ERA5 y el Filtro Atmosférico](#era5-y-el-filtro-atmosférico)
+5. [Parámetros de adquisición fijos](#parámetros-de-adquisición-fijos)
+6. [Instalación](#instalación)
 
 ---
 
-## Conceptos Fundamentales
+## Tecnologías de base
 
-### ¿Qué es un Granule?
+### Sentinel-1
 
-Un **granule** es la unidad mínima de datos satelitales. Representa una imagen SAR (Radar de Apertura Sintética) capturada por el satélite Sentinel-1 en un momento y lugar específicos.
+**Sentinel-1** es una constelación de satélites de la ESA (Agencia Espacial Europea) equipados con radar SAR (Synthetic Aperture Radar) en banda C (longitud de onda ≈ 5.55 cm). A diferencia de los sensores ópticos, opera independientemente de la luz solar y penetra nubes, lo que garantiza adquisiciones regulares y predecibles.
 
-Cada granule contiene:
+La constelación está formada por **Sentinel-1A** (lanzado en 2014) y **Sentinel-1B** (lanzado en 2016, actualmente inactivo). Cada satélite recorre su órbita completa en 12 días, de modo que el mismo punto de la Tierra es observado con la misma geometría radar cada 12 días desde una misma plataforma.
 
-- Imagen radar en formato SLC (Single Look Complex)
-- Metadatos (fecha, coordenadas, órbita, polarización)
-- Cobertura de aproximadamente 250 km × 100 km
-
-### ¿Por qué se necesitan PARES de granules?
-
-La técnica **InSAR (Interferometría SAR)** requiere **dos imágenes** del mismo lugar tomadas en fechas diferentes para detectar cambios en la superficie terrestre.
-
-```
-Granule 1 (Fecha A)     Granule 2 (Fecha B)
-        ↓                       ↓
-    [Imagen SAR]           [Imagen SAR]
-              ↘           ↙
-              COMPARACIÓN
-                   ↓
-           INTERFEROGRAMA
-        (diferencia de fase)
-                   ↓
-        MAPA DE DEFORMACIÓN
-```
-
-**Ejemplo práctico:**
-
-- Granule A: 1 de enero 2025
-- Granule B: 13 de enero 2025 (12 días después, ciclo orbital de Sentinel-1)
-- Resultado: Interferograma que muestra movimientos del terreno entre esas fechas
-
-Con **3 granules consecutivos** (A, B, C) se generan **2 pares**: (A↔B) y (B↔C).
-
-### Requisitos para formar un par válido
-
-| Criterio                     | Razón                             |
-| ---------------------------- | --------------------------------- |
-| Misma órbita (ruta/marco)    | Geometría de adquisición idéntica |
-| Intervalo ≤ 12 días          | Evitar decorrelación temporal     |
-| Misma plataforma (S1A o S1B) | Consistencia del sensor           |
+Las imágenes utilizadas en GeoDesk son de nivel **SLC (Single Look Complex)**: contienen la amplitud y la fase de la señal radar, siendo la fase el dato fundamental para la interferometría.
 
 ---
 
-## ¿Qué hace HyP3?
+### Interferometría SAR (InSAR)
 
-**HyP3 (Hybrid Pluggable Processing Pipeline)** es un servicio de Alaska Satellite Facility que procesa pares de granules en la nube. Realiza todo el procesamiento InSAR automáticamente.
+La **interferometría SAR** es una técnica geodésica que mide cambios submétricos en la distancia entre el satélite y la superficie terrestre comparando la **fase** de dos imágenes radar adquiridas en pasadas distintas.
 
-### Pasos que ejecuta HyP3 (INSAR_GAMMA):
+#### Principio físico
+
+Cuando el satélite emite un pulso de microondas, el eco vuelve con un retardo proporcional a la distancia. Ese retardo se codifica como **fase** φ (un valor cíclico entre −π y +π). Al restar la fase de dos imágenes del mismo lugar tomadas en fechas diferentes, se obtiene un **interferograma**: una imagen en la que los patrones de franjas (∼5.6 cm por franja) revelan cambios en la línea de visión del radar (LOS, Line-of-Sight).
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  1. CORREGISTRO                                             │
-│     → Alinear las dos imágenes con precisión subpixel       │
-├─────────────────────────────────────────────────────────────┤
-│  2. GENERACIÓN DE INTERFEROGRAMA                            │
-│     → Calcular la diferencia de fase entre ambas imágenes   │
-├─────────────────────────────────────────────────────────────┤
-│  3. FILTRADO (Goldstein)                                    │
-│     → Reducir el ruido speckle característico del radar     │
-├─────────────────────────────────────────────────────────────┤
-│  4. DESENROLLADO DE FASE (Phase Unwrapping)                 │
-│     → Convertir fase cíclica (-π a +π) a valores continuos  │
-├─────────────────────────────────────────────────────────────┤
-│  5. GEOCODIFICACIÓN                                         │
-│     → Proyectar a coordenadas geográficas (lat/lon)         │
-├─────────────────────────────────────────────────────────────┤
-│  6. GENERACIÓN DE DEM                                       │
-│     → Modelo Digital de Elevación del área                  │
-├─────────────────────────────────────────────────────────────┤
-│  7. CÁLCULO DE COHERENCIA                                   │
-│     → Medir calidad/confiabilidad de la señal (0-1)         │
-└─────────────────────────────────────────────────────────────┘
+φ_interferograma = φ₂ − φ₁ = (4π / λ) · Δr + φ_topo + φ_atm + φ_ruido
 ```
 
-### Productos de salida de HyP3
+Donde:
+- **λ** = longitud de onda del radar (0.05546576 m para Sentinel-1 banda C)
+- **Δr** = desplazamiento real de la superficie en la dirección LOS
+- **φ_topo** = contribución topográfica (removida con un DEM)
+- **φ_atm** = error introducido por la atmósfera (principalmente vapor de agua)
+- **φ_ruido** = decorrelación temporal y espacial
 
-| Archivo            | Descripción                  | Uso                            |
-| ------------------ | ---------------------------- | ------------------------------ |
-| `*_unw_phase.tif`  | Fase desenrollada            | Indica deformación del terreno |
-| `*_corr.tif`       | Coherencia (0-1)             | Calidad de la medición         |
-| `*_amp.tif`        | Amplitud                     | Intensidad de la señal radar   |
-| `*_dem.tif`        | Modelo de Elevación          | Topografía del área            |
-| `*_lv_phi.tif`     | Vector de vista (azimut)     | Geometría de observación       |
-| `*_lv_theta.tif`   | Vector de vista (incidencia) | Geometría de observación       |
-| `*_water_mask.tif` | Máscara de agua              | Identifica cuerpos de agua     |
+Una vez eliminada la contribución topográfica y desenrollada la fase (conversión de valores cíclicos −π/+π a valores continuos acumulativos), el desplazamiento en milímetros se obtiene como:
+
+```
+Desplazamiento (m) = (fase_desenrollada × λ) / (−4π)
+Deformación (mm)   = Desplazamiento (m) × 1000
+```
+
+Este es exactamente el cálculo implementado en GeoDesk (`λ = 0.05546576 m`).
+
+#### ¿Por qué pares de imágenes?
+
+El interferograma requiere dos escenas: una **imagen de referencia (master)** y una **imagen secundaria (slave)**. Las escenas deben compartir la misma geometría de adquisición (misma órbita relativa y marco) para que los píxeles se correspondan espacialmente. Si el intervalo temporal es demasiado largo, la vegetación y otras superficies cambian suficientemente para destruir la correlación de fase (**decorrelación temporal**). Por eso Sentinel-1 opera con ciclos de 12 días: es el compromiso óptimo entre cobertura temporal y coherencia de la señal.
+
+#### Coherencia
+
+La **coherencia** (0 a 1) mide la estabilidad de la fase entre ambas imágenes. Un valor cercano a 1 indica que la superficie no cambió entre adquisiciones (suelos desnudos, estructuras urbanas). Valores bajos indican zonas que han cambiado o son inherentemente inestables (agua, vegetación densa). La coherencia se usa como máscara de calidad: píxeles con coherencia baja se descartan del análisis de deformación.
 
 ---
 
-## Flujo Completo de la Aplicación
+## HyP3 — Procesamiento en la nube
+
+**HyP3 (Hybrid Pluggable Processing Pipeline)** es el servicio de procesamiento en la nube de **Alaska Satellite Facility (ASF)**. Ejecuta el flujo completo de InSAR sobre pares de granules Sentinel-1 usando el procesador **GAMMA** sin requerir infraestructura local.
+
+### Pipeline INSAR_GAMMA
+
+| Paso | Operación | Descripción |
+|------|-----------|-------------|
+| 1 | Corregistro | Alinea ambas imágenes SLC con precisión subpíxel usando la efemérides orbital y el DEM |
+| 2 | Generación de interferograma | Multiplica una imagen por el conjugado complejo de la otra → diferencia de fase |
+| 3 | Filtrado Goldstein | Reduce el ruido speckle preservando la señal de deformación |
+| 4 | Desenrollado de fase | Convierte la fase cíclica (−π, +π) a valores continuos acumulativos |
+| 5 | Geocodificación | Proyecta los resultados al sistema de coordenadas WGS84 (EPSG:4326) |
+| 6 | Generación de DEM | Incluye el Modelo Digital de Elevación utilizado para remover la topografía |
+| 7 | Cálculo de coherencia | Genera el mapa de calidad de la señal (0–1) |
+
+### Productos de salida
+
+| Archivo | Contenido | Uso en GeoDesk |
+|---------|-----------|----------------|
+| `*_unw_phase.tif` | Fase desenrollada (radianes) | Base para calcular deformación en mm |
+| `*_corr.tif` | Coherencia (0–1) | Máscara de calidad |
+| `*_amp.tif` | Amplitud radar | Referencia geométrica |
+| `*_dem.tif` | Modelo Digital de Elevación | Contexto topográfico |
+| `*_lv_phi.tif` / `*_lv_theta.tif` | Vectores LOS (azimut e incidencia) | Geometría de observación |
+| `*_water_mask.tif` | Máscara de cuerpos de agua | Exclusión de zonas sin coherencia |
+
+GeoDesk recibe estos ZIP directamente desde HyP3, extrae el `*_unw_phase.tif`, aplica la conversión de fase a milímetros y exporta los resultados en CSV georreferenciado con columnas: `Latitud`, `Longitud`, `Fase`, `Desplazamiento_m`, `Deformacion_mm`.
+
+---
+
+## ERA5 y el Filtro Atmosférico
+
+### ¿Qué es ERA5?
+
+**ERA5** es el reanálisis atmosférico global de quinta generación del **Centro Europeo de Previsión Meteorológica a Plazo Medio (ECMWF)**, distribuido gratuitamente a través del **Climate Data Store (CDS) de Copernicus**. Combina modelos numéricos de predicción del tiempo con millones de observaciones reales para generar una representación coherente del estado de la atmósfera desde 1940 hasta el presente.
+
+GeoDesk utiliza ERA5 en resolución estándar (~31 km) con los siguientes productos:
+- **`tcwv`** — Total Column Water Vapour (Vapor de Agua en Columna Total), en kg/m²
+- **`t2m`** — Temperatura del aire a 2 metros de altura, en Kelvin
+
+### El problema: retardo troposférico
+
+La señal radar de Sentinel-1 viaja dos veces a través de la troposfera (bajada + subida del eco). El vapor de agua ralentiza la propagación de las microondas, introduciendo un **retardo de fase aparente** que puede confundirse con deformación real del terreno. Este error es espacialmente variable y temporalmente impredecible, y puede alcanzar varias decenas de milímetros.
+
+### El modelo de corrección implementado
+
+GeoDesk implementa una corrección empírica troposférica basada en los dos componentes del retardo húmedo y seco:
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        FLUJO DE TRABAJO                              │
-└──────────────────────────────────────────────────────────────────────┘
-
-   PASO 1: BÚSQUEDA                    PASO 2: ENVÍO A HyP3
-   ─────────────────                   ────────────────────
-
-   [Sentinel] → Buscar escenas    →    [HyP3] → Procesar pares
-       ↓         por área/fecha             ↓      en la nube
-   Lista de                            Jobs en
-   Granules                            procesamiento
-                                       (30-60 min)
-
-   PASO 3: DESCARGA                    PASO 4: VISUALIZACIÓN
-   ────────────────                    ─────────────────────
-
-   [HyP3] → Descargar productos   →    [Procesamiento] → Ver imágenes
-       ↓      procesados (.zip)             ↓              coloreadas
-   Archivos                            PNGs de coherencia,
-   .tif                                fase, elevación
-
-
-   OPCIONAL: ANÁLISIS AVANZADO
-   ───────────────────────────
-
-   [ERA5] → Datos meteorológicos  →    [Temp+Deformación] → Correlacionar
-       ↓      (temperatura)                  ↓               variables
-   Archivo                             Gráficas de
-   .nc                                 análisis
+Error_atmosférico (mm) = 0.238 · Δ(PWV) + 0.035 · Δ(T)
 ```
 
----
+Donde:
+- **Δ(PWV)** = cambio en vapor de agua total entre la fecha inicial y final del interferograma (kg/m²)
+- **Δ(T)** = cambio en temperatura a 2 m entre ambas fechas (K)
+- **0.238** = coeficiente de conversión húmedo (mm de retardo por kg/m² de PWV)
+- **0.035** = coeficiente de conversión seco/térmico (mm de retardo por K)
 
-## Guía de Uso por Sección
+La deformación corregida se calcula restando este error al valor InSAR observado:
 
-### 1. Sentinel (Búsqueda Manual)
+```
+Deformación_corregida (mm) = Deformación_InSAR (mm) − Error_atmosférico (mm)
+```
 
-**Propósito:** Buscar y procesar imágenes Sentinel-1 de cualquier área del mundo.
+#### Origen y validación de los coeficientes
 
-#### Pestaña "Obtener Datos"
+Los coeficientes **0.238** y **0.035** provienen de la literatura geodésica clásica sobre retardos troposféricos en señales de microondas. Su base física fue establecida por **Bevis et al. (1992)** en el contexto del GPS y la estimación del agua precipitable atmosférica, y extendida a InSAR por **Zebker et al. (1997)** y **Hanssen (2001)**, quienes cuantificaron el impacto estadístico del vapor de agua sobre las mediciones interferométricas.
 
-| Campo                  | Descripción                                    | Ejemplo                 |
-| ---------------------- | ---------------------------------------------- | ----------------------- |
-| **Fecha Inicio/Fin**   | Rango temporal de búsqueda                     | 2025-01-01 a 2025-01-31 |
-| **Ruta**               | Órbita relativa del satélite (1-175)           | 128                     |
-| **Marco**              | Subdivisión de la órbita                       | 547                     |
-| **Dirección de vuelo** | ASCENDING (sur→norte) o DESCENDING (norte→sur) | ASCENDING               |
-| **Polarización**       | Tipo de señal radar (ver tabla abajo)          | VV+VH                   |
-| **Polígono**           | Dibuja en el mapa el área de interés           | Doble clic para cerrar  |
+La validez de esta aproximación lineal reside en:
 
-##### Tipos de Polarización
+1. **Componente húmedo (0.238 · ΔPWV):** El vapor de agua es el principal contribuyente al retardo húmedo. La relación entre PWV y el retardo en señales de microondas es aproximadamente lineal en el rango de condiciones troposféricas normales. El factor 0.238 relaciona el retardo en milímetros con el contenido de vapor en kg/m² a lo largo de toda la columna atmosférica. Este valor fue derivado experimentalmente comparando observaciones GPS/GNSS con radiómetros de vapor de agua y validado extensamente en zonas de alta variabilidad troposférica (zonas tropicales, costas).
 
-| Polarización | Significado                                 | Mejor para                      |
-| ------------ | ------------------------------------------- | ------------------------------- |
-| **VV**       | Vertical transmitida, Vertical recibida     | Agua, superficies lisas         |
-| **VH**       | Vertical transmitida, Horizontal recibida   | Vegetación, bosques             |
-| **VV+VH**    | Dual polarización vertical                  | Análisis completo (recomendado) |
-| **HH**       | Horizontal transmitida, Horizontal recibida | Hielo, zonas polares            |
-| **HV**       | Horizontal transmitida, Vertical recibida   | Biomasa, agricultura            |
-| **HH+HV**    | Dual polarización horizontal                | Regiones polares                |
+2. **Componente seco/térmico (0.035 · ΔT):** Representa la variación del índice de refracción del aire seco debida a cambios de temperatura. Aunque su magnitud es menor que la del componente húmedo, es relevante en zonas de alta variabilidad térmica o en interferogramas con períodos de tiempo prolongados. El coeficiente fue ajustado a partir del modelo de Smith-Weintraub para la refractectividad atmosférica.
 
-> **Nota:** La polarización VV+VH es la más común para Sentinel-1 modo IW y ofrece la mejor versatilidad.
+El filtro actúa de forma **diferencial**: no corrige el retardo absoluto de ninguna imagen, sino el **cambio** del retardo entre ambas fechas del interferograma, lo cual es consistente con la naturaleza diferencial de la propia medición InSAR.
 
-#### Pestaña "Descargar"
-
-1. **Procesar seleccionadas (HyP3):** Envía los granules seleccionados a HyP3
-2. **Cargar productos HyP3:** Recupera los archivos procesados cuando estén listos
-3. **Descargar:** Descarga los ZIPs al servidor
-
-> ⚠️ **Importante:** Se necesitan mínimo 2 granules para formar un par de interferometría.
+> **Nota sobre la centralización de datos:** Los valores de deformación InSAR exportados por HyP3 contienen un offset de fase arbitrario heredado del procesamiento. GeoDesk centra los datos restando la mediana del campo de deformación antes de aplicar el filtro ERA5, asumiendo que la mayor parte del área analizada es geológicamente estable. Esto elimina el sesgo global sin alterar los gradientes espaciales de deformación.
 
 ---
 
-### 2. Solicitar Imágenes (Automático)
+## Parámetros de adquisición fijos
 
-**Propósito:** Búsqueda y procesamiento automatizado para **El Salvador** con parámetros predefinidos.
+Para el modo de solicitud automática de imágenes (El Salvador), GeoDesk utiliza los siguientes parámetros, derivados de la geometría orbital de Sentinel-1 sobre Centroamérica:
 
-| Campo                   | Descripción                            |
-| ----------------------- | -------------------------------------- |
-| **Fecha inicio**        | Inicio del período de análisis         |
-| **Fecha fin**           | Fin del período de análisis            |
-| **Nombre del proyecto** | Identificador único para este análisis |
-
-**Parámetros fijos:**
-
-- Área: El Salvador (polígono predefinido)
-- Ruta: 128, Marco: 547
-- Modo: IW, Nivel: SLC
-- Intervalo entre pares: 12 días
-
-**Resultado:** Muestra escenas encontradas, pares construidos y jobs enviados.
+| Parámetro | Valor | Razón |
+|-----------|-------|-------|
+| **Ruta relativa** | 128 | Órbita de Sentinel-1 que cubre El Salvador en geometría descendente |
+| **Marco** | 547 | Subdivisión de la órbita que centra la imagen sobre el territorio |
+| **Modo de haz** | IW (Interferometric Wide) | Modo estándar de Sentinel-1 para nivel L1 SLC, 250 km de swath |
+| **Nivel de procesamiento** | SLC | Fase preservada, requisito indispensable para InSAR |
+| **Intervalo entre pares** | 12 días | Ciclo orbital de Sentinel-1; maximiza la coherencia temporal |
+| **Restricción de plataforma** | Misma (S1A ó S1B) | Evitar inconsistencias de sensor entre adquisiciones |
+| **Multi-look** | 20×4 | Balance entre resolución espacial y reducción de ruido speckle |
 
 ---
 
-### 3. Procesamiento SNAP (Recorte y Velocidad)
+## Instalación
 
-**Propósito:** Extraer regiones de interés específicas de un producto InSAR procesado por HyP3 y calcular la **velocidad anual de deformación** (mm/año).
+### Requisitos
 
-**Cómo usar:**
+- Docker y Docker Compose
+- Cuenta en [NASA Earthdata / ASF](https://urs.earthdata.nasa.gov/) — para búsqueda y descarga de granules
+- Cuenta en [Copernicus CDS](https://cds.climate.copernicus.eu/) — para descarga de datos ERA5
 
-1. **Cargar Proyecto InSAR:** Sube el archivo `.zip` resultante de HyP3. El sistema extraerá las coordenadas de la escena y dibujará un recuadro azul punteado sobre un mapa interactivo (Leaflet) mostrando la cobertura de la imagen.
-2. **Definir Área de Recorte:**
-   - Usa la herramienta de dibujo en el mapa para trazar un rectángulo exacto sobre tu región de interés (por ejemplo, una ciudad entera).
-   - Opcionalmente, usa el panel de **Coordenadas de Selección Exactas** para ingresar manualmente las coordenadas de Latitud/Longitud y lograr un control milimétrico (ideal para recortes reproducibles a través de múltiples fechas).
-3. **Recortar y Descargar:** Haz clic en "Recortar Selección" para enmascarar todos los archivos TIFF internos y descargar un nuevo archivo ZIP ligero enfocado solo en el área de estudio.
-4. **Calcular Velocidad de Fase:** Al tener un ráster recortado, haz clic en "Derivar Deformación de Fase". El sistema traducirá los radianes del archivo `_unw_phase.tif` a desplazamiento físico en milímetros, generando una tabla numérica con los resultados.
-   - Puedes exportar el 100% de esta tabla a `.csv` para alimentar modelos matemáticos o de series de tiempo (SBAS).
-5. **Corrección Atmosférica (Filtro ERA5):**
-   - La señal de radar es susceptible a retrasos al cruzar la tropósfera, especialmente debido al vapor de agua. Estos retardos introducen errores en la estimación de la deformación.
-   - GeoDesk permite aplicar una mitigación de error troposférico cargando un archivo meteorológico `.nc` (Copernicus ERA5) que coincida espacial y temporalmente con el interferograma.
-   - **Física del Filtro:** El modelo utilizado para estimar el error por fase atmosférica se fundamenta en las variaciones del Vapor de Agua (PWV) y la Temperatura (T). Se aplica la siguiente corrección empírica derivada de Bevis & Brown (1987):
-     `Error (mm) = 0.238 * Δ(PWV) + 0.035 * Δ(T)`
-     Donde `Δ` representa el cambio temporal entre la fecha final y la fecha inicial del interferograma. Este error calculado se resta de la deformación InSAR observada, aislando mejor el verdadero movimiento del terreno.
+### Configuración
 
-### 4. Cálculo de Velocidad desde Excel
+Crea el archivo `backend/.env` con las siguientes variables:
 
-**Propósito:** Unificar y correlacionar la información meteorológica (ERA5) sobre imágenes satelitales de alta resolución (Sentinel). Esta herramienta superpone variables climáticas (Temperatura) como mapas de visualización interactivos encima de los contornos base del radar.
+```env
+ASF_USERNAME=tu_usuario_earthdata
+ASF_PASSWORD=tu_contraseña_earthdata
+HYP3_USERNAME=tu_usuario_earthdata
+HYP3_PASSWORD=tu_contraseña_earthdata
+ERA5_URL=https://cds.climate.copernicus.eu/api/v2
+ERA5_KEY=tu_uid:tu_api_key_copernicus
+```
 
-**Guía de Colores de Mapas Generados:**
-Al mezclar los datos atmosféricos (ERA5 NetCDF) con la zona de recorte de la imagen satelital, observarás la siguiente paleta climática generada por *matplotlib*:
-- **Tonos Rojos Intensos:** Altas temperaturas (clima caliente).
-- **Rangos Intermedios/Naranjas:** Zonas cálidas a templadas.
-- **Tonos Azules/Morados:** Bajas temperaturas (climas fríos y altas elevaciones).
+### Ejecución
 
-**¿Qué hace internamente?**
-El sistema extrae las coordenadas reales de Sentinel (Affines) a través del archivo de amplitud/fase correspondiente y localiza exactamente esos mismos píxeles sobre la matriz de temperatura descargada de Copernicus. Finalmente, descarta las zonas nulas y cálcula la _Temperatura (K)_ local en cada coordenada, mostrando una vista estadística y geográfica unificada.
+```bash
+docker compose up --build
+```
 
-**Requisitos Críticos:**
-
-- **Misma Área Espacial:** El archivo `.nc` de ERA5 y los rásteres `.zip` de Sentinel deben cubrir **estrictamente** la misma zona geográfica, de lo contrario la extracción de temperaturas fallará silenciosamente debido a falta de datos rasterizados solapados.
-- **Fechas Coincidentes:** Para que la correlación adquiera validez científica, el archivo `.nc` de ERA5 debe contener registros temporales que coincidan o cubran la ventana de adquisición de Sentinel para que la influencia de las temperaturas sea fidedigna a las capas expuestas. Solo funciona si coinciden fechas y lugares.
-
-**Cómo usar:**
-
-1. Ve a la pestaña **"Comparativa ERA5/Sentinel"** en la navegación.
-2. Sube un archivo **`.nc`** que contiene el Contexto Meteorológico (extraído de Copernicus).
-3. Sube uno o **múltiples** **`.zip`** que contienen los productos de deformación/SAR de Sentinel. (No es necesario descomprimirlos).
-4. Presiona el botón para generar la comparativa.
-5. Obtendrás un visor interactivo de carrusel para **explorar los mapas climáticos** que demuestran las variaciones térmicas geolocalizadas al momento del barrido de cada toma.
-6. Debajo, podrás previsualizar la iteración espacial cruzada en una **tabla numérica detallada** conteniendo _Latitud_, _Longitud_, _Temperatura (K)_, y _Radar Base_.
-7. Para usos estadísticos profesionales o modelado posterior, haz click en el botón **"Exportar CSV"** que descargará todos los píxeles (muestras extraídas dinámicamente) de forma consolidada en formato hoja de cálculo.
-
-### Requisitos Previos
-
-- Docker y Docker Compose instalados
-- Cuenta en [ASF/Earthdata](https://urs.earthdata.nasa.gov/) (para HyP3)
-- Cuenta en [Copernicus CDS](https://cds.climate.copernicus.eu/) (para ERA5)
+La aplicación estará disponible en `http://localhost:5173` (frontend) y `http://localhost:8000` (API).

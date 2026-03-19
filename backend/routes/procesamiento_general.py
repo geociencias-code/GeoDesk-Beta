@@ -8,7 +8,7 @@ import rasterio
 import pandas as pd
 import pyproj
 from pathlib import Path
-
+import re
 from utils.file_handling import extract_zip, find_rasters
 from services.image_processing import classify_kind, render_raster_tiff, generar_mapa_el_salvador
 import datetime
@@ -151,7 +151,6 @@ async def procesar_zip(
 
 @router.post("/api/v1/alaska/preview")
 async def preview_zip(file: UploadFile = File(...)):
-    """ Extrae el bounding box del zip original de HyP3. """
     try:
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp.write(await file.read())
@@ -163,12 +162,10 @@ async def preview_zip(file: UploadFile = File(...)):
         
         if not tifs:
             raise HTTPException(status_code=400, detail="No TIFs found in ZIP")
-        
-        # Leemos el primer TIF para sacar sus bounds (asumimos que todos comparten footprint)
+
         unw_phase_tif = next((t for t in tifs if "unw_phase" in t.name), tifs[0])
         
         with rasterio.open(unw_phase_tif) as src:
-            # Transformamos los bordes del CRS original as WGS84 (EPSG:4326)
             left, bottom, right, top = rasterio.warp.transform_bounds(src.crs, "EPSG:4326", *src.bounds)
             
         tmp_path.unlink()
@@ -204,13 +201,11 @@ async def crop_zip(
         extract_zip(tmp_path, temp_folder)
         tifs = find_rasters(temp_folder)
 
-        # Crear el Bounding Box de shapely y pasarlo a GeoJSON
         bbox = box(lon_min, lat_min, lon_max, lat_max)
         geo = gpd.GeoDataFrame({'geometry': [bbox]}, crs="EPSG:4326")
 
         for tif in tifs:
             with rasterio.open(tif) as src:
-                # Reproyectar el bbox a la proyección nativa del raster respectivo (usualmente UTM)
                 geo_proj = geo.to_crs(src.crs)
                 shapes = [features["geometry"] for features in json.loads(geo_proj.to_json())['features']]
                 
@@ -223,13 +218,11 @@ async def crop_zip(
                     "width": out_image.shape[2],
                     "transform": out_transform
                 })
-                
-                # Guardar TIF recortado
+
                 out_tif_path = out_folder / tif.name
                 with rasterio.open(out_tif_path, "w", **out_meta) as dest:
                     dest.write(out_image)
 
-        # Comprimir nuevamente los recortes
         cropped_zip_path = Path(tempfile.gettempdir()) / f"cropped_{file.filename}"
         with zipfile.ZipFile(cropped_zip_path, 'w') as zipf:
             for cropped_tif in out_folder.glob("*.tif"):
@@ -256,9 +249,6 @@ async def process_velocity(file: UploadFile = File(...)):
         if not unw_phase_tif:
             raise HTTPException(status_code=400, detail="No se encontró unw_phase.tif")
 
-        # Extraer fechas del nombre del archivo: ej S1AA_20250101T120000_20250113T120000_...
-        # Buscamos dos secuencias de 8 numeros consecutivas separadas por T o guion
-        import re
         date_pattern = re.compile(r'(\d{8})T')
         matches = date_pattern.findall(unw_phase_tif.name)
         
@@ -267,7 +257,7 @@ async def process_velocity(file: UploadFile = File(...)):
             d2 = datetime.datetime.strptime(matches[1], "%Y%m%d")
             diff_days = abs((d2 - d1).days)
         else:
-            diff_days = 12  # Fallback a 12 días estándar de Sentinel-1
+            diff_days = 12
 
         with rasterio.open(unw_phase_tif) as src:
             fase = src.read(1)
@@ -276,19 +266,16 @@ async def process_velocity(file: UploadFile = File(...)):
 
             # Transformar a desplazamiento (m)
             # disp_m = (fase * lambda) / (-4 * pi) => Sentinel-1 lambda approx 0.05546576 m
-            # ignorar nulos
             valid_mask = (fase != nodata) & np.isfinite(fase)
             
             fase_valid = fase[valid_mask]
             
             disp_m = (fase_valid * 0.05546576) / (-4 * math.pi)
-            
-            # Deformación en mm
+
             deformacion_mm = disp_m * 1000.0
 
             rows, cols = np.where(valid_mask)
-            
-            # Cálculo vectorizado de coordenadas
+
             xs, ys = transform * (cols, rows)
             
             if src.crs and src.crs.to_epsg() != 4326:
@@ -296,8 +283,7 @@ async def process_velocity(file: UploadFile = File(...)):
                 lons, lats = transformer.transform(xs, ys)
             else:
                 lons, lats = xs, ys
-            
-            # Guardamos el CSV vectorizado con pandas para máxima performance
+
             csv_path = Path(tempfile.gettempdir()) / f"velocidad_{file.filename}.csv"
             df = pd.DataFrame({
                 "Latitud": np.round(lats, 6),
@@ -307,8 +293,7 @@ async def process_velocity(file: UploadFile = File(...)):
                 "Deformacion_mm": np.round(deformacion_mm, 4)
             })
             df.to_csv(csv_path, index=False)
-            
-            # Submuestreo para el JSON de la interfaz (limitado a 100)
+
             step = max(1, len(rows) // 100)
             ui_sample = []
             
@@ -321,11 +306,9 @@ async def process_velocity(file: UploadFile = File(...)):
                     "def": float(deformacion_mm[i])
                 })
 
-        # Comprimimos el CSV para enviarlo junto con el JSON
         result_zip_path = Path(tempfile.gettempdir()) / f"deformation_result_{file.filename}.zip"
         with zipfile.ZipFile(result_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             zipf.write(csv_path, f"deformacion_{file.filename}.csv")
-            # También devolvemos el json de la UI como un archivo de config dentro del zip
             ui_json_path = Path(tempfile.gettempdir()) / "ui_data.json"
             with open(ui_json_path, 'w') as jf:
                 json.dump({"sample": ui_sample, "dias": diff_days, "start_date": matches[0] if len(matches) > 0 else None, "end_date": matches[1] if len(matches) > 1 else None}, jf)
@@ -345,6 +328,44 @@ async def apply_era5_filter(
     start_date: str = Form(...),
     end_date: str = Form(...)
 ):
+    """Applies tropospheric error correction to InSAR deformation data using ERA5 data.
+
+    This function implements the Bevis & Brown (1987) atmospheric correction model
+    to remove tropospheric phase delay errors from Sentinel-1 InSAR measurements.
+    It extracts water vapor (PWV) and temperature data from ERA5 at the interferogram
+    acquisition dates, calculates the atmospheric error, and subtracts it from the
+    measured deformation to isolate true ground motion.
+
+    The tropospheric error is calculated using:
+        error_tropo (mm) = 0.238 * Δ(PWV) + 0.035 * Δ(T)
+    where Δ(PWV) is the change in water vapor column and Δ(T) is the change in
+    2-meter air temperature between the two interferogram dates.
+
+    Args:
+        csv_file (UploadFile): CSV file containing InSAR deformation measurements.
+            Expected columns: Latitud, Longitud, Deformacion_mm, Desplazamiento_m, Fase.
+        nc_file (UploadFile): NetCDF (.nc) file containing ERA5 atmospheric data.
+            Must include either 'tcwv' or 'total_column_water_vapour' (water vapor)
+            and either 't2m' or 'temperature' (2m air temperature).
+        start_date (str): Start date of the interferogram in format 'YYYY-MM-DD'.
+        end_date (str): End date of the interferogram in format 'YYYY-MM-DD'.
+
+    Returns:
+        FileResponse: ZIP archive containing:
+            - filtered_*.csv: CSV file with corrected deformation values
+            - ui_data.json: JSON with visualization sample (max 100 points),
+              time span in days, and date range
+
+    Raises:
+        HTTPException: With status code 400 if:
+            - ERA5 file lacks 'water vapor' variable (tcwv or total_column_water_vapour)
+            - ERA5 file lacks 'temperature' variable (t2m or temperature)
+            - ERA5 file lacks valid time dimension
+        HTTPException: With status code 500 if:
+            - CSV or NetCDF files cannot be read
+            - Data extraction or interpolation fails
+            - Output ZIP creation fails
+    """
     try:
         import xarray as xr
         from dateutil.parser import parse as parse_date
@@ -366,17 +387,19 @@ async def apply_era5_filter(
         time_var = 'time' if 'time' in ds else ('valid_time' if 'valid_time' in ds else None)
         
         if not pwv_var:
-            raise HTTPException(status_code=400, detail="El archivo ERA5 proporcionado no contiene la variable 'Vapor de agua en toda la columna' (tcwv o total_column_water_vapour). Es necesaria para el filtro.")
+            raise HTTPException(status_code=400, detail="El archivo ERA5 proporcionado no contiene la variable 'Vapor de agua en toda la columna'")
         
         if not t_var:
-            raise HTTPException(status_code=400, detail="El archivo ERA5 proporcionado no contiene la variable de 'Temperatura' (t2m o temperature). Es necesaria para el filtro.")
+            raise HTTPException(status_code=400, detail="El archivo ERA5 proporcionado no contiene la variable de 'Temperatura'")
             
         if not time_var:
-            raise HTTPException(status_code=400, detail="El archivo ERA5 proporcionado no contiene una dimensión de tiempo válida (time o valid_time).")
+            raise HTTPException(status_code=400, detail="El archivo ERA5 proporcionado no contiene una dimensión de tiempo válida")
         
         lon_var = [d for d in ds.dims if 'lon' in d.lower()][0]
         lat_var = [d for d in ds.dims if 'lat' in d.lower()][0]
-        
+
+        # Convert longitudes from 0-360 to -180+180 range for compatibility with CSV coordinates
+        # Formula: lon_normalized = ((lon + 180) % 360) - 180
         if ds[lon_var].max() > 180:
             ds = ds.assign_coords(**{lon_var: (((ds[lon_var] + 180) % 360) - 180)})
             ds = ds.sortby(lon_var)
@@ -397,7 +420,9 @@ async def apply_era5_filter(
         
         lats_csv = xr.DataArray(df['Latitud'], dims='points')
         lons_csv = xr.DataArray(df['Longitud'], dims='points')
-        
+
+        # Extract water vapor (PWV) values from ERA5 at initial and final dates
+        #using nearest neighbor interpolation at each CSV coordinate point
         pwv_start = ds_start[pwv_var].sel({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
         pwv_end = ds_end[pwv_var].sel({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
         
@@ -407,13 +432,18 @@ async def apply_era5_filter(
         delta_pwv = np.nan_to_num(pwv_end - pwv_start, nan=0.0)
         delta_t = np.nan_to_num(t_end - t_start, nan=0.0)
         
+        # Calculate tropospheric error using Bevis & Brown (1987) empirical model
+        # error_tropo (mm) = 0.238 * Δ(PWV) + 0.035 * Δ(T)
+        # where PWV is water vapor (kg/m²) and T is temperature (K)
+        # This error is subtracted from SAR deformation to isolate true ground motion
         error_tropo = 0.238 * delta_pwv + 0.035 * delta_t
         
         df['Deformacion_mm'] = df['Deformacion_mm'] - error_tropo
         df['Desplazamiento_m'] = df['Deformacion_mm'] / 1000.0
         
-        wavelength_m = 0.055465763
-        import math
+        wavelength_m = 0.055465763  # Sentinel-1 wavelength in meters
+
+        #Convert InSAR phase to physical displacement
         df['Fase'] = - df['Desplazamiento_m'] * (4 * math.pi) / wavelength_m
         
         df['Deformacion_mm'] = df['Deformacion_mm'].round(4)

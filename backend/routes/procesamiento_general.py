@@ -398,11 +398,11 @@ async def apply_era5_filter(
         lats_csv = xr.DataArray(df['Latitud'], dims='points')
         lons_csv = xr.DataArray(df['Longitud'], dims='points')
         
-        pwv_start = ds_start[pwv_var].interp({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
-        pwv_end = ds_end[pwv_var].interp({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
+        pwv_start = ds_start[pwv_var].sel({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
+        pwv_end = ds_end[pwv_var].sel({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
         
-        t_start = ds_start[t_var].interp({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
-        t_end = ds_end[t_var].interp({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
+        t_start = ds_start[t_var].sel({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
+        t_end = ds_end[t_var].sel({lat_var: lats_csv, lon_var: lons_csv}, method='nearest').values
         
         delta_pwv = np.nan_to_num(pwv_end - pwv_start, nan=0.0)
         delta_t = np.nan_to_num(t_end - t_start, nan=0.0)

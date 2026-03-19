@@ -105,7 +105,7 @@ const Era5: React.FC = () => {
         day: days,
         time: hours,
         area: [area.north, area.west, area.south, area.east],
-        dataset: "reanalysis-era5-land",
+        dataset: "reanalysis-era5-single-levels",
         format: "netcdf",
       };
 

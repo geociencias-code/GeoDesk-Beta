@@ -410,7 +410,15 @@ async def apply_era5_filter(
         error_tropo = 0.238 * delta_pwv + 0.035 * delta_t
         
         df['Deformacion_mm'] = df['Deformacion_mm'] - error_tropo
+        df['Desplazamiento_m'] = df['Deformacion_mm'] / 1000.0
+        
+        wavelength_m = 0.055465763
+        import math
+        df['Fase'] = - df['Desplazamiento_m'] * (4 * math.pi) / wavelength_m
+        
         df['Deformacion_mm'] = df['Deformacion_mm'].round(4)
+        df['Desplazamiento_m'] = df['Desplazamiento_m'].round(6)
+        df['Fase'] = df['Fase'].round(4)
         
         out_csv_path = Path(tempfile.gettempdir()) / f"filtered_{csv_file.filename}"
         df.to_csv(out_csv_path, index=False)

@@ -8,6 +8,7 @@ services:
     volumes:
       - ./backend:/app
       - /app/__pycache__
+      - mintpy_results:/app/mintpy_results
     environment:
       - PYTHONUNBUFFERED=1
 
@@ -24,3 +25,6 @@ services:
       - CHOKIDAR_USEPOLLING=true
     depends_on:
       - backend
+
+volumes:
+  mintpy_results:

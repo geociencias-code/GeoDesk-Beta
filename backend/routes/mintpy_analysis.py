@@ -303,6 +303,21 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
             lat_arr = lat0 + np.arange(rows) * dlat
             lon_arr = lon0 + np.arange(cols) * dlon
             lon_grid, lat_grid = np.meshgrid(lon_arr, lat_arr)
+            
+            # Si los valores exceden los límites de grados, están en proyeccion UTM (ej. HyP3)
+            # Intentamos leer el EPSG de los atributos de MintPy, o asumimos UTM zona local
+            if abs(lat0) > 90 or abs(lon0) > 180:
+                epsg = vel_attrs.get("EPSG", 32616)
+                if isinstance(epsg, (np.ndarray, bytes)):
+                    try:
+                        epsg = int(epsg)
+                    except ValueError:
+                        epsg = 32616
+                try:
+                    transformer = pyproj.Transformer.from_crs(int(epsg), 4326, always_xy=True)
+                    lon_grid, lat_grid = transformer.transform(lon_grid, lat_grid)
+                except Exception as e:
+                    logging.warning(f"Error convirtiendo de UTM a WGS84: {e}")
 
         # Valid pixels = finite and inside temporal-coherence mask (MintPy sets NaN/0 for masked px)
         valid = np.isfinite(vel_mm) & (vel_mm != 0.0)

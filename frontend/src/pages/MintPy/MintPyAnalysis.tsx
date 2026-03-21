@@ -46,20 +46,33 @@ interface ProcessingResults {
 // ── Color scale helpers ────────────────────────────────────────────────────────
 
 function velocityColor(val: number, min: number, max: number): string {
-  if (max === min) return "#94a3b8";
-  const t = (val - min) / (max - min);
+  // Use a symmetric bound so that 0 is perfectly perfectly anchored in the middle
+  const limit = Math.max(Math.abs(min), Math.abs(max));
+  if (limit === 0) return "rgb(0, 255, 0)"; // perfect green
+  
+  // Normalize from -limit to +limit to be 0.0 to 1.0
+  // t = 0.5 is exactly 0 mm/yr
+  const t = Math.max(0, Math.min(1, (val + limit) / (2 * limit)));
+  
+  // Deformation colormap:
+  // 0.0 (Max Subsidence) = Red (255,0,0)
+  // 0.25 = Yellow (255,255,0)
+  // 0.50 (Stable 0 mm/yr) = Green (0,255,0)
+  // 0.75 = Cyan (0,255,255)
+  // 1.00 (Max Uplift) = Blue (0,0,255)
+  
   if (t < 0.25) {
-    const u = t / 0.25;
-    return `rgb(${Math.round(59 + 141*u)}, ${Math.round(130 - 130*u)}, ${Math.round(246 - 50*u)})`;
+    const u = t / 0.25; 
+    return `rgb(255, ${Math.round(255 * u)}, 0)`;
   } else if (t < 0.5) {
     const u = (t - 0.25) / 0.25;
-    return `rgb(${Math.round(200 + 55*u)}, ${Math.round(u * 200)}, ${Math.round(196 - 196*u)})`;
+    return `rgb(${Math.round(255 * (1 - u))}, 255, 0)`;
   } else if (t < 0.75) {
     const u = (t - 0.5) / 0.25;
-    return `rgb(255, ${Math.round(200 - 100*u)}, 0)`;
+    return `rgb(0, 255, ${Math.round(255 * u)})`;
   } else {
     const u = (t - 0.75) / 0.25;
-    return `rgb(255, ${Math.round(100 - 100*u)}, 0)`;
+    return `rgb(0, ${Math.round(255 * (1 - u))}, 255)`;
   }
 }
 
@@ -659,7 +672,7 @@ export default function MintPyAnalysis() {
                           color: "white",
                           fontSize: "0.8rem",
                         }}
-                        formatter={(v: number) => [`${v} píxeles`, "Frecuencia"]}
+                        formatter={(v: any) => [`${v} píxeles`, "Frecuencia"]}
                       />
                       <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} />
                     </BarChart>

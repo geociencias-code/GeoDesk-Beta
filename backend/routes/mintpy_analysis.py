@@ -23,6 +23,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import h5py
 import numpy as np
 import pandas as pd
@@ -95,7 +98,8 @@ mintpy.subset.yx         = {subset_yx}
 mintpy.network.coherenceBased     = yes
 mintpy.network.minCoherence       = 0.4
 mintpy.reference.lalo             = auto
-mintpy.troposphericDelay.method   = no
+mintpy.troposphericDelay.method   = pyaps
+mintpy.troposphericDelay.weatherModel = ERA5
 mintpy.deramp                     = linear
 mintpy.topographicResidual        = no
 mintpy.topographicResidual.stepFuncDate = no
@@ -125,6 +129,13 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
     cfg_path = work_dir / "mintpy.cfg"
     cfg_path.write_text(_make_cfg(zip_dir))
 
+    # Escribir el archivo .cdsapirc requerido por PyAPS para descargar ERA5
+    cds_url = os.getenv("ERA5_URL", "https://cds.climate.copernicus.eu/api")
+    cds_key = os.getenv("ERA5_KEY")
+    if cds_key:
+        cdsapirc_path = Path.home() / ".cdsapirc"
+        cdsapirc_path.write_text(f"url: {cds_url}\nkey: {cds_key}\n")
+
     try:
         from mintpy.smallbaselineApp import TimeSeriesAnalysis
 
@@ -153,6 +164,7 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
             "load_data",
             "reference_point",
             "invert_network",
+            "correct_troposphere",
             "deramp",
             "velocity",
         ]
@@ -339,15 +351,78 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
         # ── 7. Multi-sheet Excel ───────────────────────────────────────────────
         EXCEL_MAX = 1_000_000
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
+            # Hoja 1: Velocidad Lineal Promedio
             df_res = pd.DataFrame(results)
             df_res.columns = ["Latitud", "Longitud", "Velocidad_mm_año"]
             if len(df_res) > EXCEL_MAX:
                 df_res = df_res.iloc[:: len(df_res) // EXCEL_MAX].head(EXCEL_MAX)
             df_res.to_excel(writer, sheet_name="Velocidad_SBAS", index=False)
 
+            # Hoja 2: Metadata de Interferogramas
             df_igs = pd.DataFrame(igram_meta)
             df_igs.columns = ["Archivo", "Fecha_1", "Fecha_2", "Días_baseline"]
-            df_igs.to_excel(writer, sheet_name="Interferogramas", index=False)
+            df_igs.to_excel(writer, sheet_name="Interferogramas_Info", index=False)
+
+            # Hojas 3+: Una por interferograma con sus desplazamientos 
+            if_stack = work_dir / "inputs" / "ifgramStack.h5"
+            era5_model = work_dir / "inputs" / "ERA5.h5"
+            
+            if if_stack.exists():
+                with h5py.File(if_stack, "r") as stack_f:
+                    if "unwrapPhase" in stack_f and "date" in stack_f:
+                        dates_array = stack_f["date"][:]
+                        phase_array = stack_f["unwrapPhase"][:]
+                        
+                        # Extraer wavelength para InSAR Math
+                        wvl = float(stack_f.attrs.get("WAVELENGTH", 0.05546576))
+                        rad2mm = (-1 * wvl / (4 * np.pi)) * 1000.0
+
+                        # Tratar de cargar el modelo atmosférico si existe
+                        aps_array = None
+                        if era5_model.exists():
+                            with h5py.File(era5_model, "r") as ef:
+                                if "unwrapPhase" in ef:
+                                    aps_array = ef["unwrapPhase"][:]
+                                elif "timeseries" in ef:
+                                    # PyAPS ERA5 a veces genera un cubo por fecha, no por interferograma original
+                                    # lo ignoramos para mantener la robustez si el shape no coincide
+                                    pass
+
+                        # Recorrer cada interferograma pero usando los mismos índices de 'sample'
+                        sample_indices = list(range(0, len(lats_v), step_s))[:500]
+                        
+                        for idx, d_pair in enumerate(dates_array):
+                            # d_pair es típicamente b'20250101-20250113'
+                            sheet_title = d_pair[0].decode("utf-8") if isinstance(d_pair, np.ndarray) and len(d_pair) > 0 else "Unk"
+                            if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
+                                sheet_title = f"{d_pair[0].decode('utf-8')}_{d_pair[1].decode('utf-8')}"
+                            
+                            # Fase de este interferograma: [rows, cols]
+                            phase_2d = phase_array[idx]
+                            phase_1d = phase_2d[valid].flatten()
+                            phase_sample = [phase_1d[i] for i in sample_indices]
+                            
+                            # Desplazamiento = Fase_rad * rad2mm
+                            disp_mm = [p * rad2mm for p in phase_sample]
+
+                            sheet_data = {
+                                "Lat": [s["lat"] for s in sample],
+                                "Lon": [s["lon"] for s in sample],
+                                "Desplazamiento_mm": [round(float(d), 2) for d in disp_mm]
+                            }
+
+                            if aps_array is not None and idx < len(aps_array):
+                                aps_2d = aps_array[idx]
+                                aps_1d = aps_2d[valid].flatten()
+                                aps_sample = [aps_1d[i] for i in sample_indices]
+                                # APS en interferogramas ERA5 ya suele estar en radianes o metros
+                                # MintPy guarda APS típicamente en metros en ERA5.h5
+                                sheet_data["ERA5_APS_m"] = [round(float(a), 4) for a in aps_sample]
+
+                            df_if = pd.DataFrame(sheet_data)
+                            # Truncar nombre a 31 chars máximo para Excel
+                            sheet_name_safe = sheet_title[:31] 
+                            df_if.to_excel(writer, sheet_name=sheet_name_safe, index=False)
 
         stats["excel_rows"] = len(df_res)
         return output

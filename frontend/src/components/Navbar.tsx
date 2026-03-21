@@ -6,7 +6,8 @@ import {
   CloudRain, 
   Settings, 
   ChevronDown, 
-  Layers
+  Layers,
+  Activity
 } from "lucide-react";
 
 const cx = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
@@ -35,7 +36,6 @@ type ItemProps = {
 
 export default function Navbar({ activeSection, onChangeSection }: NavbarProps) {
   const [isAlaskaOpen, setIsAlaskaOpen] = useState(false);
-  const [isEra5Open, setIsEra5Open] = useState(false);
 
   const handleKey = (section: string, toggleSubmenu?: () => void) => (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -144,7 +144,6 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
               { id: "solicitud-automatico", label: "Solicitud automático" },
               { id: "descarga-imagenes", label: "Descarga de imágenes" },
               { id: "procesamiento-imagenes", label: "Recorte y deformación" },
-              { id: "alaska-velocity-excel", label: "Velocidad desde Excel" },
             ]}
             activeSection={activeSection}
           />
@@ -153,13 +152,8 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
             id="era5"
             label="Clima ERA5"
             icon={<CloudRain size={18} />}
-            hasSubmenu={true}
-            isOpen={isEra5Open}
-            toggleSubmenu={() => setIsEra5Open(!isEra5Open)}
-            submenuItems={[
-              { id: "descargar-datos", label: "Descargar datos" },
-              { id: "analisis-datos", label: "Análisis y gráficos" },
-            ]}
+            hasSubmenu={false}
+            onChangeSection={onChangeSection}
             activeSection={activeSection}
           />
 
@@ -171,6 +165,15 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
             id="comparativa-era5-sentinel"
             label="Comparativa ERA5/Sentinel"
             icon={<Settings size={18} />}
+            hasSubmenu={false}
+            onChangeSection={onChangeSection}
+            activeSection={activeSection}
+          />
+
+          <Item
+            id="mintpy-analysis"
+            label="Análisis InSAR (MintPy)"
+            icon={<Activity size={18} />}
             hasSubmenu={false}
             onChangeSection={onChangeSection}
             activeSection={activeSection}

@@ -2,14 +2,14 @@ import { useState, useRef, useEffect } from "react";
 import Navbar from "./components/Navbar";
 import BarraSuperior from "./components/BarraSuperior";
 import Era5 from "./pages/Era5/Era5";
-import Era5Procesamiento from "./pages/Era5ProcessingNc/Era5ProcessingNc";
+
 import AlaskaSearch from "./pages/Alaska/AlaskaSearch";
 import SentinelDashboard from "./pages/Alaska/SentinelDashboard";
 import DownloadFiles from "./pages/Alaska/DownloadFiles";
 import Alaska_procesamiento from "./pages/AlaskaProcessing/AlaskaProcessing";
 import SolicitarImagenesAutomatico from "./pages/SolicitarImagenesAutomatico/SolicitarImagenesAutomatico";
 import Era5SentinelComparative from "./pages/Era5SentinelComparative/Era5SentinelComparative";
-import AlaskaVelocityExcel from "./pages/AlaskaVelocityExcel";
+import MintPyAnalysis from "./pages/MintPy/MintPyAnalysis";
 
 import Inicio from "./pages/Home/Home";
 import api, { API_URL } from "./services/api";
@@ -162,12 +162,6 @@ const App: React.FC = () => {
           </div>
         );
 
-      case "alaska-velocity-excel":
-        return (
-          <div>
-            <AlaskaVelocityExcel />
-          </div>
-        );
 
       case "solicitud-automatico":
         return (
@@ -183,17 +177,18 @@ const App: React.FC = () => {
           </div>
         );
 
-      case "analisis-datos":
-        return (
-          <div>
-            <Era5Procesamiento />
-          </div>
-        );
 
       case "comparativa-era5-sentinel":
         return (
           <div>
             <Era5SentinelComparative />
+          </div>
+        );
+
+      case "mintpy-analysis":
+        return (
+          <div style={{ height: "100%", overflowY: "auto" }}>
+            <MintPyAnalysis />
           </div>
         );
 

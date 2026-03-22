@@ -236,6 +236,49 @@ async def crop_zip(
 
 @router.post("/api/v1/alaska/velocity")
 async def process_velocity(file: UploadFile = File(...)):
+    """Processes an InSAR ZIP file to compute deformation velocity and displacement data.
+
+    This endpoint processes a ZIP archive containing Sentinel-1 InSAR unwrapped phase TIFF
+    files. It extracts phase data, converts it to deformation measurements (displacement in
+    meters and deformation in millimeters), and generates geographic coordinates. The results
+    are exported as a CSV file with detailed measurements and a JSON file with UI sample data.
+
+    The phase-to-displacement conversion uses the Sentinel-1 wavelength approximation:
+        - Wavelength (λ): ~0.05546576 meters
+        - Conversion formula: disp_m = (phase * λ) / (-4 * π)
+        - Final deformation: deformation_mm = displacement_m * 1000
+
+    Args:
+        file (UploadFile): A ZIP file containing InSAR TIFF products. Must include at least
+            one file with "unw_phase" in its filename. The file naming convention should
+            follow the pattern: *_YYYYMMDDTHHMMSS_YYYYMMDDTHHMMSS_*.tif
+
+    Returns:
+        FileResponse: A ZIP file containing:
+            - deformacion_{filename}.csv: CSV file with columns:
+                - Latitud (float): Geographic latitude in WGS84 (EPSG:4326)
+                - Longitud (float): Geographic longitude in WGS84 (EPSG:4326)
+                - Fase (float): Raw unwrapped phase values
+                - Desplazamiento_m (float): Displacement in meters
+                - Deformacion_mm (float): Deformation in millimeters
+            - ui_data.json: JSON file containing:
+                - sample (list): Up to 100 sample points with lat, lon, and def fields
+                - dias (int): Time interval in days between the two acquisition dates
+                - start_date (str): Start acquisition date in YYYYMMDD format
+                - end_date (str): End acquisition date in YYYYMMDD format
+
+    Raises:
+        HTTPException: With status code 400 if:
+            - No TIFF files are found in the ZIP archive
+            - The unw_phase.tif file is not found in the extracted data
+        HTTPException: With status code 500 if:
+            - An error occurs during ZIP extraction
+            - An error occurs while reading or processing TIFF files
+            - An error occurs during coordinate transformation
+            - An error occurs while creating the output ZIP file
+            - Any unexpected error occurs during processing
+    """
+
     try:
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp.write(await file.read())
@@ -264,7 +307,7 @@ async def process_velocity(file: UploadFile = File(...)):
             transform = src.transform
             nodata = src.nodata
 
-            # Transformar a desplazamiento (m)
+            # Transformar la fase a desplazamiento en metros usando la fórmula:
             # disp_m = (fase * lambda) / (-4 * pi) => Sentinel-1 lambda approx 0.05546576 m
             valid_mask = (fase != nodata) & np.isfinite(fase)
             

@@ -1,31 +1,17 @@
-"""
-Real MintPy InSAR velocity analysis backend.
-
-Correct HyP3 → MintPy flow using the Python API directly:
-  1. Extract HyP3 ZIPs into a work directory
-  2. Write smallbaselineApp.cfg with glob patterns pointing to the TIFs
-  3. Instantiate TimeSeriesAnalysis and call tsa.run() with the correct
-     MintPy step names:
-       load_data → reference_point → network_inversion → deramp → velocity
-     (load_data internally calls prep_hyp3 to generate .rsc sidecar files)
-  4. Read velocity.h5 with h5py → return JSON + write multi-sheet Excel
-"""
-
 import json
 import logging
 import os
 import re
 import shutil
-import sys
 import tempfile
 import zipfile
+import pyproj
 from datetime import datetime
 from pathlib import Path
 from typing import List
-
+import warnings
 from dotenv import load_dotenv
 load_dotenv()
-
 import h5py
 import numpy as np
 import pandas as pd
@@ -58,10 +44,31 @@ def _extract_dates(filename: str):
 
 
 def _make_cfg(zip_dir: Path) -> str:
-    """
-    Build smallbaselineApp.cfg content with glob patterns pointing to the
-    extracted TIF files. MintPy's load_data step expands these globs.
-    Also calculates the minimum grid intersection to avoid dropping interferograms.
+    """Generates a MintPy configuration file for SBAS processing.
+
+    Constructs a configuration file (.cfg) with the necessary parameters
+    to run the MintPy time-series analysis pipeline. The function automatically
+    detects the minimum dimensions of available interferograms to ensure
+    compatibility across all files.
+
+    Args:
+        zip_dir (Path): Path to the directory containing extracted interferograms.
+            Expected to follow the standard HyP3 directory structure with
+            subdirectories for each interferogram.
+
+    Returns:
+        str: Formatted configuration string with MintPy parameters ready for
+            processing. Contains paths to input files (unwrapped phase, coherence,
+            DEM, angles) and pipeline control parameters.
+
+    Raises:
+        ValueError: If zip_dir does not contain valid interferograms (.tif files).
+
+    Warning:
+        DO NOT add tabs (\t) to the returned string.
+        MintPy requires whitespace characters as configuration delimiters.
+        Tabs will cause parsing errors and silent failures in network inversion.
+
     """
     unw_pat = str(zip_dir / "*" / "*_unw_phase.tif")
     cor_pat = str(zip_dir / "*" / "*_corr.tif")
@@ -69,7 +76,6 @@ def _make_cfg(zip_dir: Path) -> str:
     inc_pat = str(zip_dir / "*" / "*_lv_theta.tif")
     azi_pat = str(zip_dir / "*" / "*_lv_phi.tif")
 
-    # Find minimum dimensions across all unw_phase.tif to construct a subset bounding box
     tifs = list(zip_dir.glob("*/*_unw_phase.tif"))
     min_h = min_w = "auto"
     if tifs:
@@ -109,14 +115,6 @@ mintpy.networkInversion.minTempCoh = 0.4
 
 
 def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
-    """
-    Run MintPy TimeSeriesAnalysis pipeline via Python API.
-    Raises ValueError with details on failure.
-
-    Correct MintPy step names (from smallbaselineApp.py):
-      load_data, reference_point, network_inversion, deramp, velocity
-    """
-    import warnings
     warnings.filterwarnings("ignore")
 
     # Configure MintPy logging to go to a file so it doesn't pollute FastAPI logs
@@ -194,7 +192,6 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
         fh.close()
 
 
-# ── Main endpoint ──────────────────────────────────────────────────────────────
 
 @router.post("/process")
 async def process_interferograms(files: List[UploadFile] = File(...)):
@@ -221,7 +218,6 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
     zip_dir.mkdir()
 
     try:
-        # ── 1. Save + extract ZIPs ─────────────────────────────────────────────
         igram_meta = []
         for upload in files:
             raw  = await upload.read()
@@ -250,7 +246,6 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                 zf.extractall(zip_dir)
             zip_bytes.unlink()  # remove .zip to save space
 
-        # ── 2. Run MintPy pipeline ─────────────────────────────────────────────
         try:
             _run_mintpy_pipeline(work_dir, zip_dir)
         except ValueError as exc:
@@ -280,11 +275,17 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
 
         geometry_geo = work_dir / "inputs" / "geometryGeo.h5"
 
-        # ── 4. Read results ────────────────────────────────────────────────────
         with h5py.File(velocity_h5, "r") as vf:
             vel_data  = vf["velocity"][:]          # 2D (rows × cols) in m/yr
             vel_mm    = vel_data * 1000.0           # → mm/yr
             vel_attrs = dict(vf.attrs)
+
+        # Centrar la velocidad restando la mediana estadística (evita el sesgo del píxel de referencia de MintPy)
+        vmask = np.isfinite(vel_mm) & (vel_mm != 0.0)
+        median_vel = np.nanmedian(vel_mm[vmask])
+        if not np.isnan(median_vel):
+            vel_mm[vmask] -= median_vel
+
 
         use_grid = False
         if geometry_geo.exists():
@@ -333,7 +334,6 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                        "Verifica la cobertura y coherencia de tus interferogramas.",
             )
 
-        # ── 5. Build results list ──────────────────────────────────────────────
         results = [
             {
                 "lat": round(float(lats_v[i]), 4),
@@ -343,7 +343,6 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
             for i in range(len(vels_v))
         ]
 
-        # ── 6. Statistics ──────────────────────────────────────────────────────
         all_dates = [m["date1"] for m in igram_meta] + [m["date2"] for m in igram_meta]
         stats = {
             "min":              round(float(np.min(vels_v)),  2),
@@ -363,7 +362,6 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
 
-        # ── 7. Multi-sheet Excel ───────────────────────────────────────────────
         EXCEL_MAX = 1_000_000
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             # Hoja 1: Velocidad Lineal Promedio
@@ -394,14 +392,14 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
 
                         # Tratar de cargar el modelo atmosférico si existe
                         aps_array = None
+                        aps_dates = None
                         if era5_model.exists():
                             with h5py.File(era5_model, "r") as ef:
                                 if "unwrapPhase" in ef:
                                     aps_array = ef["unwrapPhase"][:]
-                                elif "timeseries" in ef:
-                                    # PyAPS ERA5 a veces genera un cubo por fecha, no por interferograma original
-                                    # lo ignoramos para mantener la robustez si el shape no coincide
-                                    pass
+                                elif "timeseries" in ef and "date" in ef:
+                                    aps_array = ef["timeseries"][:]
+                                    aps_dates = [d.decode("utf-8") for d in ef["date"][:]]
 
                         # Recorrer cada interferograma pero usando los mismos índices de 'sample'
                         sample_indices = list(range(0, len(lats_v), step_s))[:500]
@@ -414,6 +412,13 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                             
                             # Fase de este interferograma: [rows, cols]
                             phase_2d = phase_array[idx]
+                            
+                            # Centrar también cada interferograma por su mediana para anular el sesgo del píxel de referencia
+                            pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
+                            median_phase = np.nanmedian(phase_2d[pmask])
+                            if not np.isnan(median_phase):
+                                phase_2d[pmask] -= median_phase
+
                             phase_1d = phase_2d[valid].flatten()
                             phase_sample = [phase_1d[i] for i in sample_indices]
                             
@@ -426,13 +431,26 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                                 "Desplazamiento_mm": [round(float(d), 2) for d in disp_mm]
                             }
 
-                            if aps_array is not None and idx < len(aps_array):
-                                aps_2d = aps_array[idx]
-                                aps_1d = aps_2d[valid].flatten()
-                                aps_sample = [aps_1d[i] for i in sample_indices]
-                                # APS en interferogramas ERA5 ya suele estar en radianes o metros
-                                # MintPy guarda APS típicamente en metros en ERA5.h5
-                                sheet_data["ERA5_APS_m"] = [round(float(a), 4) for a in aps_sample]
+                            if aps_array is not None:
+                                if aps_dates is not None:
+                                    # Viene de un cubo timeseries (un archivo por fecha)
+                                    if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
+                                        d1 = d_pair[0].decode("utf-8")
+                                        d2 = d_pair[1].decode("utf-8")
+                                        if d1 in aps_dates and d2 in aps_dates:
+                                            idx1 = aps_dates.index(d1)
+                                            idx2 = aps_dates.index(d2)
+                                            aps_2d = aps_array[idx2] - aps_array[idx1]
+                                            aps_1d = aps_2d[valid].flatten()
+                                            aps_sample = [aps_1d[i] for i in sample_indices]
+                                            sheet_data["ERA5_APS_m"] = [round(float(a), 4) for a in aps_sample]
+                                else:
+                                    # Viene de un cubo ifgramStack (alineado 1:1 con el interferograma)
+                                    if idx < len(aps_array):
+                                        aps_2d = aps_array[idx]
+                                        aps_1d = aps_2d[valid].flatten()
+                                        aps_sample = [aps_1d[i] for i in sample_indices]
+                                        sheet_data["ERA5_APS_m"] = [round(float(a), 4) for a in aps_sample]
 
                             df_if = pd.DataFrame(sheet_data)
                             # Truncar nombre a 31 chars máximo para Excel
@@ -446,7 +464,6 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-# ── Read-only endpoints ────────────────────────────────────────────────────────
 
 @router.get("/results")
 def get_results():

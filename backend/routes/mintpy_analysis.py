@@ -13,6 +13,7 @@ import warnings
 from dotenv import load_dotenv
 load_dotenv()
 import h5py
+from mintpy.smallbaselineApp import TimeSeriesAnalysis
 import numpy as np
 import pandas as pd
 import rasterio
@@ -115,9 +116,43 @@ mintpy.networkInversion.minTempCoh = 0.4
 
 
 def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
+    """Executes the complete MintPy SBAS time-series analysis pipeline.
+
+    Orchestrates the full MintPy processing workflow from interferogram loading
+    through deformation velocity estimation. Handles configuration generation,
+    atmospheric data setup, and applies necessary patches for NumPy compatibility.
+
+    Args:
+        work_dir (Path): Working directory where MintPy outputs and logs will be
+            stored. Created files include velocity.h5, interferogram stack, and
+            atmospheric correction models.
+        zip_dir (Path): Directory containing extracted HyP3 interferogram products.
+            Should have been populated by unzipping multiple HyP3 product archives.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the MintPy pipeline fails during any processing step. The
+            exception message includes the last 3000 characters of the log file
+            for debugging. Specific error conditions include:
+            - Network inversion failures
+            - NumPy array dimension mismatches
+            - MintPy SystemExit with non-zero code
+            - Missing or incompatible interferogram data
+
+
+    Note:
+        - Executes 6 sequential processing steps:
+          1. load_data: Load interferograms and associated data
+          2. reference_point: Establish reference point for unwrapped phase
+          3. invert_network: Invert interferogram network for time series
+          4. correct_troposphere: Apply ERA5-based atmospheric delay correction
+          5. deramp: Remove linear phase ramps from interferograms
+          6. velocity: Calculate deformation velocities
+    """
     warnings.filterwarnings("ignore")
 
-    # Configure MintPy logging to go to a file so it doesn't pollute FastAPI logs
     log_path = work_dir / "mintpy_run.log"
     mintpy_logger = logging.getLogger("mintpy")
     fh = logging.FileHandler(log_path)
@@ -127,7 +162,6 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
     cfg_path = work_dir / "mintpy.cfg"
     cfg_path.write_text(_make_cfg(zip_dir))
 
-    # Escribir el archivo .cdsapirc requerido por PyAPS para descargar ERA5
     cds_url = os.getenv("ERA5_URL", "https://cds.climate.copernicus.eu/api")
     cds_key = os.getenv("ERA5_KEY")
     if cds_key:
@@ -135,8 +169,6 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
         cdsapirc_path.write_text(f"url: {cds_url}\nkey: {cds_key}\n")
 
     try:
-        from mintpy.smallbaselineApp import TimeSeriesAnalysis
-
         tsa = TimeSeriesAnalysis(
             customTemplateFile=str(cfg_path),
             workDir=str(work_dir),
@@ -157,7 +189,6 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
             
         inv.estimate_timeseries = patched_estimate
 
-        # Official step names from smallbaselineApp.run()
         steps = [
             "load_data",
             "reference_point",
@@ -169,21 +200,16 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
         tsa.run(steps=steps)
 
     except SystemExit as e:
-        # MintPy sometimes calls sys.exit(0) on success — that's OK
         if str(e) != "0" and e.code != 0:
             log_tail = log_path.read_text()[-3000:] if log_path.exists() else "(no log)"
             raise ValueError(f"MintPy pipeline exited with code {e.code}.\nLog:\n{log_tail}")
     except Exception as e:
         log_tail = log_path.read_text()[-3000:] if log_path.exists() else "(no log)"
-        
-        # Intercept common MintPy failures
+
         err_str = str(e).lower()
         if isinstance(e, ValueError) and "sequence" in err_str:
             raise ValueError(
-                "MintPy falló en la inversión de red (network_inversion). "
-                "Esto casi siempre significa que MintPy descartó interferogramas "
-                "(por tener distinto tamaño de grid o baja coherencia) y quedaron "
-                "menos de 3 operativos. Por favor, sube más interferogramas del mismo frame."
+                "MintPy falló en la inversión de red (network_inversion)."
             )
             
         raise ValueError(f"{type(e).__name__}: {e}\nLog:\n{log_tail}")
@@ -195,8 +221,67 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
 
 @router.post("/process")
 async def process_interferograms(files: List[UploadFile] = File(...)):
-    """
-    Runs the real MintPy SBAS pipeline on a set of HyP3 interferogram ZIPs.
+    """Processes HyP3 interferogram products through the MintPy SBAS pipeline.
+
+    Orchestrates the complete workflow for time-series deformation analysis:
+    receives compressed HyP3 interferogram products, validates input, extracts
+    and decompresses data, runs the MintPy Small Baseline Subset (SBAS) processing
+    pipeline, and generates comprehensive velocity and displacement results with
+    geographic georeferencing.
+
+    This endpoint handles coordinate system transformations (UTM to WGS84 if needed),
+    median filtering to remove reference point bias, and exports results in both
+    JSON and Excel formats with detailed per-interferogram displacement data.
+
+    Args:
+        files (List[UploadFile]): List of uploaded ZIP files containing HyP3
+            interferogram products. Each ZIP must contain:
+            - *_unw_phase.tif: Unwrapped interferometric phase (radians)
+            - *_corr.tif: Coherence map [0, 1]
+            - *_dem.tif: Digital elevation model (meters)
+            - *_lv_theta.tif: Local incidence angle (radians)
+            - *_lv_phi.tif: Local azimuth angle (radians)
+
+            Filenames must follow HyP3/ASF naming convention:
+            S1[AB]A_YYYYMMDDTHHMMSS_YYYYMMDDTHHMMSS_*.zip
+
+    Returns:
+        dict: Processing results containing:
+            - stats (dict): Summary statistics with keys:
+                - min (float): Minimum velocity in mm/yr
+                - max (float): Maximum velocity in mm/yr
+                - mean (float): Mean velocity in mm/yr
+                - std (float): Standard deviation of velocities
+                - n_points (int): Number of valid measurements
+                - n_interferograms (int): Number of input interferograms
+                - date_start (str): ISO format start date
+                - date_end (str): ISO format end date
+                - excel_rows (int): Total rows exported to Excel
+
+            - interferograms (list): Metadata for each input interferogram with keys:
+                - filename (str): Input ZIP filename
+                - date1 (str): ISO format acquisition start date
+                - date2 (str): ISO format acquisition end date
+                - days (int): Temporal baseline in days
+
+            - sample (list): Georeferenced velocity sample (max 500 points) with keys:
+                - lat (float): WGS84 latitude, precision 4 decimals
+                - lon (float): WGS84 longitude, precision 4 decimals
+                - velocidad_mm_yr (float): LOS deformation velocity, precision 2 decimals
+
+    Raises:
+        HTTPException (400): If fewer than MIN_INTERFEROGRAMS (3) files provided,
+            if any file is not a .zip archive, or if date extraction from filename
+            fails. Status code 400.
+
+        HTTPException (422): If MintPy rejects interferograms due to dimension
+            mismatch (rows/columns differ across dataset), or if final velocity.h5
+            contains no coherent pixels. Status code 422.
+
+        HTTPException (500): If MintPy pipeline execution fails, velocity.h5 is not
+            generated after successful pipeline run, or critical intermediate files
+            are missing. Response includes last 3000 characters of mintpy_run.log
+            for debugging. Status code 500.
     """
     if len(files) < MIN_INTERFEROGRAMS:
         raise HTTPException(
@@ -241,10 +326,9 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                 "days": abs((d2 - d1).days),
             })
 
-            # The ZIP contains a top-level folder — extract directly into zip_dir
             with zipfile.ZipFile(zip_bytes, "r") as zf:
                 zf.extractall(zip_dir)
-            zip_bytes.unlink()  # remove .zip to save space
+            zip_bytes.unlink()
 
         try:
             _run_mintpy_pipeline(work_dir, zip_dir)
@@ -253,7 +337,6 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
 
         velocity_h5 = work_dir / "velocity.h5"
         if not velocity_h5.exists():
-            # Check the log for clues
             log_tail = (work_dir / "mintpy_run.log").read_text()[-3000:] \
                 if (work_dir / "mintpy_run.log").exists() else "(no log)"
             
@@ -276,8 +359,8 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
         geometry_geo = work_dir / "inputs" / "geometryGeo.h5"
 
         with h5py.File(velocity_h5, "r") as vf:
-            vel_data  = vf["velocity"][:]          # 2D (rows × cols) in m/yr
-            vel_mm    = vel_data * 1000.0           # → mm/yr
+            vel_data  = vf["velocity"][:] # 2D (rows × cols) in m/yr
+            vel_mm    = vel_data * 1000.0
             vel_attrs = dict(vf.attrs)
 
         # Centrar la velocidad restando la mediana estadística (evita el sesgo del píxel de referencia de MintPy)
@@ -305,8 +388,7 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
             lon_arr = lon0 + np.arange(cols) * dlon
             lon_grid, lat_grid = np.meshgrid(lon_arr, lat_arr)
             
-            # Si los valores exceden los límites de grados, están en proyeccion UTM (ej. HyP3)
-            # Intentamos leer el EPSG de los atributos de MintPy, o asumimos UTM zona local
+            # Si los valores exceden los límites de grados, están en proyeccion UTM
             if abs(lat0) > 90 or abs(lon0) > 180:
                 epsg = vel_attrs.get("EPSG", 32616)
                 if isinstance(epsg, (np.ndarray, bytes)):
@@ -320,7 +402,6 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                 except Exception as e:
                     logging.warning(f"Error convirtiendo de UTM a WGS84: {e}")
 
-        # Valid pixels = finite and inside temporal-coherence mask (MintPy sets NaN/0 for masked px)
         valid = np.isfinite(vel_mm) & (vel_mm != 0.0)
 
         lats_v = lat_grid[valid].flatten()
@@ -401,11 +482,9 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                                     aps_array = ef["timeseries"][:]
                                     aps_dates = [d.decode("utf-8") for d in ef["date"][:]]
 
-                        # Recorrer cada interferograma pero usando los mismos índices de 'sample'
                         sample_indices = list(range(0, len(lats_v), step_s))[:500]
                         
                         for idx, d_pair in enumerate(dates_array):
-                            # d_pair es típicamente b'20250101-20250113'
                             sheet_title = d_pair[0].decode("utf-8") if isinstance(d_pair, np.ndarray) and len(d_pair) > 0 else "Unk"
                             if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
                                 sheet_title = f"{d_pair[0].decode('utf-8')}_{d_pair[1].decode('utf-8')}"
@@ -433,7 +512,7 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
 
                             if aps_array is not None:
                                 if aps_dates is not None:
-                                    # Viene de un cubo timeseries (un archivo por fecha)
+                                    # Viene de un cubo timeseries
                                     if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
                                         d1 = d_pair[0].decode("utf-8")
                                         d2 = d_pair[1].decode("utf-8")
@@ -445,7 +524,7 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                                             aps_sample = [aps_1d[i] for i in sample_indices]
                                             sheet_data["ERA5_APS_m"] = [round(float(a), 4) for a in aps_sample]
                                 else:
-                                    # Viene de un cubo ifgramStack (alineado 1:1 con el interferograma)
+                                    # Viene de un cubo ifgramStack
                                     if idx < len(aps_array):
                                         aps_2d = aps_array[idx]
                                         aps_1d = aps_2d[valid].flatten()
@@ -453,7 +532,6 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                                         sheet_data["ERA5_APS_m"] = [round(float(a), 4) for a in aps_sample]
 
                             df_if = pd.DataFrame(sheet_data)
-                            # Truncar nombre a 31 chars máximo para Excel
                             sheet_name_safe = sheet_title[:31] 
                             df_if.to_excel(writer, sheet_name=sheet_name_safe, index=False)
 

@@ -11,7 +11,6 @@ import {
 } from "recharts";
 import { API_URL } from "../../services/api";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface IgramMeta {
   filename: string;
@@ -43,15 +42,11 @@ interface ProcessingResults {
   sample: VelocityPoint[];
 }
 
-// ── Color scale helpers ────────────────────────────────────────────────────────
 
 function velocityColor(val: number, min: number, max: number): string {
-  // Use a symmetric bound so that 0 is perfectly perfectly anchored in the middle
   const limit = Math.max(Math.abs(min), Math.abs(max));
-  if (limit === 0) return "rgb(0, 255, 0)"; // perfect green
-  
-  // Normalize from -limit to +limit to be 0.0 to 1.0
-  // t = 0.5 is exactly 0 mm/yr
+  if (limit === 0) return "rgb(0, 255, 0)";
+
   const t = Math.max(0, Math.min(1, (val + limit) / (2 * limit)));
   
   // Deformation colormap:

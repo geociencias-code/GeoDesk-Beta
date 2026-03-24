@@ -444,12 +444,18 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
         RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
 
         EXCEL_MAX = 1_000_000
+        
+        # Decide which indices to use for Excel exports to avoid exceeding max rows
+        step_excel = 1
+        if len(results) > EXCEL_MAX:
+            step_excel = len(results) // EXCEL_MAX
+        
+        excel_indices = list(range(0, len(results), step_excel))[:EXCEL_MAX]
+        
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
             # Hoja 1: Velocidad Lineal Promedio
-            df_res = pd.DataFrame(results)
+            df_res = pd.DataFrame([results[i] for i in excel_indices])
             df_res.columns = ["Latitud", "Longitud", "Velocidad_mm_año"]
-            if len(df_res) > EXCEL_MAX:
-                df_res = df_res.iloc[:: len(df_res) // EXCEL_MAX].head(EXCEL_MAX)
             df_res.to_excel(writer, sheet_name="Velocidad_SBAS", index=False)
 
             # Hoja 2: Metadata de Interferogramas
@@ -457,7 +463,7 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
             df_igs.columns = ["Archivo", "Fecha_1", "Fecha_2", "Días_baseline"]
             df_igs.to_excel(writer, sheet_name="Interferogramas_Info", index=False)
 
-            # Hojas 3+: Una por interferograma con sus desplazamientos 
+            # Hoja 3: Todos los interferogramas juntos (Desplazamiento y Error APS en mm)
             if_stack = work_dir / "inputs" / "ifgramStack.h5"
             era5_model = work_dir / "inputs" / "ERA5.h5"
             
@@ -481,59 +487,59 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                                 elif "timeseries" in ef and "date" in ef:
                                     aps_array = ef["timeseries"][:]
                                     aps_dates = [d.decode("utf-8") for d in ef["date"][:]]
-
-                        sample_indices = list(range(0, len(lats_v), step_s))[:500]
+                        
+                        # Inicializar datos con coordenadas completas
+                        sheet_data = {
+                            "Lat": [results[i]["lat"] for i in excel_indices],
+                            "Lon": [results[i]["lon"] for i in excel_indices]
+                        }
                         
                         for idx, d_pair in enumerate(dates_array):
-                            sheet_title = d_pair[0].decode("utf-8") if isinstance(d_pair, np.ndarray) and len(d_pair) > 0 else "Unk"
                             if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
-                                sheet_title = f"{d_pair[0].decode('utf-8')}_{d_pair[1].decode('utf-8')}"
+                                d1 = d_pair[0].decode("utf-8")
+                                d2 = d_pair[1].decode("utf-8")
+                                col_suffix = f"{d1}_{d2}"
+                            else:
+                                col_suffix = f"Unk_{idx}"
+                                d1 = d2 = None
                             
                             # Fase de este interferograma: [rows, cols]
                             phase_2d = phase_array[idx]
                             
-                            # Centrar también cada interferograma por su mediana para anular el sesgo del píxel de referencia
+                            # Centrar por mediana
                             pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
                             median_phase = np.nanmedian(phase_2d[pmask])
                             if not np.isnan(median_phase):
                                 phase_2d[pmask] -= median_phase
 
                             phase_1d = phase_2d[valid].flatten()
-                            phase_sample = [phase_1d[i] for i in sample_indices]
                             
                             # Desplazamiento = Fase_rad * rad2mm
-                            disp_mm = [p * rad2mm for p in phase_sample]
-
-                            sheet_data = {
-                                "Lat": [s["lat"] for s in sample],
-                                "Lon": [s["lon"] for s in sample],
-                                "Desplazamiento_mm": [round(float(d), 2) for d in disp_mm]
-                            }
-
+                            disp_mm = [round(float(phase_1d[i] * rad2mm), 2) for i in excel_indices]
+                            sheet_data[f"Def_{col_suffix}_mm"] = disp_mm
+                            
                             if aps_array is not None:
-                                if aps_dates is not None:
+                                aps_1d = None
+                                if aps_dates is not None and d1 and d2:
                                     # Viene de un cubo timeseries
-                                    if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
-                                        d1 = d_pair[0].decode("utf-8")
-                                        d2 = d_pair[1].decode("utf-8")
-                                        if d1 in aps_dates and d2 in aps_dates:
-                                            idx1 = aps_dates.index(d1)
-                                            idx2 = aps_dates.index(d2)
-                                            aps_2d = aps_array[idx2] - aps_array[idx1]
-                                            aps_1d = aps_2d[valid].flatten()
-                                            aps_sample = [aps_1d[i] for i in sample_indices]
-                                            sheet_data["ERA5_APS_m"] = [round(float(a), 4) for a in aps_sample]
+                                    if d1 in aps_dates and d2 in aps_dates:
+                                        idx1 = aps_dates.index(d1)
+                                        idx2 = aps_dates.index(d2)
+                                        aps_2d = aps_array[idx2] - aps_array[idx1]
+                                        aps_1d = aps_2d[valid].flatten()
                                 else:
                                     # Viene de un cubo ifgramStack
                                     if idx < len(aps_array):
                                         aps_2d = aps_array[idx]
                                         aps_1d = aps_2d[valid].flatten()
-                                        aps_sample = [aps_1d[i] for i in sample_indices]
-                                        sheet_data["ERA5_APS_m"] = [round(float(a), 4) for a in aps_sample]
+                                
+                                if aps_1d is not None:
+                                    # Convertimos el valor asumiendo m -> mm (multiplicando por 1000)
+                                    aps_mm = [round(float(aps_1d[i] * 1000.0), 4) for i in excel_indices]
+                                    sheet_data[f"Err_{col_suffix}_mm"] = aps_mm
 
-                            df_if = pd.DataFrame(sheet_data)
-                            sheet_name_safe = sheet_title[:31] 
-                            df_if.to_excel(writer, sheet_name=sheet_name_safe, index=False)
+                        df_if = pd.DataFrame(sheet_data)
+                        df_if.to_excel(writer, sheet_name="Interferogramas_Datos", index=False)
 
         stats["excel_rows"] = len(df_res)
         return output

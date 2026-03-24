@@ -43,18 +43,32 @@ interface ProcessingResults {
 }
 
 
+/**
+ * Maps a ground deformation velocity value to an RGB color string.
+ * 
+ * Uses a five-point color scale that transitions from subsidence (red) through
+ * stable conditions (green) to uplift (blue). The color mapping is normalized
+ * to the range of input data, allowing proper visualization of asymmetric
+ * deformation patterns.
+ * 
+ * @param {number} val - The velocity value in mm/year to be mapped to a color
+ * @param {number} min - The minimum velocity value in the dataset (typically subsidence)
+ * @param {number} max - The maximum velocity value in the dataset (typically uplift)
+ * @returns {string} An RGB color string in the format "rgb(r,g,b)" where r,g,b are 0-255
+ *
+ * @see The color scale follows InSAR conventions:
+ * - 0.0 (Max Subsidence) → Red rgb(255,0,0)
+ * - 0.25 → Yellow rgb(255,255,0)
+ * - 0.50 (Stable 0 mm/yr) → Green rgb(0,255,0)
+ * - 0.75 → Cyan rgb(0,255,255)
+ * - 1.00 (Max Uplift) → Blue rgb(0,0,255)
+ */
 function velocityColor(val: number, min: number, max: number): string {
   const limit = Math.max(Math.abs(min), Math.abs(max));
   if (limit === 0) return "rgb(0, 255, 0)";
 
   const t = Math.max(0, Math.min(1, (val + limit) / (2 * limit)));
-  
-  // Deformation colormap:
-  // 0.0 (Max Subsidence) = Red (255,0,0)
-  // 0.25 = Yellow (255,255,0)
-  // 0.50 (Stable 0 mm/yr) = Green (0,255,0)
-  // 0.75 = Cyan (0,255,255)
-  // 1.00 (Max Uplift) = Blue (0,0,255)
+
   
   if (t < 0.25) {
     const u = t / 0.25; 
@@ -71,9 +85,22 @@ function velocityColor(val: number, min: number, max: number): string {
   }
 }
 
-// ── Histogram helper ───────────────────────────────────────────────────────────
 
 function buildHistogram(points: VelocityPoint[], bins = 20): { range: string; count: number }[] {
+  /**
+ * Builds a distribution histogram of ground deformation velocity values.
+ *
+ * Groups velocity values into bins and counts how many points fall within each range.
+ * Each bin is labeled with its minimum value and contains the count of points within
+ * that range.
+ *
+ * @param {VelocityPoint[]} points - Array of points containing ground deformation velocity data
+ * @param {number} [bins=20] - Number of bins to divide the velocity range into. Defaults to 20.
+ * @returns {{ range: string; count: number }[]} Array of objects with two properties:
+ *          - range: string with the minimum value of the range (e.g., "-5.0")
+ *          - count: number with the quantity of points in that bin
+ *
+ **/
   if (!points.length) return [];
   const vals = points.map((p) => p.velocidad_mm_yr);
   const mn = Math.min(...vals);

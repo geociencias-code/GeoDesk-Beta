@@ -28,6 +28,7 @@ interface VelocityStats {
   n_interferograms: number;
   date_start: string;
   date_end: string;
+  era5_successful?: boolean;
 }
 
 interface VelocityPoint {
@@ -120,6 +121,12 @@ function buildHistogram(points: VelocityPoint[], bins = 20): { range: string; co
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
+interface SeedPoint {
+  lat: number;
+  lon: number;
+  is_mintpy_default: boolean;
+}
+
 export default function MintPyAnalysis() {
   const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -127,6 +134,8 @@ export default function MintPyAnalysis() {
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [results, setResults] = useState<ProcessingResults | null>(null);
+  const [seedPoints, setSeedPoints] = useState<SeedPoint[]>([]);
+  const [selectedSeed, setSelectedSeed] = useState<SeedPoint | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const MIN_IGRAMS = 3;
 
@@ -157,6 +166,46 @@ export default function MintPyAnalysis() {
 
   // ── Process ──────────────────────────────────────────────────────────────────
 
+  const handlePreview = async () => {
+    if (files.length < MIN_IGRAMS) {
+      setMessage(`❌ Se requieren al menos ${MIN_IGRAMS} interferogramas.`);
+      return;
+    }
+
+    setBusy(true);
+    setProgress(0);
+    setSeedPoints([]);
+    setSelectedSeed(null);
+    setMessage("🔍 Buscando los puntos semilla de mayor coherencia...");
+
+    try {
+      const formData = new FormData();
+      files.forEach((f) => formData.append("files", f, f.name));
+
+      const response = await axios.post(`${API_URL}/api/mintpy/preview_reference`, formData, {
+        onUploadProgress: (e) => {
+          if (e.total) setProgress(Math.round((e.loaded / e.total) * 100));
+        },
+      });
+
+      const pts = response.data.seed_points as SeedPoint[];
+      setSeedPoints(pts);
+      const def = pts.find(p => p.is_mintpy_default) || pts[0];
+      setSelectedSeed(def);
+      setMessage(`✅ Se encontraron ${pts.length} puntos con coherencia máxima. Selecciona uno para anclar el cálculo.`);
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        const detail = error.response?.data?.detail || error.message;
+        setMessage(`❌ Error: ${detail}`);
+      } else {
+        setMessage("❌ Error desconocido al previsualizar.");
+      }
+    } finally {
+      setBusy(false);
+      setProgress(0);
+    }
+  };
+
   const handleProcess = async () => {
     if (files.length < MIN_IGRAMS) {
       setMessage(`❌ Se requieren al menos ${MIN_IGRAMS} interferogramas. Actualmente tienes ${files.length}.`);
@@ -166,11 +215,15 @@ export default function MintPyAnalysis() {
     setBusy(true);
     setProgress(0);
     setResults(null);
-    setMessage("⏳ Enviando archivos al servidor y ejecutando inversión SBAS…");
+    setMessage("⏳ Ejecutando inversión SBAS con el punto semilla seleccionado...");
 
     try {
       const formData = new FormData();
       files.forEach((f) => formData.append("files", f, f.name));
+      if (selectedSeed) {
+        formData.append("ref_lat", selectedSeed.lat.toString());
+        formData.append("ref_lon", selectedSeed.lon.toString());
+      }
 
       const response = await axios.post(`${API_URL}/api/mintpy/process`, formData, {
         onUploadProgress: (e) => {
@@ -197,6 +250,8 @@ export default function MintPyAnalysis() {
   const handleReset = () => {
     setFiles([]);
     setResults(null);
+    setSeedPoints([]);
+    setSelectedSeed(null);
     setMessage("");
     setProgress(0);
   };
@@ -417,27 +472,51 @@ export default function MintPyAnalysis() {
 
           {/* Action Buttons */}
           <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              onClick={handleProcess}
-              disabled={busy || files.length < MIN_IGRAMS}
-              style={{
-                flex: 1,
-                padding: "12px",
-                borderRadius: "10px",
-                border: "none",
-                background:
-                  busy || files.length < MIN_IGRAMS
-                    ? "rgba(99,102,241,0.3)"
-                    : "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                color: "white",
-                fontWeight: 600,
-                fontSize: "0.9rem",
-                cursor: busy || files.length < MIN_IGRAMS ? "not-allowed" : "pointer",
-                transition: "all 0.2s",
-              }}
-            >
-              {busy ? "⏳ Procesando…" : "🚀 Procesar"}
-            </button>
+            {seedPoints.length === 0 ? (
+              <button
+                onClick={handlePreview}
+                disabled={busy || files.length < MIN_IGRAMS}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: "10px",
+                  border: "none",
+                  background:
+                    busy || files.length < MIN_IGRAMS
+                      ? "rgba(99,102,241,0.3)"
+                      : "linear-gradient(135deg, #0ea5e9, #3b82f6)",
+                  color: "white",
+                  fontWeight: 600,
+                  fontSize: "0.9rem",
+                  cursor: busy || files.length < MIN_IGRAMS ? "not-allowed" : "pointer",
+                  transition: "all 0.2s",
+                }}
+              >
+                {busy ? "⏳ Buscando Semillas…" : "🔍 Buscar Puntos Semilla"}
+              </button>
+            ) : (
+              <button
+                onClick={handleProcess}
+                disabled={busy || files.length < MIN_IGRAMS}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: "10px",
+                  border: "none",
+                  background:
+                    busy || files.length < MIN_IGRAMS
+                      ? "rgba(16,185,129,0.3)"
+                      : "linear-gradient(135deg, #10b981, #059669)",
+                  color: "white",
+                  fontWeight: 600,
+                  fontSize: "0.9rem",
+                  cursor: busy || files.length < MIN_IGRAMS ? "not-allowed" : "pointer",
+                  transition: "all 0.2s",
+                }}
+              >
+                {busy ? "⏳ Procesando…" : "🚀 Ejecutar Análisis SBAS"}
+              </button>
+            )}
             {(files.length > 0 || results) && (
               <button
                 onClick={handleReset}
@@ -456,6 +535,51 @@ export default function MintPyAnalysis() {
               </button>
             )}
           </div>
+
+          {/* Seed Points Selection */}
+          {seedPoints.length > 0 && !results && (
+            <div style={{ marginTop: "20px" }}>
+              <h3 style={{ fontSize: "0.85rem", color: "#e2e8f0", marginBottom: "10px" }}>
+                📍 Selecciona el Punto Cero (Semilla):
+              </h3>
+              <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginBottom: "12px" }}>
+                Estos puntos empataron con la máxima coherencia espacial.
+              </p>
+              
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "180px", overflowY: "auto", paddingRight: "4px" }}>
+                {seedPoints.map((p, i) => {
+                  const isSelected = selectedSeed === p;
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => setSelectedSeed(p)}
+                      style={{
+                        padding: "10px 12px",
+                        background: isSelected ? "rgba(56,189,248,0.15)" : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${isSelected ? "#38bdf8" : "rgba(255,255,255,0.1)"}`,
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        transition: "all 0.2s"
+                      }}
+                    >
+                      <div style={{ fontSize: "0.8rem", color: isSelected ? "#e0f2fe" : "#cbd5e1" }}>
+                        Lat: {p.lat.toFixed(4)} <br/>
+                        Lon: {p.lon.toFixed(4)}
+                      </div>
+                      {p.is_mintpy_default && (
+                        <span style={{ fontSize: "0.65rem", padding: "2px 6px", background: "#f59e0b", color: "#fff", borderRadius: "10px" }}>
+                          MintPy Default
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Interferogram list (after processing) */}
           {results && (
@@ -567,21 +691,38 @@ export default function MintPyAnalysis() {
                     <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", margin: 0 }}>
                       🗺️ Mapa de Velocidad de Deformación
                     </h3>
-                    <a
-                      href={`${API_URL}/api/mintpy/export`}
-                      download
-                      style={{
-                        padding: "6px 14px",
-                        background: "linear-gradient(135deg, #10b981, #059669)",
-                        color: "white",
-                        borderRadius: "8px",
-                        fontSize: "0.78rem",
-                        fontWeight: 600,
-                        textDecoration: "none",
-                      }}
-                    >
-                      📊 Exportar Excel
-                    </a>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <a
+                        href={`${API_URL}/api/mintpy/export`}
+                        download
+                        style={{
+                          padding: "6px 14px",
+                          background: "linear-gradient(135deg, #10b981, #059669)",
+                          color: "white",
+                          borderRadius: "8px",
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          textDecoration: "none",
+                        }}
+                      >
+                        📊 Exportar Excel
+                      </a>
+                      <a
+                        href={`${API_URL}/api/mintpy/export_csv`}
+                        download
+                        style={{
+                          padding: "6px 14px",
+                          background: "linear-gradient(135deg, #6366f1, #4f46e5)",
+                          color: "white",
+                          borderRadius: "8px",
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          textDecoration: "none",
+                        }}
+                      >
+                        💾 Descargar CSV completo
+                      </a>
+                    </div>
                   </div>
 
                   {/* Color scale strip */}
@@ -657,9 +798,24 @@ export default function MintPyAnalysis() {
                       fontSize: "0.7rem",
                       color: "#475569",
                       textAlign: "center",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "10px"
                     }}
                   >
-                    Periodo: {results.stats.date_start} → {results.stats.date_end} | {results.stats.n_interferograms} interferogramas
+                    <span>Periodo: {results.stats.date_start} → {results.stats.date_end} | {results.stats.n_interferograms} interferogramas</span>
+                    {results.stats.era5_successful !== undefined && (
+                      <span style={{
+                        padding: "2px 6px",
+                        borderRadius: "4px",
+                        background: results.stats.era5_successful ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
+                        color: results.stats.era5_successful ? "#10b981" : "#ef4444",
+                        fontWeight: 600
+                      }}>
+                        {results.stats.era5_successful ? "☁️ ERA5 OK" : "⚠️ ERA5 Falló"}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -694,7 +850,7 @@ export default function MintPyAnalysis() {
                           color: "white",
                           fontSize: "0.8rem",
                         }}
-                        formatter={(v: any) => [`${v} píxeles`, "Frecuencia"]}
+                        formatter={(v: number) => [`${v} píxeles`, "Frecuencia"]}
                       />
                       <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} />
                     </BarChart>
@@ -732,21 +888,38 @@ export default function MintPyAnalysis() {
                       ({results.sample.length} de {results.stats.n_points.toLocaleString()} puntos)
                     </span>
                   </h3>
-                  <a
-                    href={`${API_URL}/api/mintpy/export`}
-                    download
-                    style={{
-                      padding: "6px 14px",
-                      background: "linear-gradient(135deg, #10b981, #059669)",
-                      color: "white",
-                      borderRadius: "8px",
-                      fontSize: "0.78rem",
-                      fontWeight: 600,
-                      textDecoration: "none",
-                    }}
-                  >
-                    ⬇️ Descargar Excel completo
-                  </a>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <a
+                      href={`${API_URL}/api/mintpy/export`}
+                      download
+                      style={{
+                        padding: "6px 14px",
+                        background: "linear-gradient(135deg, #10b981, #059669)",
+                        color: "white",
+                        borderRadius: "8px",
+                        fontSize: "0.78rem",
+                        fontWeight: 600,
+                        textDecoration: "none",
+                      }}
+                    >
+                      ⬇️ Descargar Excel (1M lim)
+                    </a>
+                    <a
+                      href={`${API_URL}/api/mintpy/export_csv`}
+                      download
+                      style={{
+                        padding: "6px 14px",
+                        background: "linear-gradient(135deg, #6366f1, #4f46e5)",
+                        color: "white",
+                        borderRadius: "8px",
+                        fontSize: "0.78rem",
+                        fontWeight: 600,
+                        textDecoration: "none",
+                      }}
+                    >
+                      ⬇️ Descargar CSV (Todos los datos)
+                    </a>
+                  </div>
                 </div>
 
                 <div style={{ overflowX: "auto", maxHeight: "340px", overflowY: "auto" }}>

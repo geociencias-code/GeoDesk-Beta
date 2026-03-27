@@ -17,7 +17,7 @@ from mintpy.smallbaselineApp import TimeSeriesAnalysis
 import numpy as np
 import pandas as pd
 import rasterio
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile, Form
 from fastapi.responses import FileResponse
 
 router = APIRouter(prefix="/api/mintpy", tags=["MintPy"])
@@ -27,6 +27,7 @@ RESULTS_DIR = BASE_DIR / "mintpy_results"
 RESULTS_DIR.mkdir(exist_ok=True)
 RESULTS_FILE = RESULTS_DIR / "latest_results.json"
 EXCEL_FILE   = RESULTS_DIR / "velocidad_deformacion.xlsx"
+CSV_FILE     = RESULTS_DIR / "velocidad_deformacion.csv"
 
 MIN_INTERFEROGRAMS = 3
 DATE_RE = re.compile(r"(20\d{6})T")
@@ -44,7 +45,7 @@ def _extract_dates(filename: str):
     return None, None
 
 
-def _make_cfg(zip_dir: Path) -> str:
+def _make_cfg(zip_dir: Path, ref_lat: float = None, ref_lon: float = None) -> str:
     """Generates a MintPy configuration file for SBAS processing.
 
     Constructs a configuration file (.cfg) with the necessary parameters
@@ -94,6 +95,7 @@ def _make_cfg(zip_dir: Path) -> str:
             min_w = min(widths)
     
     subset_yx = f"0:{min_h},0:{min_w}" if min_h != "auto" else "auto"
+    ref_lalo = f"{ref_lat},{ref_lon}" if ref_lat is not None and ref_lon is not None else "auto"
 
     return f"""mintpy.load.processor    = hyp3
 mintpy.load.unwFile      = {unw_pat}
@@ -104,7 +106,7 @@ mintpy.load.azAngleFile  = {azi_pat}
 mintpy.subset.yx         = {subset_yx}
 mintpy.network.coherenceBased     = yes
 mintpy.network.minCoherence       = 0.4
-mintpy.reference.lalo             = auto
+mintpy.reference.lalo             = {ref_lalo}
 mintpy.troposphericDelay.method   = pyaps
 mintpy.troposphericDelay.weatherModel = ERA5
 mintpy.deramp                     = linear
@@ -115,7 +117,7 @@ mintpy.networkInversion.minTempCoh = 0.4
 """
 
 
-def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
+def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path, ref_lat: float = None, ref_lon: float = None) -> None:
     """Executes the complete MintPy SBAS time-series analysis pipeline.
 
     Orchestrates the full MintPy processing workflow from interferogram loading
@@ -160,7 +162,7 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
     mintpy_logger.addHandler(fh)
 
     cfg_path = work_dir / "mintpy.cfg"
-    cfg_path.write_text(_make_cfg(zip_dir))
+    cfg_path.write_text(_make_cfg(zip_dir, ref_lat, ref_lon))
 
     cds_url = os.getenv("ERA5_URL", "https://cds.climate.copernicus.eu/api")
     cds_key = os.getenv("ERA5_KEY")
@@ -220,7 +222,11 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path) -> None:
 
 
 @router.post("/process")
-async def process_interferograms(files: List[UploadFile] = File(...)):
+async def process_interferograms(
+    files: List[UploadFile] = File(...),
+    ref_lat: float = Form(None),
+    ref_lon: float = Form(None)
+):
     """Processes HyP3 interferogram products through the MintPy SBAS pipeline.
 
     Orchestrates the complete workflow for time-series deformation analysis:
@@ -303,7 +309,7 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
     zip_dir.mkdir()
 
     try:
-        igram_meta = []
+        igram_pre_meta = []
         for upload in files:
             raw  = await upload.read()
             zname = upload.filename or "interferogram.zip"
@@ -319,19 +325,43 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                         "El nombre debe seguir el formato HyP3/ASF estándar."
                     ),
                 )
-            igram_meta.append({
-                "filename": zname,
-                "date1": d1.isoformat(),
-                "date2": d2.isoformat(),
-                "days": abs((d2 - d1).days),
-            })
 
             with zipfile.ZipFile(zip_bytes, "r") as zf:
+                # Obtener la carpeta raíz extraída (ej. 'S1A_2020...')
+                top_level = {p.split('/')[0] for p in zf.namelist() if '/' in p}
                 zf.extractall(zip_dir)
             zip_bytes.unlink()
 
+            extracted_folder = list(top_level)[0] if top_level else zname.replace('.zip', '')
+            igram_pre_meta.append({
+                "filename": zname,
+                "date1": d1,
+                "date2": d2,
+                "days": abs((d2 - d1).days),
+                "extracted_folder": extracted_folder
+            })
+
+        # Forzar un determinismo estricto ordenando cronológicamente
+        igram_pre_meta.sort(key=lambda x: (x["date1"], x["date2"], x["filename"]))
+
+        igram_meta = []
+        for idx, meta in enumerate(igram_pre_meta):
+            # Renombrar carpeta: "S1A_2020..." -> "0000_S1A_2020..." 
+            # Esto evita el bug donde la S1B alfabéticamente se procesaba antes que S1A de forma ruidosa alterando el network
+            old_path = zip_dir / meta["extracted_folder"]
+            new_path = zip_dir / f"{idx:04d}_{meta['extracted_folder']}"
+            if old_path.exists():
+                old_path.rename(new_path)
+            
+            igram_meta.append({
+                "filename": meta["filename"],
+                "date1": meta["date1"].isoformat(),
+                "date2": meta["date2"].isoformat(),
+                "days": meta["days"],
+            })
+
         try:
-            _run_mintpy_pipeline(work_dir, zip_dir)
+            _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon)
         except ValueError as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
@@ -424,6 +454,9 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
             for i in range(len(vels_v))
         ]
 
+        era5_model = work_dir / "inputs" / "ERA5.h5"
+        era5_success = era5_model.exists()
+
         all_dates = [m["date1"] for m in igram_meta] + [m["date2"] for m in igram_meta]
         stats = {
             "min":              round(float(np.min(vels_v)),  2),
@@ -434,10 +467,11 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
             "n_interferograms": len(files),
             "date_start":       min(all_dates),
             "date_end":         max(all_dates),
+            "era5_successful":  era5_success,
         }
 
-        step_s = max(1, len(results) // 500)
-        sample = results[::step_s][:500]
+        step_s = max(1, len(results) // 1000)
+        sample = results[::step_s][:1000]
 
         output = {"stats": stats, "interferograms": igram_meta, "sample": sample}
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -538,8 +572,70 @@ async def process_interferograms(files: List[UploadFile] = File(...)):
                                     aps_mm = [round(float(aps_1d[i] * 1000.0), 4) for i in excel_indices]
                                     sheet_data[f"Err_{col_suffix}_mm"] = aps_mm
 
-                        df_if = pd.DataFrame(sheet_data)
-                        df_if.to_excel(writer, sheet_name="Interferogramas_Datos", index=False)
+        # Generar CSV completo sin límite emulando la estructura de la Hoja 3, pero de forma vectorizada
+        # para evitar agotar la memoria (evitamos generar arrays de objetos Float en Python).
+        if if_stack.exists():
+            with h5py.File(if_stack, "r") as stack_f:
+                if "unwrapPhase" in stack_f and "date" in stack_f:
+                    dates_array = stack_f["date"][:]
+                    phase_array = stack_f["unwrapPhase"][:]
+                    wvl = float(stack_f.attrs.get("WAVELENGTH", 0.05546576))
+                    rad2mm = (-1 * wvl / (4 * np.pi)) * 1000.0
+
+                    aps_array = None
+                    aps_dates = None
+                    if era5_model.exists():
+                        with h5py.File(era5_model, "r") as ef:
+                            if "unwrapPhase" in ef:
+                                aps_array = ef["unwrapPhase"][:]
+                            elif "timeseries" in ef and "date" in ef:
+                                aps_array = ef["timeseries"][:]
+                                aps_dates = [d.decode("utf-8") for d in ef["date"][:]]
+
+                    df_all_data = pd.DataFrame()
+                    df_all_data["Lat"] = np.round(lats_v, 6)
+                    df_all_data["Lon"] = np.round(lons_v, 6)
+                    
+                    for idx, d_pair in enumerate(dates_array):
+                        if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
+                            d1 = d_pair[0].decode("utf-8")
+                            d2 = d_pair[1].decode("utf-8")
+                            col_suffix = f"{d1}_{d2}"
+                        else:
+                            col_suffix = f"Unk_{idx}"
+                            d1 = d2 = None
+                            
+                        phase_2d = phase_array[idx].copy()
+                        pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
+                        median_phase = np.nanmedian(phase_2d[pmask])
+                        if not np.isnan(median_phase):
+                            phase_2d[pmask] -= median_phase
+
+                        phase_1d = phase_2d[valid].flatten()
+                        df_all_data[f"Def_{col_suffix}_mm"] = np.round(phase_1d * rad2mm, 2)
+                        
+                        if aps_array is not None:
+                            aps_1d = None
+                            if aps_dates is not None and d1 and d2:
+                                if d1 in aps_dates and d2 in aps_dates:
+                                    idx1 = aps_dates.index(d1)
+                                    idx2 = aps_dates.index(d2)
+                                    aps_2d = aps_array[idx2] - aps_array[idx1]
+                                    aps_1d = aps_2d[valid].flatten()
+                            else:
+                                if idx < len(aps_array):
+                                    aps_2d = aps_array[idx]
+                                    aps_1d = aps_2d[valid].flatten()
+                                    
+                            if aps_1d is not None:
+                                df_all_data[f"Err_{col_suffix}_mm"] = np.round(aps_1d * 1000.0, 4)
+                                
+                    df_all_data.to_csv(CSV_FILE, index=False)
+        else:
+            # Fallback simple
+            df_csv = pd.DataFrame(results)
+            df_csv.columns = ["Latitud", "Longitud", "Velocidad_mm_año"]
+            df_csv.to_csv(CSV_FILE, index=False)
 
         stats["excel_rows"] = len(df_res)
         return output
@@ -570,4 +666,105 @@ def export_excel():
         EXCEL_FILE,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename="velocidad_deformacion_mintpy.xlsx",
+    )
+
+
+@router.post("/preview_reference")
+async def preview_reference(files: List[UploadFile] = File(...)):
+    """Extracts and averages coherence maps to preview highest tied reference points."""
+    if len(files) < MIN_INTERFEROGRAMS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Se requieren al menos {MIN_INTERFEROGRAMS} interferogramas."
+        )
+
+    work_dir = Path(tempfile.mkdtemp(prefix="mintpy_prev_"))
+    zip_dir  = work_dir / "hyp3_products"
+    zip_dir.mkdir()
+
+    try:
+        for upload in files:
+            raw  = await upload.read()
+            zname = upload.filename or "interferogram.zip"
+            zip_bytes = zip_dir / zname
+            zip_bytes.write_bytes(raw)
+            with zipfile.ZipFile(zip_bytes, "r") as zf:
+                zf.extractall(zip_dir)
+            zip_bytes.unlink()
+
+        tifs = list(zip_dir.glob("*/*_corr.tif"))
+        if not tifs:
+            raise HTTPException(status_code=400, detail="No se encontraron archivos de coherencia (*_corr.tif).")
+
+        heights = []
+        widths = []
+        for t in tifs:
+            with rasterio.open(str(t)) as src:
+                heights.append(src.height)
+                widths.append(src.width)
+                
+        min_h = min(heights)
+        min_w = min(widths)
+
+        coh_sum = np.zeros((min_h, min_w), dtype=np.float32)
+        transform = None
+        crs = None
+        
+        from rasterio.windows import Window
+        for t in tifs:
+            with rasterio.open(str(t)) as src:
+                data = src.read(1, window=Window(0, 0, min_w, min_h)).astype(np.float32)
+                if src.nodata is not None:
+                    data[data == src.nodata] = np.nan
+                if transform is None:
+                    transform = src.transform
+                    crs = src.crs
+                
+                valid = ~np.isnan(data)
+                coh_sum[valid] += data[valid]
+
+        if coh_sum is None:
+            raise HTTPException(status_code=500, detail="Error combinando mapas de coherencia.")
+
+        max_val = np.nanmax(coh_sum)
+        ys, xs = np.where(coh_sum == max_val)
+
+        transformer = None
+        if crs and crs.to_epsg() != 4326:
+            transformer = pyproj.Transformer.from_crs(crs.to_epsg() or 32616, 4326, always_xy=True)
+
+        tied_points = []
+        for i in range(len(ys)):
+            r, c = ys[i], xs[i]
+            # rasterio transform defaults to upper-left, add 0.5 for pixel center
+            lon_proj, lat_proj = transform * (c + 0.5, r + 0.5)
+            
+            if transformer:
+                lon_val, lat_val = transformer.transform(lon_proj, lat_proj)
+            else:
+                lon_val, lat_val = lon_proj, lat_proj
+                
+            tied_points.append({
+                "lat": round(float(lat_val), 4),
+                "lon": round(float(lon_val), 4),
+                "is_mintpy_default": (i == 0)
+            })
+
+        return {"seed_points": tied_points}
+
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@router.get("/export_csv")
+def export_csv():
+    if not CSV_FILE.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No hay datos en CSV para exportar. Procesa interferogramas primero.",
+        )
+    return FileResponse(
+        CSV_FILE,
+        media_type="text/csv",
+        filename="velocidad_deformacion_mintpy.csv",
     )

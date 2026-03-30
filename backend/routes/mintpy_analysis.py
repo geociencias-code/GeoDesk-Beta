@@ -27,8 +27,7 @@ router = APIRouter(prefix="/api/mintpy", tags=["MintPy"])
 BASE_DIR = Path(__file__).resolve().parent.parent
 RESULTS_DIR = BASE_DIR / "mintpy_results"
 RESULTS_DIR.mkdir(exist_ok=True)
-RESULTS_FILE = RESULTS_DIR / "latest_results.json"
-EXCEL_FILE   = RESULTS_DIR / "velocidad_deformacion.xlsx"
+RESULTS_DIR  = Path(__file__).parent.parent / "data" / "analysis_results"
 CSV_FILE     = RESULTS_DIR / "velocidad_deformacion.csv"
 
 MIN_INTERFEROGRAMS = 3
@@ -291,7 +290,6 @@ async def process_interferograms(
                 - n_interferograms (int): Number of input interferograms
                 - date_start (str): ISO format start date
                 - date_end (str): ISO format end date
-                - excel_rows (int): Total rows exported to Excel
 
             - interferograms (list): Metadata for each input interferogram with keys:
                 - filename (str): Input ZIP filename
@@ -506,101 +504,6 @@ async def process_interferograms(
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
 
-        EXCEL_MAX = 1_000_000
-        
-        # Decide which indices to use for Excel exports to avoid exceeding max rows
-        step_excel = 1
-        if len(results) > EXCEL_MAX:
-            step_excel = len(results) // EXCEL_MAX
-        
-        excel_indices = list(range(0, len(results), step_excel))[:EXCEL_MAX]
-        
-        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-            # Hoja 1: Velocidad Lineal Promedio
-            df_res = pd.DataFrame([results[i] for i in excel_indices])
-            df_res.columns = ["Latitud", "Longitud", "Velocidad_mm_año"]
-            df_res.to_excel(writer, sheet_name="Velocidad_SBAS", index=False)
-
-            # Hoja 2: Metadata de Interferogramas
-            df_igs = pd.DataFrame(igram_meta)
-            df_igs.columns = ["Archivo", "Fecha_1", "Fecha_2", "Días_baseline"]
-            df_igs.to_excel(writer, sheet_name="Interferogramas_Info", index=False)
-
-            # Hoja 3: Todos los interferogramas juntos (Desplazamiento y Error APS en mm)
-            if_stack = work_dir / "inputs" / "ifgramStack.h5"
-            era5_model = work_dir / "inputs" / "ERA5.h5"
-            
-            if if_stack.exists():
-                with h5py.File(if_stack, "r") as stack_f:
-                    if "unwrapPhase" in stack_f and "date" in stack_f:
-                        dates_array = stack_f["date"][:]
-                        phase_array = stack_f["unwrapPhase"][:]
-                        
-                        # Extraer wavelength para InSAR Math
-                        wvl = float(stack_f.attrs.get("WAVELENGTH", 0.05546576))
-                        rad2mm = (-1 * wvl / (4 * np.pi)) * 1000.0
-
-                        # Tratar de cargar el modelo atmosférico si existe
-                        aps_array = None
-                        aps_dates = None
-                        if era5_model.exists():
-                            with h5py.File(era5_model, "r") as ef:
-                                if "unwrapPhase" in ef:
-                                    aps_array = ef["unwrapPhase"][:]
-                                elif "timeseries" in ef and "date" in ef:
-                                    aps_array = ef["timeseries"][:]
-                                    aps_dates = [d.decode("utf-8") for d in ef["date"][:]]
-                        
-                        # Inicializar datos con coordenadas completas
-                        sheet_data = {
-                            "Lat": [results[i]["lat"] for i in excel_indices],
-                            "Lon": [results[i]["lon"] for i in excel_indices]
-                        }
-                        
-                        for idx, d_pair in enumerate(dates_array):
-                            if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
-                                d1 = d_pair[0].decode("utf-8")
-                                d2 = d_pair[1].decode("utf-8")
-                                col_suffix = f"{d1}_{d2}"
-                            else:
-                                col_suffix = f"Unk_{idx}"
-                                d1 = d2 = None
-                            
-                            # Fase de este interferograma: [rows, cols]
-                            phase_2d = phase_array[idx]
-                            
-                            # Centrar por mediana
-                            pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
-                            median_phase = np.nanmedian(phase_2d[pmask])
-                            if not np.isnan(median_phase):
-                                phase_2d[pmask] -= median_phase
-
-                            phase_1d = phase_2d[valid].flatten()
-                            
-                            # Desplazamiento = Fase_rad * rad2mm
-                            disp_mm = [round(float(phase_1d[i] * rad2mm), 2) for i in excel_indices]
-                            sheet_data[f"Def_{col_suffix}_mm"] = disp_mm
-                            
-                            if aps_array is not None:
-                                aps_1d = None
-                                if aps_dates is not None and d1 and d2:
-                                    # Viene de un cubo timeseries
-                                    if d1 in aps_dates and d2 in aps_dates:
-                                        idx1 = aps_dates.index(d1)
-                                        idx2 = aps_dates.index(d2)
-                                        aps_2d = aps_array[idx2] - aps_array[idx1]
-                                        aps_1d = aps_2d[valid].flatten()
-                                else:
-                                    # Viene de un cubo ifgramStack
-                                    if idx < len(aps_array):
-                                        aps_2d = aps_array[idx]
-                                        aps_1d = aps_2d[valid].flatten()
-                                
-                                if aps_1d is not None:
-                                    # Convertimos el valor asumiendo m -> mm (multiplicando por 1000)
-                                    aps_mm = [round(float(aps_1d[i] * 1000.0), 4) for i in excel_indices]
-                                    sheet_data[f"Err_{col_suffix}_mm"] = aps_mm
-
         # Generar CSV completo sin límite emulando la estructura de la Hoja 3, pero de forma vectorizada
         # para evitar agotar la memoria (evitamos generar arrays de objetos Float en Python).
         if if_stack.exists():
@@ -624,6 +527,7 @@ async def process_interferograms(
                     df_all_data = pd.DataFrame()
                     df_all_data["Lat"] = np.round(lats_v, 6)
                     df_all_data["Lon"] = np.round(lons_v, 6)
+                    df_all_data["Velocidad_mm_año"] = np.round(vels_v, 2)
                     
                     for idx, d_pair in enumerate(dates_array):
                         if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
@@ -666,7 +570,6 @@ async def process_interferograms(
             df_csv.columns = ["Latitud", "Longitud", "Velocidad_mm_año"]
             df_csv.to_csv(CSV_FILE, index=False)
 
-        stats["excel_rows"] = len(df_res)
         return output
 
     finally:
@@ -682,20 +585,6 @@ def get_results():
             detail="No hay resultados. Procesa interferogramas primero.",
         )
     return json.loads(RESULTS_FILE.read_text())
-
-
-@router.get("/export")
-def export_excel():
-    if not EXCEL_FILE.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="No hay datos para exportar. Procesa interferogramas primero.",
-        )
-    return FileResponse(
-        EXCEL_FILE,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename="velocidad_deformacion_mintpy.xlsx",
-    )
 
 
 @router.post("/preview_reference")

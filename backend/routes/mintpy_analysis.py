@@ -19,6 +19,7 @@ import pandas as pd
 import rasterio
 from fastapi import APIRouter, File, HTTPException, UploadFile, Form
 from fastapi.responses import FileResponse
+import rasterio.warp
 
 router = APIRouter(prefix="/api/mintpy", tags=["MintPy"])
 
@@ -704,7 +705,6 @@ async def preview_reference(
     crop_lon_min: float = Form(None),
     crop_lon_max: float = Form(None)
 ):
-    """Extracts and averages coherence maps to preview highest tied reference points."""
     if len(files) < MIN_INTERFEROGRAMS:
         raise HTTPException(
             status_code=400,
@@ -821,29 +821,65 @@ def export_csv():
         filename="velocidad_deformacion_mintpy.csv",
     )
 
-import rasterio.warp
+
 
 @router.post("/preview_bounds")
 async def preview_bounds(files: List[UploadFile] = File(...)):
-    """Extracts bounding box from the first interferogram."""
+    """Extracts geographic bounds from the first HyP3 interferogram ZIP file.
+
+    Processes the first uploaded ZIP file containing HyP3 interferogram products,
+    extracts its contents, and retrieves the geographic bounding box by reading
+    the GeoTIFF metadata. Coordinates are automatically transformed to WGS84
+    (EPSG:4326) format regardless of the source CRS.
+
+    Args:
+        files (List[UploadFile]): List of uploaded ZIP files. Only the first file
+            is processed. Each ZIP should contain HyP3 product files including
+            at least one GeoTIFF file (*_dem.tif or any *.tif).
+
+    Returns:
+        dict: A dictionary with the following structure:
+            {
+                "success": bool,
+                "bounds": {
+                    "lat_min": float,  # Minimum latitude in WGS84 (south edge)
+                    "lon_min": float,  # Minimum longitude in WGS84 (west edge)
+                    "lat_max": float,  # Maximum latitude in WGS84 (north edge)
+                    "lon_max": float   # Maximum longitude in WGS84 (east edge)
+                }
+            }
+
+    Raises:
+        HTTPException (400): If the files list is empty or if no GeoTIFF files
+            (*_dem.tif or *.tif) are found in the extracted ZIP. Status code 400.
+
+    Note:
+        - Only the first file in the files list is processed.
+        - The function creates a temporary directory for extraction which is
+          cleaned up after processing, even if an error occurs.
+        - DEM files (*_dem.tif) are preferred, but any *.tif file will be used
+          if DEM files are not found.
+    """
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")
 
     file = files[0]
     work_dir = Path(tempfile.mkdtemp(prefix="mintpy_prev_bounds_"))
-    zip_dir  = work_dir / "hyp3_products"
+    zip_dir = work_dir /"hyp3_products"
     zip_dir.mkdir()
 
     try:
-        raw  = await file.read()
+        raw = await file.read()
         zname = file.filename or "interferogram.zip"
         zip_bytes = zip_dir / zname
         zip_bytes.write_bytes(raw)
+
         with zipfile.ZipFile(zip_bytes, "r") as zf:
             zf.extractall(zip_dir)
         zip_bytes.unlink()
 
-        tifs = list(zip_dir.glob("*/*_dem.tif")) or list(zip_dir.glob("*/*.tif"))
+        tifs = list(zip_dir.glob("*/*_dem.tif")) or list(zip_dir.glob(""
+                                                                      "*/*.tif"))
         if not tifs:
             raise HTTPException(status_code=400, detail="No .tif files found in ZIP")
 
@@ -859,7 +895,7 @@ async def preview_bounds(files: List[UploadFile] = File(...)):
                 "lon_max": right
             }
         }
+
     finally:
-        import shutil
         shutil.rmtree(work_dir, ignore_errors=True)
 

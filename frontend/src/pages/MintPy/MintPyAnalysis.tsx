@@ -1032,21 +1032,6 @@ export default function MintPyAnalysis() {
                     </h3>
                     <div style={{ display: "flex", gap: "8px" }}>
                       <a
-                        href={`${API_URL}/api/mintpy/export`}
-                        download
-                        style={{
-                          padding: "6px 14px",
-                          background: "linear-gradient(135deg, #10b981, #059669)",
-                          color: "white",
-                          borderRadius: "8px",
-                          fontSize: "0.78rem",
-                          fontWeight: 600,
-                          textDecoration: "none",
-                        }}
-                      >
-                        📊 Exportar Excel
-                      </a>
-                      <a
                         href={`${API_URL}/api/mintpy/export_csv`}
                         download
                         style={{
@@ -1059,7 +1044,7 @@ export default function MintPyAnalysis() {
                           textDecoration: "none",
                         }}
                       >
-                        💾 Descargar CSV completo
+                        ⬇️ Exportar Datos a CSV
                       </a>
                     </div>
                   </div>
@@ -1208,21 +1193,6 @@ export default function MintPyAnalysis() {
                   </h3>
                   <div style={{ display: "flex", gap: "8px" }}>
                     <a
-                      href={`${API_URL}/api/mintpy/export`}
-                      download
-                      style={{
-                        padding: "6px 14px",
-                        background: "linear-gradient(135deg, #10b981, #059669)",
-                        color: "white",
-                        borderRadius: "8px",
-                        fontSize: "0.78rem",
-                        fontWeight: 600,
-                        textDecoration: "none",
-                      }}
-                    >
-                      ⬇️ Descargar Excel (1M lim)
-                    </a>
-                    <a
                       href={`${API_URL}/api/mintpy/export_csv`}
                       download
                       style={{
@@ -1235,7 +1205,7 @@ export default function MintPyAnalysis() {
                         textDecoration: "none",
                       }}
                     >
-                      ⬇️ Descargar CSV (Todos los datos)
+                      ⬇️ Exportar Datos a CSV
                     </a>
                   </div>
                 </div>
@@ -1302,7 +1272,7 @@ export default function MintPyAnalysis() {
                       fontStyle: "italic",
                     }}
                   >
-                    Mostrando muestra de {results.sample.length} puntos. Descarga el Excel para el dataset completo.
+                    Mostrando muestra de {results.sample.length} puntos. Descarga el CSV para el dataset completo.
                   </p>
                 )}
               </div>

@@ -3,6 +3,9 @@ import axios from "axios";
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
+  Legend,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -287,9 +290,20 @@ interface VelocityPoint {
   velocidad_mm_yr: number;
 }
 
+interface IgramStat {
+  date1: string;
+  date2: string;
+  label: string;
+  mean: number;
+  std: number;
+  min: number;
+  max: number;
+}
+
 interface ProcessingResults {
   stats: VelocityStats;
   interferograms: IgramMeta[];
+  igram_stats?: IgramStat[];
   sample: VelocityPoint[];
 }
 
@@ -1160,6 +1174,47 @@ export default function MintPyAnalysis() {
                   </ResponsiveContainer>
                 </div>
               </div>
+
+              {/* Line Chart for Igram Stats */}
+              {results?.igram_stats && results.igram_stats.length > 0 && (
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: "14px",
+                    padding: "20px",
+                  }}
+                >
+                  <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", marginBottom: "14px" }}>
+                    📈 Deformación Media por Par de Fechas (Población Total)
+                  </h3>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <LineChart data={results?.igram_stats} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fontSize: 9, fill: "#64748b" }}
+                        angle={-45}
+                        textAnchor="end"
+                      />
+                      <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
+                      <Tooltip
+                        contentStyle={{
+                          background: "#0f172a",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: "8px",
+                          color: "white",
+                          fontSize: "0.8rem",
+                        }}
+                      />
+                      <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: "0.8rem", color: "#94a3b8" }} />
+                      <Line type="monotone" name="Media (mm)" dataKey="mean" stroke="#38bdf8" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" name="Max (mm)" dataKey="max" stroke="#f87171" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+                      <Line type="monotone" name="Min (mm)" dataKey="min" stroke="#34d399" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
 
               {/* Data table */}
               <div

@@ -20,6 +20,7 @@ import rasterio
 from fastapi import APIRouter, File, HTTPException, UploadFile, Form
 from fastapi.responses import FileResponse
 import rasterio.warp
+from rasterio.windows import Window
 
 router = APIRouter(prefix="/api/mintpy", tags=["MintPy"])
 
@@ -699,11 +700,11 @@ def export_excel():
 
 @router.post("/preview_reference")
 async def preview_reference(
-    files: List[UploadFile] = File(...),
-    crop_lat_min: float = Form(None),
-    crop_lat_max: float = Form(None),
-    crop_lon_min: float = Form(None),
-    crop_lon_max: float = Form(None)
+        files: List[UploadFile] = File(...),
+        crop_lat_min: float = Form(None),
+        crop_lat_max: float = Form(None),
+        crop_lon_min: float = Form(None),
+        crop_lon_max: float = Form(None),
 ):
     if len(files) < MIN_INTERFEROGRAMS:
         raise HTTPException(
@@ -712,12 +713,12 @@ async def preview_reference(
         )
 
     work_dir = Path(tempfile.mkdtemp(prefix="mintpy_prev_"))
-    zip_dir  = work_dir / "hyp3_products"
+    zip_dir = work_dir / "hyp3_products"
     zip_dir.mkdir()
 
     try:
         for upload in files:
-            raw  = await upload.read()
+            raw = await upload.read()
             zname = upload.filename or "interferogram.zip"
             zip_bytes = zip_dir / zname
             zip_bytes.write_bytes(raw)
@@ -727,23 +728,26 @@ async def preview_reference(
 
         tifs = list(zip_dir.glob("*/*_corr.tif"))
         if not tifs:
-            raise HTTPException(status_code=400, detail="No se encontraron archivos de coherencia (*_corr.tif).")
+            raise HTTPException(
+                status_code=400,
+                detail="No se encontraron archivos de coherencia en el ZIP."
+            )
 
         heights = []
         widths = []
+
         for t in tifs:
             with rasterio.open(str(t)) as src:
                 heights.append(src.height)
                 widths.append(src.width)
-                
+
         min_h = min(heights)
         min_w = min(widths)
 
         coh_sum = np.zeros((min_h, min_w), dtype=np.float32)
         transform = None
         crs = None
-        
-        from rasterio.windows import Window
+
         for t in tifs:
             with rasterio.open(str(t)) as src:
                 data = src.read(1, window=Window(0, 0, min_w, min_h)).astype(np.float32)
@@ -752,7 +756,7 @@ async def preview_reference(
                 if transform is None:
                     transform = src.transform
                     crs = src.crs
-                
+
                 valid = ~np.isnan(data)
                 coh_sum[valid] += data[valid]
 
@@ -773,11 +777,12 @@ async def preview_reference(
 
             mask = (lat_val >= crop_lat_min) & (lat_val <= crop_lat_max) & \
                    (lon_val >= crop_lon_min) & (lon_val <= crop_lon_max)
+
             coh_sum[~mask] = -1.0
 
         max_val = np.nanmax(coh_sum)
         if np.isnan(max_val) or max_val < 0:
-            raise HTTPException(status_code=422, detail="No hay píxeles de coherencia válidos en el área seleccionada.")
+            raise HTTPException(status_code=422, detail="No hay pixeles de coherencia en el área seleccionada.")
 
         ys, xs = np.where(coh_sum == max_val)
 
@@ -788,14 +793,13 @@ async def preview_reference(
         tied_points = []
         for i in range(len(ys)):
             r, c = ys[i], xs[i]
-            # rasterio transform defaults to upper-left, add 0.5 for pixel center
             lon_proj, lat_proj = transform * (c + 0.5, r + 0.5)
-            
+
             if transformer:
                 lon_val, lat_val = transformer.transform(lon_proj, lat_proj)
             else:
                 lon_val, lat_val = lon_proj, lat_proj
-                
+
             tied_points.append({
                 "lat": round(float(lat_val), 4),
                 "lon": round(float(lon_val), 4),
@@ -805,8 +809,8 @@ async def preview_reference(
         return {"seed_points": tied_points}
 
     finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
 
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 @router.get("/export_csv")
 def export_csv():

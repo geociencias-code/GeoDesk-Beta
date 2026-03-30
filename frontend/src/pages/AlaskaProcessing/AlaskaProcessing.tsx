@@ -1,25 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import JSZip from "jszip";
 import { API_URL } from "../../services/api";
 import axios from "axios";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle, CircleMarker, Tooltip } from "react-leaflet";
-import { EditControl } from "react-leaflet-draw";
-import "leaflet-draw/dist/leaflet.draw.css";
 
 if (typeof window !== "undefined") {
   (window as unknown as Window & { type: string }).type = "";
 }
-
-const STORAGE_KEY = "geodesk_last_crop";
-
-type BoundsType = {
-  lat_min: number;
-  lon_min: number;
-  lat_max: number;
-  lon_max: number;
-};
 
 interface DeformationResults {
   dias: number;
@@ -32,364 +18,33 @@ interface DeformationResults {
   }>;
 }
 
-type DrawEvent = {
-  layer: L.Rectangle | L.Polygon | L.Circle | L.CircleMarker | L.Marker | L.Polyline;
-};
-
-/** Returns true when the crop box is fully contained within the image bounds */
-function isCropWithinBounds(crop: BoundsType, image: BoundsType): boolean {
-  return (
-    crop.lat_min >= image.lat_min &&
-    crop.lat_max <= image.lat_max &&
-    crop.lon_min >= image.lon_min &&
-    crop.lon_max <= image.lon_max &&
-    crop.lat_min < crop.lat_max &&
-    crop.lon_min < crop.lon_max
-  );
-}
-
-/** Clamp a string value into a numeric field, tolerating mid-edit strings like "-89." */
-function parseCoord(raw: string): number | null {
-  // Allow an empty string or a trailing decimal / sign — return null to keep as text only
-  if (raw === "" || raw === "-" || raw === "." || raw === "-.") return null;
-  const n = parseFloat(raw);
-  return isNaN(n) ? null : n;
-}
-
-// ─── Map sub-component ────────────────────────────────────────────────────────
-
-function MapContent({
-  bounds,
-  drawnBox,
-  setDrawnBox,
-  deformationData = [],
-}: {
-  bounds: BoundsType | null;
-  drawnBox: BoundsType | null;
-  setDrawnBox: (box: BoundsType | null) => void;
-  deformationData?: Array<{ lat: number; lon: number; def: number }>;
-}) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (bounds && bounds.lat_min !== undefined) {
-      const leafBounds = L.latLngBounds(
-        [bounds.lat_min, bounds.lon_min],
-        [bounds.lat_max, bounds.lon_max]
-      );
-      map.fitBounds(leafBounds, { padding: [50, 50] });
-    }
-  }, [bounds, map]);
-
-  const onCreated = (e: DrawEvent) => {
-    if (!(e.layer instanceof L.Rectangle)) {
-      console.warn("Solo se aceptan rectángulos");
-      return;
-    }
-    const layer = e.layer as L.Rectangle;
-    const leafBounds = layer.getBounds();
-    setDrawnBox({
-      lat_min: leafBounds.getSouth(),
-      lon_min: leafBounds.getWest(),
-      lat_max: leafBounds.getNorth(),
-      lon_max: leafBounds.getEast(),
-    });
-    map.removeLayer(layer);
-  };
-
-  return (
-    <FeatureGroup>
-      <EditControl
-        position="topright"
-        onCreated={onCreated}
-        onDeleted={() => setDrawnBox(null)}
-        draw={{
-          rectangle: true,
-          polygon: false,
-          circle: false,
-          circlemarker: false,
-          marker: false,
-          polyline: false,
-        }}
-        edit={{ edit: false, remove: true }}
-      />
-      {bounds && (
-        <Rectangle
-          bounds={[
-            [bounds.lat_min, bounds.lon_min],
-            [bounds.lat_max, bounds.lon_max],
-          ]}
-          pathOptions={{ color: "#3b82f6", weight: 2, fillOpacity: 0.1, dashArray: "5, 5" }}
-        />
-      )}
-      {drawnBox && (
-        <Rectangle
-          bounds={[
-            [drawnBox.lat_min, drawnBox.lon_min],
-            [drawnBox.lat_max, drawnBox.lon_max],
-          ]}
-          pathOptions={{ color: "#ef4444", weight: 2, fillColor: "#ef4444", fillOpacity: 0.2 }}
-        />
-      )}
-      {deformationData.map((pt, i) => (
-        <CircleMarker
-          key={i}
-          center={[pt.lat, pt.lon]}
-          radius={3}
-          pathOptions={{
-            fillColor: pt.def > 0 ? "#ff4b4b" : "#4caf50",
-            color: pt.def > 0 ? "#ff4b4b" : "#4caf50",
-            weight: 1,
-            opacity: 0.8,
-            fillOpacity: 0.6,
-          }}
-        >
-          <Tooltip>
-            <span>Def: {pt.def.toFixed(2)} mm</span>
-          </Tooltip>
-        </CircleMarker>
-      ))}
-    </FeatureGroup>
-  );
-}
-
-// ─── Coordinate input row ─────────────────────────────────────────────────────
-
-type CoordField = { label: string; key: keyof BoundsType };
-
-const COORD_FIELDS: CoordField[] = [
-  { label: "Lat Mín (Sur)",  key: "lat_min" },
-  { label: "Lat Máx (Norte)", key: "lat_max" },
-  { label: "Lon Mín (Oeste)", key: "lon_min" },
-  { label: "Lon Máx (Este)",  key: "lon_max" },
-];
-
-function CoordPanel({
-  drawnBox,
-  setDrawnBox,
-  imageBounds,
-}: {
-  drawnBox: BoundsType;
-  setDrawnBox: (b: BoundsType) => void;
-  imageBounds: BoundsType | null;
-}) {
-  // Keep raw string values so the user can type "-89." without it being forced to 0
-  const [raw, setRaw] = useState<Record<keyof BoundsType, string>>({
-    lat_min: String(drawnBox.lat_min),
-    lat_max: String(drawnBox.lat_max),
-    lon_min: String(drawnBox.lon_min),
-    lon_max: String(drawnBox.lon_max),
-  });
-
-  // When drawnBox changes externally (e.g. from map draw), sync raw values
-  const prevBox = useRef(drawnBox);
-  useEffect(() => {
-    if (prevBox.current !== drawnBox) {
-      setRaw({
-        lat_min: String(drawnBox.lat_min),
-        lat_max: String(drawnBox.lat_max),
-        lon_min: String(drawnBox.lon_min),
-        lon_max: String(drawnBox.lon_max),
-      });
-      prevBox.current = drawnBox;
-    }
-  }, [drawnBox]);
-
-  const handleChange = (key: keyof BoundsType, value: string) => {
-    setRaw((r) => ({ ...r, [key]: value }));
-    const n = parseCoord(value);
-    if (n !== null) {
-      setDrawnBox({ ...drawnBox, [key]: n });
-    }
-  };
-
-  const isValid = isCropWithinBounds(drawnBox, imageBounds ?? drawnBox);
-
-  return (
-    <div
-      style={{
-        marginTop: "16px",
-        padding: "12px",
-        background: "rgba(0,0,0,0.2)",
-        borderRadius: "8px",
-        border: `1px solid ${isValid || !imageBounds ? "rgba(255,255,255,0.1)" : "rgba(239,68,68,0.5)"}`,
-      }}
-    >
-      <label
-        style={{
-          color: "var(--color-primary)",
-          fontWeight: "bold",
-          fontSize: "0.85rem",
-          display: "block",
-          marginBottom: "8px",
-        }}
-      >
-        Coordenadas de Selección Exactas
-      </label>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "8px" }}>
-        {COORD_FIELDS.map(({ label, key }) => (
-          <div key={key} style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-            <span
-              style={{
-                fontSize: "0.75rem",
-                color: "var(--color-text-muted)",
-                marginBottom: "4px",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {label}
-            </span>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={raw[key]}
-              placeholder="ej. -89.2"
-              onChange={(e) => handleChange(key, e.target.value)}
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                padding: "6px",
-                borderRadius: "4px",
-                border: "1px solid rgba(255,255,255,0.2)",
-                background: "rgba(255,255,255,0.05)",
-                color: "white",
-                fontSize: "0.80rem",
-              }}
-            />
-          </div>
-        ))}
-      </div>
-      {imageBounds && !isValid && (
-        <p style={{ fontSize: "0.75rem", color: "#fca5a5", margin: 0, marginTop: "4px" }}>
-          ⚠️ El recorte debe estar dentro de los límites de la imagen ({imageBounds.lat_min.toFixed(4)}°N–{imageBounds.lat_max.toFixed(4)}°N,&nbsp;
-          {imageBounds.lon_min.toFixed(4)}°E–{imageBounds.lon_max.toFixed(4)}°E).
-        </p>
-      )}
-    </div>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AlaskaProcesamiento() {
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [bounds, setBounds] = useState<BoundsType | null>(null);
-
-  const [drawnBox, setDrawnBox] = useState<BoundsType | null>(null);
-  const [croppedZipUrl, setCroppedZipUrl] = useState<string | null>(null);
-  const [croppedFileName, setCroppedFileName] = useState<string>("");
 
   const [results, setResults] = useState<DeformationResults | null>(null);
   const [deformationCsvUrl, setDeformationCsvUrl] = useState<string | null>(null);
   const [deformationCsvBlob, setDeformationCsvBlob] = useState<Blob | null>(null);
 
-  // ── Persist last crop to localStorage ──────────────────────────────────────
-  // Save whenever drawnBox changes (and after a successful crop)
-  useEffect(() => {
-    if (drawnBox) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(drawnBox));
-    }
-  }, [drawnBox]);
-
-  // ── handleZipFile ───────────────────────────────────────────────────────────
   const handleZipFile = async (file: File) => {
     setZipFile(file);
-    setBusy(true);
-    setMessage("Leyendo extensión del archivo...");
-    setBounds(null);
-    setDrawnBox(null);
-    setCroppedZipUrl(null);
     setResults(null);
     setDeformationCsvUrl(null);
     setDeformationCsvBlob(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await axios.post(`${API_URL}/api/v1/alaska/preview`, formData);
-      if (res.data.success) {
-        const imageBounds: BoundsType = res.data.bounds;
-        setBounds(imageBounds);
-
-        // Try to restore last saved crop — only use it if it fits within this image
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          try {
-            const savedCrop: BoundsType = JSON.parse(saved);
-            if (isCropWithinBounds(savedCrop, imageBounds)) {
-              setDrawnBox(savedCrop);
-              setMessage(
-                "Extensión leída. Se restauró el último recorte guardado (válido para esta imagen). Puedes ajustarlo o dibujarlo de nuevo."
-              );
-            } else {
-              setMessage(
-                "Extensión leída. El último recorte guardado no cabe en esta imagen — dibuja uno nuevo en el mapa."
-              );
-            }
-          } catch {
-            setMessage("Extensión leída correctamente. Dibuja un rectángulo en el mapa para recortar.");
-          }
-        } else {
-          setMessage("Extensión leída correctamente. Dibuja un rectángulo en el mapa o escribe las coordenadas para recortar.");
-        }
-      }
-    } catch (error: unknown) {
-      console.error(error);
-      const msg = axios.isAxiosError(error) ? error.response?.data?.detail : String(error);
-      setMessage("Error leyendo ZIP: " + msg);
-    } finally {
-      setBusy(false);
-    }
+    setMessage("Archivo cargado. Presiona 'Derivar Deformación' para procesar.");
   };
 
-  // ── handleCrop ──────────────────────────────────────────────────────────────
-  const handleCrop = async () => {
-    if (!zipFile || !drawnBox) return;
-
-    setBusy(true);
-    setMessage("Recortando rásteres. Por favor espera...");
-    try {
-      const formData = new FormData();
-      formData.append("file", zipFile);
-
-      const res = await axios.post(
-        `${API_URL}/api/v1/alaska/crop?lat_min=${drawnBox.lat_min}&lon_min=${drawnBox.lon_min}&lat_max=${drawnBox.lat_max}&lon_max=${drawnBox.lon_max}`,
-        formData,
-        { responseType: "blob" }
-      );
-
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      setCroppedZipUrl(url);
-      setCroppedFileName(`cropped_${zipFile.name}`);
-      setMessage("Archivos recortados exitosamente.");
-
-      // Persist the successful crop
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(drawnBox));
-    } catch (error) {
-      console.error(error);
-      setMessage("Error recortando imágenes.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // ── handleCalculateDeformation ──────────────────────────────────────────────
   const handleCalculateDeformation = async () => {
-    if (!croppedZipUrl || !zipFile) return;
+    if (!zipFile) return;
 
     setBusy(true);
     setMessage("Procesando fase y calculando vector de deformación anual...");
     try {
-      const blobRes = await fetch(croppedZipUrl);
-      const blob = await blobRes.blob();
-
       const formData = new FormData();
-      formData.append("file", blob, `cropped_${zipFile.name}`);
+      formData.append("file", zipFile, zipFile.name);
 
       const res = await axios.post(`${API_URL}/api/v1/alaska/velocity`, formData, {
         responseType: "blob",
@@ -420,16 +75,13 @@ export default function AlaskaProcesamiento() {
   };
 
 
-  // ── Derived state ───────────────────────────────────────────────────────────
-  const cropIsValid = drawnBox && bounds ? isCropWithinBounds(drawnBox, bounds) : !!drawnBox;
-
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="page-container" style={{ padding: 0 }}>
       {/* Header */}
       <div className="header-section">
         <div className="icon-wrapper">
-          <span style={{ fontSize: "1.5rem" }}>✂️</span>
+          <span style={{ fontSize: "1.5rem" }}>🌋</span>
         </div>
         <div>
           <h1
@@ -439,9 +91,9 @@ export default function AlaskaProcesamiento() {
               WebkitTextFillColor: "transparent",
             }}
           >
-            Recorte y Deformación SNAP
+            Análisis de Deformación (Alaska)
           </h1>
-          <p>Extrae regiones de interés de productos HyP3 y deriva modelos de deformación</p>
+          <p>Obten modelos de deformación a partir de archivos .zip de InSAR</p>
         </div>
       </div>
 
@@ -493,61 +145,8 @@ export default function AlaskaProcesamiento() {
               </div>
             </div>
 
-            {/* Coordinate panel — visible as soon as we have image bounds, regardless of drawn box */}
-            {bounds && !croppedZipUrl && (
-              <CoordPanel
-                drawnBox={drawnBox ?? { lat_min: 0, lon_min: 0, lat_max: 0, lon_max: 0 }}
-                setDrawnBox={setDrawnBox}
-                imageBounds={bounds}
-              />
-            )}
-
-            {bounds && !croppedZipUrl && (
-              <button
-                onClick={handleCrop}
-                disabled={busy || !drawnBox || !cropIsValid}
-                className="submit-btn"
-                style={{
-                  background: "linear-gradient(135deg, #3b82f6, #06b6d4)",
-                  marginTop: "16px",
-                  opacity: busy || !drawnBox || !cropIsValid ? 0.5 : 1,
-                }}
-              >
-                {busy ? "Procesando recorte..." : "Recortar Selección"}
-              </button>
-            )}
-
-            {croppedZipUrl && (
+            {zipFile && (
               <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                <a
-                  href={croppedZipUrl}
-                  download={croppedFileName}
-                  className="submit-btn"
-                  style={{
-                    display: "block",
-                    textAlign: "center",
-                    textDecoration: "none",
-                    background: "rgba(16, 185, 129, 0.2)",
-                    border: "1px solid #10b981",
-                    color: "#34d399",
-                    padding: "10px",
-                    borderRadius: "8px",
-                  }}
-                >
-                  ⬇️ Descargar Recorte ZIP
-                </a>
-
-                <hr style={{ borderColor: "rgba(255,255,255,0.1)", margin: "8px 0" }} />
-
-                <label
-                  style={{
-                    color: "var(--color-primary)",
-                    fontWeight: "bold",
-                    fontSize: "0.9rem",
-                  }}
-                >
-                  2. Estimación de Desplazamiento
-                </label>
                 <button
                   onClick={handleCalculateDeformation}
                   disabled={busy}
@@ -580,33 +179,6 @@ export default function AlaskaProcesamiento() {
 
         {/* ── Right panel ── */}
         <div className="results-panel" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <div
-            className="data-widget"
-            style={{
-              padding: "0",
-              display: "flex",
-              flexDirection: "column",
-              height: "500px",
-              borderRadius: "12px",
-              overflow: "hidden",
-              border: "1px solid rgba(255,255,255,0.1)",
-            }}
-          >
-            <MapContainer
-              center={[13.69, -89.22]}
-              zoom={8}
-              style={{ height: "100%", width: "100%", background: "#1a1a1a" }}
-              zoomControl={false}
-            >
-              <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-              <MapContent
-                bounds={bounds}
-                drawnBox={drawnBox}
-                setDrawnBox={setDrawnBox}
-                deformationData={results?.sample || []}
-              />
-            </MapContainer>
-          </div>
 
           {results && results.sample.length > 0 && (
             <div

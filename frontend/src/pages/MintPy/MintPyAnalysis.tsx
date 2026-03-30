@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import axios from "axios";
 import {
   BarChart,
@@ -10,6 +10,256 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { API_URL } from "../../services/api";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle, CircleMarker, Tooltip as LeafletTooltip } from "react-leaflet";
+import { EditControl } from "react-leaflet-draw";
+import "leaflet-draw/dist/leaflet.draw.css";
+
+if (typeof window !== "undefined") {
+  (window as unknown as Window & { type: string }).type = "";
+}
+
+const STORAGE_KEY = "mintpy_last_crop";
+
+type BoundsType = {
+  lat_min: number;
+  lon_min: number;
+  lat_max: number;
+  lon_max: number;
+};
+
+function isCropWithinBounds(crop: BoundsType, image: BoundsType): boolean {
+  return (
+    crop.lat_min >= image.lat_min &&
+    crop.lat_max <= image.lat_max &&
+    crop.lon_min >= image.lon_min &&
+    crop.lon_max <= image.lon_max &&
+    crop.lat_min < crop.lat_max &&
+    crop.lon_min < crop.lon_max
+  );
+}
+
+function parseCoord(raw: string): number | null {
+  if (raw === "" || raw === "-" || raw === "." || raw === "-.") return null;
+  const n = parseFloat(raw);
+  return isNaN(n) ? null : n;
+}
+
+type DrawEvent = {
+  layer: L.Rectangle | L.Polygon | L.Circle | L.CircleMarker | L.Marker | L.Polyline;
+};
+
+function MapContent({
+  bounds,
+  drawnBox,
+  setDrawnBox,
+  deformationData = [],
+}: {
+  bounds: BoundsType | null;
+  drawnBox: BoundsType | null;
+  setDrawnBox: (box: BoundsType | null) => void;
+  deformationData?: Array<{ lat: number; lon: number; velocidad_mm_yr: number }>;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (bounds && bounds.lat_min !== undefined) {
+      const leafBounds = L.latLngBounds(
+        [bounds.lat_min, bounds.lon_min],
+        [bounds.lat_max, bounds.lon_max]
+      );
+      map.fitBounds(leafBounds, { padding: [50, 50] });
+    }
+  }, [bounds, map]);
+
+  const onCreated = (e: DrawEvent) => {
+    if (!(e.layer instanceof L.Rectangle)) {
+      console.warn("Solo se aceptan rectángulos");
+      return;
+    }
+    const layer = e.layer as L.Rectangle;
+    const leafBounds = layer.getBounds();
+    setDrawnBox({
+      lat_min: leafBounds.getSouth(),
+      lon_min: leafBounds.getWest(),
+      lat_max: leafBounds.getNorth(),
+      lon_max: leafBounds.getEast(),
+    });
+    map.removeLayer(layer);
+  };
+
+  return (
+    <FeatureGroup>
+      <EditControl
+        position="topright"
+        onCreated={onCreated}
+        onDeleted={() => setDrawnBox(null)}
+        draw={{
+          rectangle: true,
+          polygon: false,
+          circle: false,
+          circlemarker: false,
+          marker: false,
+          polyline: false,
+        }}
+        edit={{ edit: false, remove: true }}
+      />
+      {bounds && (
+        <Rectangle
+          bounds={[
+            [bounds.lat_min, bounds.lon_min],
+            [bounds.lat_max, bounds.lon_max],
+          ]}
+          pathOptions={{ color: "#3b82f6", weight: 2, fillOpacity: 0.1, dashArray: "5, 5" }}
+        />
+      )}
+      {drawnBox && (
+        <Rectangle
+          bounds={[
+            [drawnBox.lat_min, drawnBox.lon_min],
+            [drawnBox.lat_max, drawnBox.lon_max],
+          ]}
+          pathOptions={{ color: "#ef4444", weight: 2, fillColor: "#ef4444", fillOpacity: 0.2 }}
+        />
+      )}
+      {deformationData.map((pt, i) => {
+        // Find color based on min/max of current data or just default to blue/red
+        return (
+          <CircleMarker
+            key={i}
+            center={[pt.lat, pt.lon]}
+            radius={3}
+            pathOptions={{
+              fillColor: pt.velocidad_mm_yr > 0 ? "#ff4b4b" : "#4caf50",
+              color: pt.velocidad_mm_yr > 0 ? "#ff4b4b" : "#4caf50",
+              weight: 1,
+              opacity: 0.8,
+              fillOpacity: 0.6,
+            }}
+          >
+            <LeafletTooltip>
+              <span>Def: {pt.velocidad_mm_yr.toFixed(2)} mm/a</span>
+            </LeafletTooltip>
+          </CircleMarker>
+        );
+      })}
+    </FeatureGroup>
+  );
+}
+
+const COORD_FIELDS: { label: string; key: keyof BoundsType }[] = [
+  { label: "Lat Mín (Sur)",  key: "lat_min" },
+  { label: "Lat Máx (Norte)", key: "lat_max" },
+  { label: "Lon Mín (Oeste)", key: "lon_min" },
+  { label: "Lon Máx (Este)",  key: "lon_max" },
+];
+
+function CoordPanel({
+  drawnBox,
+  setDrawnBox,
+  imageBounds,
+}: {
+  drawnBox: BoundsType;
+  setDrawnBox: (b: BoundsType) => void;
+  imageBounds: BoundsType | null;
+}) {
+  const [raw, setRaw] = useState<Record<keyof BoundsType, string>>({
+    lat_min: String(drawnBox.lat_min),
+    lat_max: String(drawnBox.lat_max),
+    lon_min: String(drawnBox.lon_min),
+    lon_max: String(drawnBox.lon_max),
+  });
+
+  const prevBox = useRef(drawnBox);
+  useEffect(() => {
+    if (prevBox.current !== drawnBox) {
+      setRaw({
+        lat_min: String(drawnBox.lat_min),
+        lat_max: String(drawnBox.lat_max),
+        lon_min: String(drawnBox.lon_min),
+        lon_max: String(drawnBox.lon_max),
+      });
+      prevBox.current = drawnBox;
+    }
+  }, [drawnBox]);
+
+  const handleChange = (key: keyof BoundsType, value: string) => {
+    setRaw((r) => ({ ...r, [key]: value }));
+    const n = parseCoord(value);
+    if (n !== null) {
+      setDrawnBox({ ...drawnBox, [key]: n });
+    }
+  };
+
+  const isValid = imageBounds ? isCropWithinBounds(drawnBox, imageBounds) : true;
+
+  return (
+    <div
+      style={{
+        marginTop: "16px",
+        padding: "16px",
+        background: "rgba(0,0,0,0.2)",
+        borderRadius: "12px",
+        border: `1px solid ${isValid ? "rgba(255,255,255,0.08)" : "rgba(239,68,68,0.5)"}`,
+      }}
+    >
+      <label
+        style={{
+          color: "#e2e8f0",
+          fontWeight: 600,
+          fontSize: "0.9rem",
+          display: "block",
+          marginBottom: "12px",
+        }}
+      >
+        ✂️ Coordenadas de Recorte
+      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "8px" }}>
+        {COORD_FIELDS.map(({ label, key }) => (
+          <div key={key} style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                color: "#94a3b8",
+                marginBottom: "4px",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {label}
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={raw[key]}
+              placeholder="ej. -89.2"
+              onChange={(e) => handleChange(key, e.target.value)}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "8px",
+                borderRadius: "6px",
+                border: "1px solid rgba(255,255,255,0.1)",
+                background: "rgba(255,255,255,0.03)",
+                color: "white",
+                fontSize: "0.85rem",
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      {imageBounds && !isValid && (
+        <p style={{ fontSize: "0.75rem", color: "#fca5a5", margin: 0, marginTop: "8px" }}>
+          ⚠️ El recorte debe estar dentro de los límites de la imagen ({imageBounds.lat_min.toFixed(4)}°N–{imageBounds.lat_max.toFixed(4)}°N, {imageBounds.lon_min.toFixed(4)}°E–{imageBounds.lon_max.toFixed(4)}°E).
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 
 
 interface IgramMeta {
@@ -139,6 +389,48 @@ export default function MintPyAnalysis() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const MIN_IGRAMS = 3;
 
+  const [bounds, setBounds] = useState<BoundsType | null>(null);
+  const [drawnBox, setDrawnBox] = useState<BoundsType | null>(null);
+
+  useEffect(() => {
+    if (drawnBox) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(drawnBox));
+    }
+  }, [drawnBox]);
+
+  const fetchBounds = async (fileList: File[]) => {
+    if (!fileList.length) return;
+    try {
+      const formData = new FormData();
+      formData.append("files", fileList[0]);
+      const res = await axios.post(`${API_URL}/api/mintpy/preview_bounds`, formData);
+      if (res.data.success) {
+        setBounds(res.data.bounds);
+        
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          try {
+            const savedCrop: BoundsType = JSON.parse(saved);
+            if (isCropWithinBounds(savedCrop, res.data.bounds)) {
+              setDrawnBox(savedCrop);
+            }
+          } catch (err) {
+            console.error("Invalid saved crop in storage", err);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    if (files.length > 0 && !bounds && !busy) {
+      fetchBounds(files);
+    }
+  }, [files, bounds, busy]);
+
+
   // ── Drag & drop ─────────────────────────────────────────────────────────────
 
   const onDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setDragging(true); }, []);
@@ -181,6 +473,12 @@ export default function MintPyAnalysis() {
     try {
       const formData = new FormData();
       files.forEach((f) => formData.append("files", f, f.name));
+      if (drawnBox) {
+        formData.append("crop_lat_min", drawnBox.lat_min.toString());
+        formData.append("crop_lat_max", drawnBox.lat_max.toString());
+        formData.append("crop_lon_min", drawnBox.lon_min.toString());
+        formData.append("crop_lon_max", drawnBox.lon_max.toString());
+      }
 
       const response = await axios.post(`${API_URL}/api/mintpy/preview_reference`, formData, {
         onUploadProgress: (e) => {
@@ -224,6 +522,12 @@ export default function MintPyAnalysis() {
         formData.append("ref_lat", selectedSeed.lat.toString());
         formData.append("ref_lon", selectedSeed.lon.toString());
       }
+      if (drawnBox) {
+        formData.append("crop_lat_min", drawnBox.lat_min.toString());
+        formData.append("crop_lat_max", drawnBox.lat_max.toString());
+        formData.append("crop_lon_min", drawnBox.lon_min.toString());
+        formData.append("crop_lon_max", drawnBox.lon_max.toString());
+      }
 
       const response = await axios.post(`${API_URL}/api/mintpy/process`, formData, {
         onUploadProgress: (e) => {
@@ -252,9 +556,12 @@ export default function MintPyAnalysis() {
     setResults(null);
     setSeedPoints([]);
     setSelectedSeed(null);
+    setBounds(null);
     setMessage("");
     setProgress(0);
   };
+
+  const cropIsValid = drawnBox && bounds ? isCropWithinBounds(drawnBox, bounds) : !!drawnBox;
 
   // ── Histogram data ───────────────────────────────────────────────────────────
 
@@ -470,25 +777,34 @@ export default function MintPyAnalysis() {
             </div>
           )}
 
+          {/* Coordinate panel — visible when bounds are available */}
+          {bounds && !results && (
+            <CoordPanel
+              drawnBox={drawnBox ?? { lat_min: 0, lon_min: 0, lat_max: 0, lon_max: 0 }}
+              setDrawnBox={setDrawnBox}
+              imageBounds={bounds}
+            />
+          )}
+
           {/* Action Buttons */}
-          <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
             {seedPoints.length === 0 ? (
               <button
                 onClick={handlePreview}
-                disabled={busy || files.length < MIN_IGRAMS}
+                disabled={busy || files.length < MIN_IGRAMS || (!!drawnBox && !cropIsValid)}
                 style={{
                   flex: 1,
                   padding: "12px",
                   borderRadius: "10px",
                   border: "none",
                   background:
-                    busy || files.length < MIN_IGRAMS
+                    busy || files.length < MIN_IGRAMS || (!!drawnBox && !cropIsValid)
                       ? "rgba(99,102,241,0.3)"
                       : "linear-gradient(135deg, #0ea5e9, #3b82f6)",
                   color: "white",
                   fontWeight: 600,
                   fontSize: "0.9rem",
-                  cursor: busy || files.length < MIN_IGRAMS ? "not-allowed" : "pointer",
+                  cursor: busy || files.length < MIN_IGRAMS || (!!drawnBox && !cropIsValid) ? "not-allowed" : "pointer",
                   transition: "all 0.2s",
                 }}
               >
@@ -497,20 +813,20 @@ export default function MintPyAnalysis() {
             ) : (
               <button
                 onClick={handleProcess}
-                disabled={busy || files.length < MIN_IGRAMS}
+                disabled={busy || files.length < MIN_IGRAMS || (!!drawnBox && !cropIsValid)}
                 style={{
                   flex: 1,
                   padding: "12px",
                   borderRadius: "10px",
                   border: "none",
                   background:
-                    busy || files.length < MIN_IGRAMS
+                    busy || files.length < MIN_IGRAMS || (!!drawnBox && !cropIsValid)
                       ? "rgba(16,185,129,0.3)"
                       : "linear-gradient(135deg, #10b981, #059669)",
                   color: "white",
                   fontWeight: 600,
                   fontSize: "0.9rem",
-                  cursor: busy || files.length < MIN_IGRAMS ? "not-allowed" : "pointer",
+                  cursor: busy || files.length < MIN_IGRAMS || (!!drawnBox && !cropIsValid) ? "not-allowed" : "pointer",
                   transition: "all 0.2s",
                 }}
               >
@@ -610,28 +926,51 @@ export default function MintPyAnalysis() {
           )}
         </div>
 
-        {/* Right Panel: Results */}
+        {/* Right Panel: Results & Map */}
         <div>
-          {!results ? (
+          {!results && bounds ? (
+            <div
+              className="data-widget"
+              style={{
+                padding: "0",
+                display: "flex",
+                flexDirection: "column",
+                height: "600px",
+                borderRadius: "16px",
+                overflow: "hidden",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <MapContainer
+                center={[(bounds.lat_min + bounds.lat_max)/2, (bounds.lon_min + bounds.lon_max)/2]}
+                zoom={8}
+                style={{ height: "100%", width: "100%", background: "#1a1a1a" }}
+              >
+                <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+                <MapContent
+                  bounds={bounds}
+                  drawnBox={drawnBox}
+                  setDrawnBox={setDrawnBox}
+                />
+              </MapContainer>
+            </div>
+          ) : !results && !bounds ? (
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                height: "400px",
+                height: "600px",
                 background: "rgba(255,255,255,0.02)",
                 border: "1px solid rgba(255,255,255,0.06)",
                 borderRadius: "16px",
                 color: "#475569",
               }}
             >
-              <div style={{ fontSize: "3rem", marginBottom: "12px" }}>🛰️</div>
+              <div style={{ fontSize: "3rem", marginBottom: "12px" }}>🗺️</div>
               <p style={{ fontSize: "0.9rem" }}>
-                Sube interferogramas y presiona <strong style={{ color: "#6366f1" }}>Procesar</strong>
-              </p>
-              <p style={{ fontSize: "0.8rem", marginTop: "6px" }}>
-                Los resultados de velocidad aparecerán aquí
+                Sube interferogramas para visualizar sus límites geográficos
               </p>
             </div>
           ) : (
@@ -739,62 +1078,41 @@ export default function MintPyAnalysis() {
                     <span style={{ fontSize: "0.7rem", color: "#64748b" }}>{velMax.toFixed(1)} mm/a</span>
                   </div>
 
-                  {/* Scatter grid visualization */}
+                  {/* Map Layer Visualization */}
                   <div
                     style={{
                       position: "relative",
                       width: "100%",
-                      height: "280px",
+                      height: "400px",
                       background: "rgba(0,0,0,0.3)",
                       borderRadius: "10px",
                       overflow: "hidden",
                       border: "1px solid rgba(255,255,255,0.05)",
                     }}
                   >
-                    {(() => {
-                      const pts = results.sample;
-                      if (!pts.length) return null;
-                      const lats = pts.map((p) => p.lat);
-                      const lons = pts.map((p) => p.lon);
-                      const latMin = Math.min(...lats), latMax = Math.max(...lats);
-                      const lonMin = Math.min(...lons), lonMax = Math.max(...lons);
-                      const latRange = latMax - latMin || 1;
-                      const lonRange = lonMax - lonMin || 1;
-                      const dotSize = Math.max(2, Math.min(6, Math.round(280 / Math.sqrt(pts.length))));
-                      return pts.map((p, i) => (
-                        <div
-                          key={i}
-                          title={`Lat: ${p.lat.toFixed(4)}\nLon: ${p.lon.toFixed(4)}\nVelocidad: ${p.velocidad_mm_yr.toFixed(2)} mm/a`}
-                          style={{
-                            position: "absolute",
-                            left: `${((p.lon - lonMin) / lonRange) * 100}%`,
-                            bottom: `${((p.lat - latMin) / latRange) * 100}%`,
-                            width: `${dotSize}px`,
-                            height: `${dotSize}px`,
-                            borderRadius: "50%",
-                            background: velocityColor(p.velocidad_mm_yr, velMin, velMax),
-                            transform: "translate(-50%, 50%)",
-                            opacity: 0.85,
-                          }}
-                        />
-                      ));
-                    })()}
-                    <div
-                      style={{
-                        position: "absolute",
-                        bottom: "6px",
-                        left: "8px",
-                        fontSize: "0.65rem",
-                        color: "#475569",
-                      }}
+                    <MapContainer
+                      center={
+                        bounds 
+                          ? [(bounds.lat_min + bounds.lat_max)/2, (bounds.lon_min + bounds.lon_max)/2] 
+                          : [0, 0]
+                      }
+                      zoom={8}
+                      style={{ height: "100%", width: "100%", background: "#1a1a1a" }}
+                      zoomControl={false}
                     >
-                      {results.sample.length} puntos mostrados de {results.stats.n_points.toLocaleString()}
-                    </div>
+                      <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+                      <MapContent
+                        bounds={bounds}
+                        drawnBox={drawnBox}
+                        setDrawnBox={setDrawnBox}
+                        deformationData={results.sample}
+                      />
+                    </MapContainer>
                   </div>
 
                   <div
                     style={{
-                      marginTop: "8px",
+                      marginTop: "12px",
                       fontSize: "0.7rem",
                       color: "#475569",
                       textAlign: "center",

@@ -45,7 +45,15 @@ def _extract_dates(filename: str):
     return None, None
 
 
-def _make_cfg(zip_dir: Path, ref_lat: float = None, ref_lon: float = None) -> str:
+def _make_cfg(
+    zip_dir: Path, 
+    ref_lat: float = None, 
+    ref_lon: float = None,
+    crop_lat_min: float = None,
+    crop_lat_max: float = None,
+    crop_lon_min: float = None,
+    crop_lon_max: float = None
+) -> str:
     """Generates a MintPy configuration file for SBAS processing.
 
     Constructs a configuration file (.cfg) with the necessary parameters
@@ -97,12 +105,18 @@ def _make_cfg(zip_dir: Path, ref_lat: float = None, ref_lon: float = None) -> st
     subset_yx = f"0:{min_h},0:{min_w}" if min_h != "auto" else "auto"
     ref_lalo = f"{ref_lat},{ref_lon}" if ref_lat is not None and ref_lon is not None else "auto"
 
+    subset_lalo = "auto"
+    if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
+        subset_lalo = f"{crop_lat_min}:{crop_lat_max},{crop_lon_min}:{crop_lon_max}"
+        subset_yx = "no"
+
     return f"""mintpy.load.processor    = hyp3
 mintpy.load.unwFile      = {unw_pat}
 mintpy.load.corFile      = {cor_pat}
 mintpy.load.demFile      = {dem_pat}
 mintpy.load.incAngleFile = {inc_pat}
 mintpy.load.azAngleFile  = {azi_pat}
+mintpy.subset.lalo       = {subset_lalo}
 mintpy.subset.yx         = {subset_yx}
 mintpy.network.coherenceBased     = yes
 mintpy.network.minCoherence       = 0.4
@@ -117,7 +131,16 @@ mintpy.networkInversion.minTempCoh = 0.4
 """
 
 
-def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path, ref_lat: float = None, ref_lon: float = None) -> None:
+def _run_mintpy_pipeline(
+    work_dir: Path, 
+    zip_dir: Path, 
+    ref_lat: float = None, 
+    ref_lon: float = None,
+    crop_lat_min: float = None,
+    crop_lat_max: float = None,
+    crop_lon_min: float = None,
+    crop_lon_max: float = None
+) -> None:
     """Executes the complete MintPy SBAS time-series analysis pipeline.
 
     Orchestrates the full MintPy processing workflow from interferogram loading
@@ -162,7 +185,7 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path, ref_lat: float = None, r
     mintpy_logger.addHandler(fh)
 
     cfg_path = work_dir / "mintpy.cfg"
-    cfg_path.write_text(_make_cfg(zip_dir, ref_lat, ref_lon))
+    cfg_path.write_text(_make_cfg(zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max))
 
     cds_url = os.getenv("ERA5_URL", "https://cds.climate.copernicus.eu/api")
     cds_key = os.getenv("ERA5_KEY")
@@ -225,7 +248,11 @@ def _run_mintpy_pipeline(work_dir: Path, zip_dir: Path, ref_lat: float = None, r
 async def process_interferograms(
     files: List[UploadFile] = File(...),
     ref_lat: float = Form(None),
-    ref_lon: float = Form(None)
+    ref_lon: float = Form(None),
+    crop_lat_min: float = Form(None),
+    crop_lat_max: float = Form(None),
+    crop_lon_min: float = Form(None),
+    crop_lon_max: float = Form(None)
 ):
     """Processes HyP3 interferogram products through the MintPy SBAS pipeline.
 
@@ -361,7 +388,7 @@ async def process_interferograms(
             })
 
         try:
-            _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon)
+            _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
         except ValueError as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
@@ -670,7 +697,13 @@ def export_excel():
 
 
 @router.post("/preview_reference")
-async def preview_reference(files: List[UploadFile] = File(...)):
+async def preview_reference(
+    files: List[UploadFile] = File(...),
+    crop_lat_min: float = Form(None),
+    crop_lat_max: float = Form(None),
+    crop_lon_min: float = Form(None),
+    crop_lon_max: float = Form(None)
+):
     """Extracts and averages coherence maps to preview highest tied reference points."""
     if len(files) < MIN_INTERFEROGRAMS:
         raise HTTPException(
@@ -726,7 +759,26 @@ async def preview_reference(files: List[UploadFile] = File(...)):
         if coh_sum is None:
             raise HTTPException(status_code=500, detail="Error combinando mapas de coherencia.")
 
+        if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
+            c_arr = np.arange(min_w)
+            r_arr = np.arange(min_h)
+            c_grid, r_grid = np.meshgrid(c_arr, r_arr)
+            lon_proj, lat_proj = transform * (c_grid + 0.5, r_grid + 0.5)
+
+            if crs and crs.to_epsg() != 4326:
+                transformer_inv = pyproj.Transformer.from_crs(crs.to_epsg() or 32616, 4326, always_xy=True)
+                lon_val, lat_val = transformer_inv.transform(lon_proj, lat_proj)
+            else:
+                lon_val, lat_val = lon_proj, lat_proj
+
+            mask = (lat_val >= crop_lat_min) & (lat_val <= crop_lat_max) & \
+                   (lon_val >= crop_lon_min) & (lon_val <= crop_lon_max)
+            coh_sum[~mask] = -1.0
+
         max_val = np.nanmax(coh_sum)
+        if np.isnan(max_val) or max_val < 0:
+            raise HTTPException(status_code=422, detail="No hay píxeles de coherencia válidos en el área seleccionada.")
+
         ys, xs = np.where(coh_sum == max_val)
 
         transformer = None
@@ -768,3 +820,46 @@ def export_csv():
         media_type="text/csv",
         filename="velocidad_deformacion_mintpy.csv",
     )
+
+import rasterio.warp
+
+@router.post("/preview_bounds")
+async def preview_bounds(files: List[UploadFile] = File(...)):
+    """Extracts bounding box from the first interferogram."""
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    file = files[0]
+    work_dir = Path(tempfile.mkdtemp(prefix="mintpy_prev_bounds_"))
+    zip_dir  = work_dir / "hyp3_products"
+    zip_dir.mkdir()
+
+    try:
+        raw  = await file.read()
+        zname = file.filename or "interferogram.zip"
+        zip_bytes = zip_dir / zname
+        zip_bytes.write_bytes(raw)
+        with zipfile.ZipFile(zip_bytes, "r") as zf:
+            zf.extractall(zip_dir)
+        zip_bytes.unlink()
+
+        tifs = list(zip_dir.glob("*/*_dem.tif")) or list(zip_dir.glob("*/*.tif"))
+        if not tifs:
+            raise HTTPException(status_code=400, detail="No .tif files found in ZIP")
+
+        with rasterio.open(str(tifs[0])) as src:
+            left, bottom, right, top = rasterio.warp.transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+
+        return {
+            "success": True,
+            "bounds": {
+                "lat_min": bottom,
+                "lon_min": left,
+                "lat_max": top,
+                "lon_max": right
+            }
+        }
+    finally:
+        import shutil
+        shutil.rmtree(work_dir, ignore_errors=True)
+

@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/mintpy", tags=["MintPy"])
 BASE_DIR = Path(__file__).resolve().parent.parent
 RESULTS_DIR = BASE_DIR / "mintpy_results"
 RESULTS_DIR.mkdir(exist_ok=True)
-RESULTS_DIR  = Path(__file__).parent.parent / "data" / "analysis_results"
+RESULTS_FILE = RESULTS_DIR / "latest_results.json"
 CSV_FILE     = RESULTS_DIR / "velocidad_deformacion.csv"
 
 MIN_INTERFEROGRAMS = 3
@@ -500,9 +500,8 @@ async def process_interferograms(
         step_s = max(1, len(results) // 1000)
         sample = results[::step_s][:1000]
 
-        output = {"stats": stats, "interferograms": igram_meta, "sample": sample}
-        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
+        igram_stats = []
+        if_stack = work_dir / "inputs" / "ifgramStack.h5"
 
         # Generar CSV completo sin límite emulando la estructura de la Hoja 3, pero de forma vectorizada
         # para evitar agotar la memoria (evitamos generar arrays de objetos Float en Python).
@@ -545,8 +544,20 @@ async def process_interferograms(
                             phase_2d[pmask] -= median_phase
 
                         phase_1d = phase_2d[valid].flatten()
-                        df_all_data[f"Def_{col_suffix}_mm"] = np.round(phase_1d * rad2mm, 2)
+                        def_mm_arr = phase_1d * rad2mm
+                        df_all_data[f"Def_{col_suffix}_mm"] = np.round(def_mm_arr, 2)
                         
+                        if d1 and d2:
+                            igram_stats.append({
+                                "date1": d1,
+                                "date2": d2,
+                                "label": f"{d1} -> {d2}",
+                                "mean": round(float(np.mean(def_mm_arr)), 2),
+                                "std": round(float(np.std(def_mm_arr)), 2),
+                                "max": round(float(np.max(def_mm_arr)), 2),
+                                "min": round(float(np.min(def_mm_arr)), 2),
+                            })
+                            
                         if aps_array is not None:
                             aps_1d = None
                             if aps_dates is not None and d1 and d2:
@@ -569,6 +580,15 @@ async def process_interferograms(
             df_csv = pd.DataFrame(results)
             df_csv.columns = ["Latitud", "Longitud", "Velocidad_mm_año"]
             df_csv.to_csv(CSV_FILE, index=False)
+
+        output = {
+            "stats": stats, 
+            "interferograms": igram_meta, 
+            "igram_stats": igram_stats,
+            "sample": sample
+        }
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
 
         return output
 
@@ -622,29 +642,36 @@ async def preview_reference(
                 detail="No se encontraron archivos de coherencia en el ZIP."
             )
 
-        heights = []
-        widths = []
-
-        for t in tifs:
-            with rasterio.open(str(t)) as src:
-                heights.append(src.height)
-                widths.append(src.width)
-
-        min_h = min(heights)
-        min_w = min(widths)
-
-        coh_sum = np.zeros((min_h, min_w), dtype=np.float32)
-        transform = None
+        lefts, bottoms, rights, tops = [], [], [], []
         crs = None
 
         for t in tifs:
             with rasterio.open(str(t)) as src:
-                data = src.read(1, window=Window(0, 0, min_w, min_h)).astype(np.float32)
+                lefts.append(src.bounds.left)
+                bottoms.append(src.bounds.bottom)
+                rights.append(src.bounds.right)
+                tops.append(src.bounds.top)
+                if crs is None:
+                    crs = src.crs
+
+        common_bounds = (max(lefts), max(bottoms), min(rights), min(tops))
+
+        with rasterio.open(str(tifs[0])) as src:
+            window = rasterio.windows.from_bounds(*common_bounds, transform=src.transform)
+            win_width, win_height = int(window.width), int(window.height)
+            transform = rasterio.windows.transform(window, src.transform)
+
+        coh_sum = np.zeros((win_height, win_width), dtype=np.float32)
+
+        for t in tifs:
+            with rasterio.open(str(t)) as src:
+                t_window = rasterio.windows.from_bounds(*common_bounds, transform=src.transform)
+                t_win_col, t_win_row = int(t_window.col_off), int(t_window.row_off)
+                exact_window = Window(t_win_col, t_win_row, win_width, win_height)
+                
+                data = src.read(1, window=exact_window).astype(np.float32)
                 if src.nodata is not None:
                     data[data == src.nodata] = np.nan
-                if transform is None:
-                    transform = src.transform
-                    crs = src.crs
 
                 valid = ~np.isnan(data)
                 coh_sum[valid] += data[valid]
@@ -653,8 +680,8 @@ async def preview_reference(
             raise HTTPException(status_code=500, detail="Error combinando mapas de coherencia.")
 
         if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
-            c_arr = np.arange(min_w)
-            r_arr = np.arange(min_h)
+            c_arr = np.arange(win_width)
+            r_arr = np.arange(win_height)
             c_grid, r_grid = np.meshgrid(c_arr, r_arr)
             lon_proj, lat_proj = transform * (c_grid + 0.5, r_grid + 0.5)
 

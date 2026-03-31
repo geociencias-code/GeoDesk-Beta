@@ -58,11 +58,15 @@ function MapContent({
   drawnBox,
   setDrawnBox,
   deformationData = [],
+  velMin = 0,
+  velMax = 0,
 }: {
   bounds: BoundsType | null;
   drawnBox: BoundsType | null;
   setDrawnBox: (box: BoundsType | null) => void;
   deformationData?: Array<{ lat: number; lon: number; velocidad_mm_yr: number }>;
+  velMin?: number;
+  velMax?: number;
 }) {
   const map = useMap();
 
@@ -134,8 +138,8 @@ function MapContent({
             center={[pt.lat, pt.lon]}
             radius={3}
             pathOptions={{
-              fillColor: pt.velocidad_mm_yr > 0 ? "#ff4b4b" : "#4caf50",
-              color: pt.velocidad_mm_yr > 0 ? "#ff4b4b" : "#4caf50",
+              fillColor: velocityColor(pt.velocidad_mm_yr, velMin, velMax),
+              color: velocityColor(pt.velocidad_mm_yr, velMin, velMax),
               weight: 1,
               opacity: 0.8,
               fillOpacity: 0.6,
@@ -1104,6 +1108,8 @@ export default function MintPyAnalysis() {
                         drawnBox={drawnBox}
                         setDrawnBox={setDrawnBox}
                         deformationData={results.sample}
+                        velMin={velMin}
+                        velMax={velMax}
                       />
                     </MapContainer>
                   </div>

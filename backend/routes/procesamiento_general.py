@@ -151,25 +151,42 @@ async def procesar_zip(
 
 @router.post("/api/v1/alaska/preview")
 async def preview_zip(file: UploadFile = File(...)):
+    """
+    Extracts and previews geospatial data from a ZIP file.
+
+    This function accepts a ZIP file containing geospatial data (e.g., GeoTIFFs), extracts its contents,
+    identifies relevant raster files, and calculates the geographic bounds of a specific raster file.
+
+    Args:
+        file (UploadFile): The uploaded ZIP file containing geospatial data.
+
+    Returns:
+        dict: A dictionary containing the success status, the original filename, and the geographic bounds
+              (latitude and longitude) of the identified raster file.
+
+    Raises:
+        HTTPException: If no raster files are found in the ZIP (status code 400).
+        HTTPException: If an unexpected error occurs during processing (status code 500).
+    """
     try:
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp.write(await file.read())
             tmp_path = Path(tmp.name)
-        
+
         temp_folder = Path(tempfile.mkdtemp(prefix="preview_"))
         extract_zip(tmp_path, temp_folder)
         tifs = find_rasters(temp_folder)
-        
+
         if not tifs:
             raise HTTPException(status_code=400, detail="No TIFs found in ZIP")
 
         unw_phase_tif = next((t for t in tifs if "unw_phase" in t.name), tifs[0])
-        
+
         with rasterio.open(unw_phase_tif) as src:
             left, bottom, right, top = rasterio.warp.transform_bounds(src.crs, "EPSG:4326", *src.bounds)
-            
+
         tmp_path.unlink()
-        
+
         return {
             "success": True,
             "filename": file.filename,

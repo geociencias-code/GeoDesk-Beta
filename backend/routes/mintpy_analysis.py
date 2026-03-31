@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import h5py
 from mintpy.smallbaselineApp import TimeSeriesAnalysis
+import mintpy.ifgram_inversion as inv
 import numpy as np
 import pandas as pd
 import rasterio
@@ -204,7 +205,6 @@ def _run_mintpy_pipeline(
         # Bugfix: MintPy's calc_inv_quality returns a 1D array of size 1 for single-pixel inversions,
         # which crashes NumPy 1.24+ with "ValueError: setting an array element with a sequence."
         # We monkey-patch the estimate_timeseries function to extract the scalar and prevent the crash.
-        import mintpy.ifgram_inversion as inv
         original_estimate = inv.estimate_timeseries
         
         def patched_estimate(*args, **kwargs):

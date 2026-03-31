@@ -445,7 +445,6 @@ export default function MintPyAnalysis() {
   }, [files, bounds, busy]);
 
 
-  // ── Drag & drop ─────────────────────────────────────────────────────────────
 
   const onDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setDragging(true); }, []);
   const onDragLeave = useCallback(() => setDragging(false), []);
@@ -520,14 +519,14 @@ export default function MintPyAnalysis() {
 
   const handleProcess = async () => {
     if (files.length < MIN_IGRAMS) {
-      setMessage(`❌ Se requieren al menos ${MIN_IGRAMS} interferogramas. Actualmente tienes ${files.length}.`);
+      setMessage(`Se requieren al menos ${MIN_IGRAMS} interferogramas. Actualmente tienes ${files.length}.`);
       return;
     }
 
     setBusy(true);
     setProgress(0);
     setResults(null);
-    setMessage("⏳ Ejecutando inversión SBAS con el punto semilla seleccionado...");
+    setMessage("Ejecutando inversión SBAS con el punto semilla seleccionado...");
 
     try {
       const formData = new FormData();
@@ -551,13 +550,13 @@ export default function MintPyAnalysis() {
 
       setProgress(100);
       setResults(response.data as ProcessingResults);
-      setMessage(`✅ Análisis completado: ${response.data.stats.n_points.toLocaleString()} puntos procesados.`);
+      setMessage(`Análisis completado: ${response.data.stats.n_points.toLocaleString()} puntos procesados.`);
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         const detail = error.response?.data?.detail || error.message;
-        setMessage(`❌ Error: ${detail}`);
+        setMessage(`Error: ${detail}`);
       } else {
-        setMessage("❌ Error desconocido al procesar.");
+        setMessage("Error desconocido al procesar.");
       }
     } finally {
       setBusy(false);

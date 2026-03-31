@@ -354,7 +354,6 @@ async def process_interferograms(
                 )
 
             with zipfile.ZipFile(zip_bytes, "r") as zf:
-                # Obtener la carpeta raíz extraída (ej. 'S1A_2020...')
                 top_level = {p.split('/')[0] for p in zf.namelist() if '/' in p}
                 zf.extractall(zip_dir)
             zip_bytes.unlink()
@@ -373,8 +372,6 @@ async def process_interferograms(
 
         igram_meta = []
         for idx, meta in enumerate(igram_pre_meta):
-            # Renombrar carpeta: "S1A_2020..." -> "0000_S1A_2020..." 
-            # Esto evita el bug donde la S1B alfabéticamente se procesaba antes que S1A de forma ruidosa alterando el network
             old_path = zip_dir / meta["extracted_folder"]
             new_path = zip_dir / f"{idx:04d}_{meta['extracted_folder']}"
             if old_path.exists():
@@ -503,8 +500,6 @@ async def process_interferograms(
         igram_stats = []
         if_stack = work_dir / "inputs" / "ifgramStack.h5"
 
-        # Generar CSV completo sin límite emulando la estructura de la Hoja 3, pero de forma vectorizada
-        # para evitar agotar la memoria (evitamos generar arrays de objetos Float en Python).
         if if_stack.exists():
             with h5py.File(if_stack, "r") as stack_f:
                 if "unwrapPhase" in stack_f and "date" in stack_f:
@@ -576,7 +571,6 @@ async def process_interferograms(
                                 
                     df_all_data.to_csv(CSV_FILE, index=False)
         else:
-            # Fallback simple
             df_csv = pd.DataFrame(results)
             df_csv.columns = ["Latitud", "Longitud", "Velocidad_mm_año"]
             df_csv.to_csv(CSV_FILE, index=False)
@@ -615,6 +609,29 @@ async def preview_reference(
         crop_lon_min: float = Form(None),
         crop_lon_max: float = Form(None),
 ):
+    """Generates a preview of optimal reference points for MintPy from ZIP files containing interferograms.
+
+    This function receives multiple ZIP files with interferograms, extracts coherence maps, computes the coherence sum
+    in the common region, and determines the point with the highest coherence. Optionally, it crops the area of
+    interest according to the provided geographic bounds. Returns the suggested seed points for MintPy spatial
+    referencing.
+
+    Args:
+        files (List[UploadFile]): List of uploaded ZIP files, each containing an interferogram.
+        crop_lat_min (float, optional): Lower latitude bound for geographic cropping.
+        crop_lat_max (float, optional): Upper latitude bound for geographic cropping.
+        crop_lon_min (float, optional): Lower longitude bound for geographic cropping.
+        crop_lon_max (float, optional): Upper longitude bound for geographic cropping.
+
+    Returns:
+        dict: Dictionary with the key 'seed_points', containing a list of suggested reference
+        points (lat, lon, is_mintpy_default).
+
+    Raises:
+        HTTPException: If there are fewer than the required minimum interferograms, if no coherence
+        files are found, or if there are no valid pixels in the selected area.
+    """
+    
     if len(files) < MIN_INTERFEROGRAMS:
         raise HTTPException(
             status_code=400,

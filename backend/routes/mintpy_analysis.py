@@ -44,6 +44,7 @@ RESULTS_DIR = BASE_DIR / "mintpy_results"
 RESULTS_DIR.mkdir(exist_ok=True)
 RESULTS_FILE = RESULTS_DIR / "latest_results.json"
 CSV_FILE     = RESULTS_DIR / "velocidad_deformacion.csv"
+XLSX_FILE    = RESULTS_DIR / "resumen_interferogramas.xlsx"
 
 MIN_INTERFEROGRAMS = 3
 DATE_RE = re.compile(r"(20\d{6})T")
@@ -317,81 +318,8 @@ async def process_interferograms(
     crop_lon_min: float = Form(None),
     crop_lon_max: float = Form(None)
 ):
-    """Processes HyP3 interferogram products through the MintPy SBAS pipeline.
-
-    Orchestrates the complete workflow for time-series deformation analysis:
-    receives compressed HyP3 interferogram products, validates input, extracts
-    and decompresses data, runs the MintPy Small Baseline Subset (SBAS) processing
-    pipeline, and generates comprehensive velocity and displacement results with
-    geographic georeferencing.
-
-    This endpoint handles coordinate system transformations (UTM to WGS84 if needed),
-    median filtering to remove reference point bias, and exports results in both
-    JSON and Excel formats with detailed per-interferogram displacement data.
-
-    Args:
-        files (List[UploadFile]): List of uploaded ZIP files containing HyP3
-            interferogram products. Each ZIP must contain:
-            - *_unw_phase.tif: Unwrapped interferometric phase (radians)
-            - *_corr.tif: Coherence map [0, 1]
-            - *_dem.tif: Digital elevation model (meters)
-            - *_lv_theta.tif: Local incidence angle (radians)
-            - *_lv_phi.tif: Local azimuth angle (radians)
-
-            Filenames must follow HyP3/ASF naming convention:
-            S1[AB]A_YYYYMMDDTHHMMSS_YYYYMMDDTHHMMSS_*.zip
-
-    Returns:
-        dict: Processing results containing:
-            - stats (dict): Summary statistics with keys:
-                - min (float): Minimum velocity in mm/yr
-                - max (float): Maximum velocity in mm/yr
-                - mean (float): Mean velocity in mm/yr
-                - std (float): Standard deviation of velocities
-                - n_points (int): Number of valid measurements
-                - n_interferograms (int): Number of input interferograms
-                - date_start (str): ISO format start date
-                - date_end (str): ISO format end date
-
-            - interferograms (list): Metadata for each input interferogram with keys:
-                - filename (str): Input ZIP filename
-                - date1 (str): ISO format acquisition start date
-                - date2 (str): ISO format acquisition end date
-                - days (int): Temporal baseline in days
-
-            - sample (list): Georeferenced velocity sample (max 500 points) with keys:
-                - lat (float): WGS84 latitude, precision 4 decimals
-                - lon (float): WGS84 longitude, precision 4 decimals
-                - velocidad_mm_yr (float): LOS deformation velocity, precision 2 decimals
-
-    Raises:
-        HTTPException (400): If fewer than MIN_INTERFEROGRAMS (3) files provided,
-            if any file is not a .zip archive, or if date extraction from filename
-            fails. Status code 400.
-
-        HTTPException (422): If MintPy rejects interferograms due to dimension
-            mismatch (rows/columns differ across dataset), or if final velocity.h5
-            contains no coherent pixels. Status code 422.
-
-        HTTPException (500): If MintPy pipeline execution fails, velocity.h5 is not
-            generated after successful pipeline run, or critical intermediate files
-            are missing. Response includes last 3000 characters of mintpy_run.log
-            for debugging. Status code 500.
-    """
     if len(files) < MIN_INTERFEROGRAMS:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Se requieren al menos {MIN_INTERFEROGRAMS} interferogramas. "
-                f"Se subieron {len(files)}."
-            ),
-        )
-    for f in files:
-        if not (f.filename or "").lower().endswith(".zip"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"'{f.filename}' no es un .zip.",
-            )
+        raise HTTPException(status_code=400, detail=f"Se requieren al menos {MIN_INTERFEROGRAMS} interferogramas.")
 
     work_dir = Path(tempfile.mkdtemp(prefix="mintpy_run_"))
     zip_dir  = work_dir / "hyp3_products"
@@ -407,251 +335,284 @@ async def process_interferograms(
 
             d1, d2 = _extract_dates(zname)
             if d1 is None or d2 is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"No se pudieron extraer fechas de '{zname}'. "
-                        "El nombre debe seguir el formato HyP3/ASF estándar."
-                    ),
-                )
+                raise HTTPException(status_code=400, detail="Error fechas zip.")
 
             with zipfile.ZipFile(zip_bytes, "r") as zf:
                 top_level = {p.split('/')[0] for p in zf.namelist() if '/' in p}
                 zf.extractall(zip_dir)
             zip_bytes.unlink()
 
-            extracted_folder = list(top_level)[0] if top_level else zname.replace('.zip', '')
             igram_pre_meta.append({
                 "filename": zname,
                 "date1": d1,
                 "date2": d2,
                 "days": abs((d2 - d1).days),
-                "extracted_folder": extracted_folder
+                "extracted_folder": list(top_level)[0] if top_level else zname.replace('.zip', '')
             })
 
-        # Forzar un determinismo estricto ordenando cronológicamente
         igram_pre_meta.sort(key=lambda x: (x["date1"], x["date2"], x["filename"]))
 
         igram_meta = []
+        asc_paths = []
+        desc_paths = []
         for idx, meta in enumerate(igram_pre_meta):
             old_path = zip_dir / meta["extracted_folder"]
             new_path = zip_dir / f"{idx:04d}_{meta['extracted_folder']}"
-            if old_path.exists():
-                old_path.rename(new_path)
+            if old_path.exists(): old_path.rename(new_path)
             
+            track_dir = "ASC"
+            phi_files = list(new_path.glob("*_lv_phi.tif"))
+            if phi_files:
+                with rasterio.open(str(phi_files[0])) as src:
+                    out_h, out_w = max(1, src.height // 10), max(1, src.width // 10)
+                    data = src.read(1, out_shape=(1, out_h, out_w))
+                    if src.nodata is not None: data[data == src.nodata] = np.nan
+                    mean_phi = np.nanmean(data)
+                    if not np.isnan(mean_phi):
+                        mean_phi_deg = (np.degrees(mean_phi) + 360) % 360
+                        if 90 < mean_phi_deg < 270: track_dir = "DESC"
+            
+            if track_dir == "ASC": asc_paths.append(new_path)
+            else: desc_paths.append(new_path)
+
             igram_meta.append({
                 "filename": meta["filename"],
                 "date1": meta["date1"].isoformat(),
                 "date2": meta["date2"].isoformat(),
                 "days": meta["days"],
+                "track": track_dir
             })
 
-        try:
-            _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
-        except ValueError as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
-
-        velocity_h5 = work_dir / "velocity.h5"
-        if not velocity_h5.exists():
-            log_tail = (work_dir / "mintpy_run.log").read_text()[-3000:] \
-                if (work_dir / "mintpy_run.log").exists() else "(no log)"
-            
-            if "WARNING: NOT all input unwrapped interferograms have the same row/column number" in log_tail:
-                 raise HTTPException(
-                     status_code=422,
-                     detail="MintPy descartó algunos interferogramas porque tienen diferente tamaño (filas/columnas). Sube más archivos para asegurar al menos 3 válidos."
-                 )
-                
-            h5_found = [str(f.relative_to(work_dir)) for f in work_dir.rglob("*.h5")]
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"MintPy no generó velocity.h5.\n"
-                    f"H5 encontrados: {h5_found}\n"
-                    f"Log:\n{log_tail}"
-                ),
-            )
-
-        geometry_geo = work_dir / "inputs" / "geometryGeo.h5"
-
-        with h5py.File(velocity_h5, "r") as vf:
-            vel_data  = vf["velocity"][:] # 2D (rows × cols) in m/yr
-            vel_mm    = vel_data * 1000.0
-            vel_attrs = dict(vf.attrs)
-
-        # Centrar la velocidad restando la mediana estadística (evita el sesgo del píxel de referencia de MintPy)
-        vmask = np.isfinite(vel_mm) & (vel_mm != 0.0)
-        median_vel = np.nanmedian(vel_mm[vmask])
-        if not np.isnan(median_vel):
-            vel_mm[vmask] -= median_vel
-
-
-        use_grid = False
-        if geometry_geo.exists():
-            with h5py.File(geometry_geo, "r") as gf:
-                if "latitude" in gf and "longitude" in gf:
-                    lat_grid = gf["latitude"][:]
-                    lon_grid = gf["longitude"][:]
-                    use_grid = True
+        is_2d_mode = len(asc_paths) >= MIN_INTERFEROGRAMS and len(desc_paths) >= MIN_INTERFEROGRAMS
         
-        if not use_grid:
-            lat0 = float(vel_attrs.get("Y_FIRST", 0))
-            lon0 = float(vel_attrs.get("X_FIRST", 0))
-            dlat = float(vel_attrs.get("Y_STEP",  -0.001))
-            dlon = float(vel_attrs.get("X_STEP",   0.001))
-            rows, cols = vel_mm.shape
-            lat_arr = lat0 + np.arange(rows) * dlat
-            lon_arr = lon0 + np.arange(cols) * dlon
-            lon_grid, lat_grid = np.meshgrid(lon_arr, lat_arr)
+        if is_2d_mode:
+            work_dir_asc = work_dir / "asc"
+            work_dir_desc = work_dir / "desc"
+            work_dir_asc.mkdir(); work_dir_desc.mkdir()
+            zip_dir_asc = work_dir_asc / "hyp3_products"
+            zip_dir_desc = work_dir_desc / "hyp3_products"
+            zip_dir_asc.mkdir(); zip_dir_desc.mkdir()
             
-            # Si los valores exceden los límites de grados, están en proyeccion UTM
-            if abs(lat0) > 90 or abs(lon0) > 180:
-                epsg = vel_attrs.get("EPSG", 32616)
-                if isinstance(epsg, (np.ndarray, bytes)):
-                    try:
-                        epsg = int(epsg)
-                    except ValueError:
-                        epsg = 32616
-                try:
-                    transformer = pyproj.Transformer.from_crs(int(epsg), 4326, always_xy=True)
+            for p in asc_paths: shutil.move(str(p), str(zip_dir_asc / p.name))
+            for p in desc_paths: shutil.move(str(p), str(zip_dir_desc / p.name))
+                
+            try:
+                _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
+                _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
+            except ValueError as exc:
+                raise HTTPException(status_code=500, detail=str(exc))
+                
+            vel_h5_asc = work_dir_asc / "velocity.h5"
+            vel_h5_desc = work_dir_desc / "velocity.h5"
+            geo_asc = work_dir_asc / "inputs" / "geometryGeo.h5"
+            geo_desc = work_dir_desc / "inputs" / "geometryGeo.h5"
+            
+            if not vel_h5_asc.exists() or not vel_h5_desc.exists() or not geo_asc.exists() or not geo_desc.exists():
+                raise HTTPException(status_code=500, detail="MintPy no generó los archivos H5 para 2D.")
+                
+            with h5py.File(vel_h5_asc, "r") as vf_a, h5py.File(vel_h5_desc, "r") as vf_d:
+                vel_asc = vf_a["velocity"][:] * 1000.0
+                vel_desc = vf_d["velocity"][:] * 1000.0
+                vel_attrs = dict(vf_a.attrs)
+                
+            with h5py.File(geo_asc, "r") as gf_a, h5py.File(geo_desc, "r") as gf_d:
+                inc_asc = np.radians(gf_a["incidenceAngle"][:])
+                azi_asc = np.radians(gf_a["azimuthAngle"][:])
+                inc_desc = np.radians(gf_d["incidenceAngle"][:])
+                azi_desc = np.radians(gf_d["azimuthAngle"][:])
+                
+                lat_grid = gf_a["latitude"][:] if "latitude" in gf_a else None
+                lon_grid = gf_a["longitude"][:] if "longitude" in gf_a else None
+
+            # Matrix inversion
+            A_asc_up = np.cos(inc_asc)
+            A_asc_ew = -np.sin(inc_asc) * np.cos(azi_asc)
+            A_desc_up = np.cos(inc_desc)
+            A_desc_ew = -np.sin(inc_desc) * np.cos(azi_desc)
+            
+            det = (A_asc_ew * A_desc_up) - (A_asc_up * A_desc_ew)
+            
+            mask_a = np.isfinite(vel_asc) & (vel_asc != 0)
+            med_a = np.nanmedian(vel_asc[mask_a])
+            if not np.isnan(med_a): vel_asc[mask_a] -= med_a
+            
+            mask_d = np.isfinite(vel_desc) & (vel_desc != 0)
+            med_d = np.nanmedian(vel_desc[mask_d])
+            if not np.isnan(med_d): vel_desc[mask_d] -= med_d
+            
+            valid = mask_a & mask_d & (det != 0)
+            vel_ew = np.full_like(vel_asc, np.nan)
+            vel_up = np.full_like(vel_asc, np.nan)
+            vel_ew[valid] = (A_desc_up[valid] * vel_asc[valid] - A_asc_up[valid] * vel_desc[valid]) / det[valid]
+            vel_up[valid] = (-A_desc_ew[valid] * vel_asc[valid] + A_asc_ew[valid] * vel_desc[valid]) / det[valid]
+
+            if lat_grid is None:
+                lat0, lon0 = float(vel_attrs.get("Y_FIRST", 0)), float(vel_attrs.get("X_FIRST", 0))
+                dlat, dlon = float(vel_attrs.get("Y_STEP", -0.001)), float(vel_attrs.get("X_STEP", 0.001))
+                lat_arr = lat0 + np.arange(vel_asc.shape[0]) * dlat
+                lon_arr = lon0 + np.arange(vel_asc.shape[1]) * dlon
+                lon_grid, lat_grid = np.meshgrid(lon_arr, lat_arr)
+                if abs(lat0) > 90 or abs(lon0) > 180:
+                    epsg = int(vel_attrs.get("EPSG", 32616))
+                    transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
                     lon_grid, lat_grid = transformer.transform(lon_grid, lat_grid)
-                except Exception as e:
-                    logging.warning(f"Error convirtiendo de UTM a WGS84: {e}")
 
-        valid = np.isfinite(vel_mm) & (vel_mm != 0.0)
-
-        lats_v = lat_grid[valid].flatten()
-        lons_v = lon_grid[valid].flatten()
-        vels_v = vel_mm[valid].flatten()
-
-        if len(vels_v) == 0:
-            raise HTTPException(
-                status_code=422,
-                detail="MintPy no encontró píxeles coherentes. "
-                       "Verifica la cobertura y coherencia de tus interferogramas.",
-            )
-
-        results = [
-            {
-                "lat": round(float(lats_v[i]), 4),
-                "lon": round(float(lons_v[i]), 4),
-                "velocidad_mm_yr": round(float(vels_v[i]), 2),
+            lats_v, lons_v = lat_grid[valid].flatten(), lon_grid[valid].flatten()
+            ew_v, up_v = vel_ew[valid].flatten(), vel_up[valid].flatten()
+            
+            results = [
+                {"lat": round(float(lats_v[i]), 4), "lon": round(float(lons_v[i]), 4), "velocidad_mm_yr": round(float(up_v[i]), 2), "vel_ew_mm_yr": round(float(ew_v[i]), 2), "vel_up_mm_yr": round(float(up_v[i]), 2)}
+                for i in range(len(ew_v))
+            ]
+            
+            df_csv = pd.DataFrame(results)
+            df_csv.columns = ["Latitud", "Longitud", "Velocidad_mm_amo", "Velocidad_EW_mm_amo", "Velocidad_UP_mm_amo"]
+            df_csv.to_csv(CSV_FILE, index=False)
+            if XLSX_FILE.exists(): XLSX_FILE.unlink()
+            
+            all_dates = [m["date1"] for m in igram_meta] + [m["date2"] for m in igram_meta]
+            stats = {
+                "min": round(float(np.min(up_v) if len(up_v) else 0), 2),
+                "max": round(float(np.max(up_v) if len(up_v) else 0), 2),
+                "mean": round(float(np.mean(up_v) if len(up_v) else 0), 2),
+                "std": round(float(np.std(up_v) if len(up_v) else 0), 2),
+                "min_ew": round(float(np.min(ew_v) if len(ew_v) else 0), 2),
+                "max_ew": round(float(np.max(ew_v) if len(ew_v) else 0), 2),
+                "n_points": len(results),
+                "n_interferograms": len(files),
+                "date_start": min(all_dates),
+                "date_end": max(all_dates),
+                "era5_successful": True,
             }
-            for i in range(len(vels_v))
-        ]
+            
+            step_s = max(1, len(results) // 1000)
+            sample = results[::step_s][:1000]
+            
+            output = {"stats": stats, "interferograms": igram_meta, "igram_stats": [], "sample": sample, "mode": "2D"}
+            RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+            RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
+            return output
 
-        era5_model = work_dir / "inputs" / "ERA5.h5"
-        era5_success = era5_model.exists()
-
-        all_dates = [m["date1"] for m in igram_meta] + [m["date2"] for m in igram_meta]
-        stats = {
-            "min":              round(float(np.min(vels_v)),  2),
-            "max":              round(float(np.max(vels_v)),  2),
-            "mean":             round(float(np.mean(vels_v)), 2),
-            "std":              round(float(np.std(vels_v)),  2),
-            "n_points":         len(results),
-            "n_interferograms": len(files),
-            "date_start":       min(all_dates),
-            "date_end":         max(all_dates),
-            "era5_successful":  era5_success,
-        }
-
-        step_s = max(1, len(results) // 1000)
-        sample = results[::step_s][:1000]
-
-        igram_stats = []
-        if_stack = work_dir / "inputs" / "ifgramStack.h5"
-
-        if if_stack.exists():
-            with h5py.File(if_stack, "r") as stack_f:
-                if "unwrapPhase" in stack_f and "date" in stack_f:
-                    dates_array = stack_f["date"][:]
-                    phase_array = stack_f["unwrapPhase"][:]
-                    wvl = float(stack_f.attrs.get("WAVELENGTH", 0.05546576))
-                    rad2mm = (-1 * wvl / (4 * np.pi)) * 1000.0
-
-                    aps_array = None
-                    aps_dates = None
-                    if era5_model.exists():
-                        with h5py.File(era5_model, "r") as ef:
-                            if "unwrapPhase" in ef:
-                                aps_array = ef["unwrapPhase"][:]
-                            elif "timeseries" in ef and "date" in ef:
-                                aps_array = ef["timeseries"][:]
-                                aps_dates = [d.decode("utf-8") for d in ef["date"][:]]
-
-                    df_all_data = pd.DataFrame()
-                    df_all_data["Lat"] = np.round(lats_v, 6)
-                    df_all_data["Lon"] = np.round(lons_v, 6)
-                    df_all_data["Velocidad_mm_año"] = np.round(vels_v, 2)
-                    
-                    for idx, d_pair in enumerate(dates_array):
-                        if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
-                            d1 = d_pair[0].decode("utf-8")
-                            d2 = d_pair[1].decode("utf-8")
-                            col_suffix = f"{d1}_{d2}"
-                        else:
-                            col_suffix = f"Unk_{idx}"
-                            d1 = d2 = None
-                            
-                        phase_2d = phase_array[idx].copy()
-                        pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
-                        median_phase = np.nanmedian(phase_2d[pmask])
-                        if not np.isnan(median_phase):
-                            phase_2d[pmask] -= median_phase
-
-                        phase_1d = phase_2d[valid].flatten()
-                        def_mm_arr = phase_1d * rad2mm
-                        df_all_data[f"Def_{col_suffix}_mm"] = np.round(def_mm_arr, 2)
-                        
-                        if d1 and d2:
-                            igram_stats.append({
-                                "date1": d1,
-                                "date2": d2,
-                                "label": f"{d1} -> {d2}",
-                                "mean": round(float(np.mean(def_mm_arr)), 2),
-                                "std": round(float(np.std(def_mm_arr)), 2),
-                                "max": round(float(np.max(def_mm_arr)), 2),
-                                "min": round(float(np.min(def_mm_arr)), 2),
-                            })
-                            
-                        if aps_array is not None:
-                            aps_1d = None
-                            if aps_dates is not None and d1 and d2:
-                                if d1 in aps_dates and d2 in aps_dates:
-                                    idx1 = aps_dates.index(d1)
-                                    idx2 = aps_dates.index(d2)
-                                    aps_2d = aps_array[idx2] - aps_array[idx1]
-                                    aps_1d = aps_2d[valid].flatten()
-                            else:
-                                if idx < len(aps_array):
-                                    aps_2d = aps_array[idx]
-                                    aps_1d = aps_2d[valid].flatten()
-                                    
-                            if aps_1d is not None:
-                                df_all_data[f"Err_{col_suffix}_mm"] = np.round(aps_1d * 1000.0, 4)
-                                
-                    df_all_data.to_csv(CSV_FILE, index=False)
         else:
+            try:
+                _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
+            except ValueError as exc:
+                raise HTTPException(status_code=500, detail=str(exc))
+
+            velocity_h5 = work_dir / "velocity.h5"
+            if not velocity_h5.exists():
+                raise HTTPException(status_code=500, detail="MintPy no generó velocity.h5 en modo LOS.")
+
+            geometry_geo = work_dir / "inputs" / "geometryGeo.h5"
+            with h5py.File(velocity_h5, "r") as vf:
+                vel_data  = vf["velocity"][:]
+                vel_mm    = vel_data * 1000.0
+                vel_attrs = dict(vf.attrs)
+
+            vmask = np.isfinite(vel_mm) & (vel_mm != 0.0)
+            median_vel = np.nanmedian(vel_mm[vmask])
+            if not np.isnan(median_vel):
+                vel_mm[vmask] -= median_vel
+
+            use_grid = False
+            if geometry_geo.exists():
+                with h5py.File(geometry_geo, "r") as gf:
+                    if "latitude" in gf and "longitude" in gf:
+                        lat_grid = gf["latitude"][:]
+                        lon_grid = gf["longitude"][:]
+                        use_grid = True
+            
+            if not use_grid:
+                lat0, lon0 = float(vel_attrs.get("Y_FIRST", 0)), float(vel_attrs.get("X_FIRST", 0))
+                dlat, dlon = float(vel_attrs.get("Y_STEP", -0.001)), float(vel_attrs.get("X_STEP", 0.001))
+                lat_arr = lat0 + np.arange(vel_mm.shape[0]) * dlat
+                lon_arr = lon0 + np.arange(vel_mm.shape[1]) * dlon
+                lon_grid, lat_grid = np.meshgrid(lon_arr, lat_arr)
+                if abs(lat0) > 90 or abs(lon0) > 180:
+                    epsg = int(vel_attrs.get("EPSG", 32616))
+                    transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
+                    lon_grid, lat_grid = transformer.transform(lon_grid, lat_grid)
+
+            valid = np.isfinite(vel_mm) & (vel_mm != 0.0)
+            lats_v, lons_v, vels_v = lat_grid[valid].flatten(), lon_grid[valid].flatten(), vel_mm[valid].flatten()
+            if len(vels_v) == 0:
+                raise HTTPException(status_code=422, detail="No coherentes.")
+
+            results = [{"lat": round(float(lats_v[i]), 4), "lon": round(float(lons_v[i]), 4), "velocidad_mm_yr": round(float(vels_v[i]), 2)} for i in range(len(vels_v))]
+            
+            all_dates = [m["date1"] for m in igram_meta] + [m["date2"] for m in igram_meta]
+            stats = {
+                "min": round(float(np.min(vels_v)), 2),
+                "max": round(float(np.max(vels_v)), 2),
+                "mean": round(float(np.mean(vels_v)), 2),
+                "std": round(float(np.std(vels_v)), 2),
+                "n_points": len(results),
+                "n_interferograms": len(files),
+                "date_start": min(all_dates),
+                "date_end": max(all_dates),
+                "era5_successful": (work_dir / "inputs/ERA5.h5").exists(),
+            }
+
+            step_s = max(1, len(results) // 1000)
+            sample = results[::step_s][:1000]
+            
+            # Simple dataframe
             df_csv = pd.DataFrame(results)
             df_csv.columns = ["Latitud", "Longitud", "Velocidad_mm_año"]
             df_csv.to_csv(CSV_FILE, index=False)
+            
+            igram_stats = []
+            if_stack = work_dir / "inputs" / "ifgramStack.h5"
+            if if_stack.exists():
+                with h5py.File(if_stack, "r") as stack_f:
+                    if "unwrapPhase" in stack_f and "date" in stack_f:
+                        dates_array = stack_f["date"][:]
+                        phase_array = stack_f["unwrapPhase"][:]
+                        wvl = float(stack_f.attrs.get("WAVELENGTH", 0.05546576))
+                        rad2mm = (-1 * wvl / (4 * np.pi)) * 1000.0
 
-        output = {
-            "stats": stats, 
-            "interferograms": igram_meta, 
-            "igram_stats": igram_stats,
-            "sample": sample
-        }
-        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
+                        for idx, d_pair in enumerate(dates_array):
+                            if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
+                                d1 = d_pair[0].decode("utf-8")
+                                d2 = d_pair[1].decode("utf-8")
+                            else:
+                                continue
 
-        return output
+                            phase_2d = phase_array[idx].copy()
+                            pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
+                            median_phase = np.nanmedian(phase_2d[pmask])
+                            if not np.isnan(median_phase):
+                                phase_2d[pmask] -= median_phase
+
+                            phase_1d = phase_2d[valid].flatten()
+                            def_mm_arr = phase_1d * rad2mm
+                            
+                            if len(def_mm_arr) > 0 and d1 and d2:
+                                igram_stats.append({
+                                    "date1": d1,
+                                    "date2": d2,
+                                    "label": f"{d1} -> {d2}",
+                                    "mean": round(float(np.mean(def_mm_arr)), 2),
+                                    "std": round(float(np.std(def_mm_arr)), 2),
+                                    "max": round(float(np.max(def_mm_arr)), 2),
+                                    "min": round(float(np.min(def_mm_arr)), 2),
+                                })
+
+            if igram_stats:
+                df_stats = pd.DataFrame(igram_stats)
+                df_stats = df_stats[["label", "date1", "date2", "mean", "min", "max"]]
+                df_stats.columns = ["Interferograma", "Fecha Inicio", "Fecha Fin", "Velocidad Media (mm/a)", "Velocidad Min (mm/a)", "Velocidad Max (mm/a)"]
+                df_stats.to_excel(XLSX_FILE, index=False)
+            else:
+                if XLSX_FILE.exists(): XLSX_FILE.unlink()
+
+            output = {"stats": stats, "interferograms": igram_meta, "igram_stats": igram_stats, "sample": sample, "mode": "LOS"}
+            RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+            RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
+            return output
 
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
-
-
 
 @router.get("/results")
 def get_results():
@@ -820,6 +781,19 @@ def export_csv():
         filename="velocidad_deformacion_mintpy.csv",
     )
 
+@router.get("/export_xlsx")
+def export_xlsx():
+    if not XLSX_FILE.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No hay datos en XLSX para exportar. Procesa interferogramas primero.",
+        )
+    return FileResponse(
+        XLSX_FILE,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="resumen_interferogramas_mintpy.xlsx",
+    )
+
 
 
 @router.post("/preview_bounds")
@@ -898,3 +872,55 @@ async def preview_bounds(files: List[UploadFile] = File(...)):
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
+@router.post("/preview_plan")
+async def preview_plan(files: List[UploadFile] = File(...)):
+    """Determines how many files are Ascending vs Descending to plan the 2D decomposition."""
+    if not files:
+         raise HTTPException(status_code=400, detail="No files provided.")
+
+    work_dir = Path(tempfile.mkdtemp(prefix="mintpy_prev_plan_"))
+    zip_dir = work_dir / "hyp3_products"
+    zip_dir.mkdir()
+    
+    asc_count = 0
+    desc_count = 0
+    try:
+        for file in files:
+            raw = await file.read()
+            zname = file.filename or "interferogram.zip"
+            zip_bytes = zip_dir / zname
+            zip_bytes.write_bytes(raw)
+            
+            with zipfile.ZipFile(zip_bytes, "r") as zf:
+                phi_files = [f for f in zf.namelist() if f.endswith("_lv_phi.tif")]
+                if phi_files:
+                    zf.extract(phi_files[0], zip_dir)
+                    phi_path = zip_dir / phi_files[0]
+                    with rasterio.open(str(phi_path)) as src:
+                        # Read a small subset for speed
+                        out_h = max(1, src.height // 10)
+                        out_w = max(1, src.width // 10)
+                        data = src.read(1, out_shape=(1, out_h, out_w))
+                        if src.nodata is not None:
+                            data[data == src.nodata] = np.nan
+                        mean_phi = np.nanmean(data)
+                        if not np.isnan(mean_phi):
+                            mean_phi_deg = (np.degrees(mean_phi) + 360) % 360
+                            # Descending heading is ~192 deg, Ascending is ~348 deg
+                            if 90 < mean_phi_deg < 270:
+                                desc_count += 1
+                            else:
+                                asc_count += 1
+            zip_bytes.unlink()
+            
+        mode = "2D" if asc_count >= MIN_INTERFEROGRAMS and desc_count >= MIN_INTERFEROGRAMS else "LOS"
+        return {
+            "success": True,
+            "asc_count": asc_count,
+            "desc_count": desc_count,
+            "mode": mode
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error previewing plan: {str(e)}")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)

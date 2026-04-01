@@ -286,12 +286,16 @@ interface VelocityStats {
   date_start: string;
   date_end: string;
   era5_successful?: boolean;
+  min_ew?: number;
+  max_ew?: number;
 }
 
 interface VelocityPoint {
   lat: number;
   lon: number;
   velocidad_mm_yr: number;
+  vel_ew_mm_yr?: number;
+  vel_up_mm_yr?: number;
 }
 
 interface IgramStat {
@@ -309,6 +313,7 @@ interface ProcessingResults {
   interferograms: IgramMeta[];
   igram_stats?: IgramStat[];
   sample: VelocityPoint[];
+  mode?: "2D" | "LOS";
 }
 
 
@@ -395,6 +400,13 @@ interface SeedPoint {
   is_mintpy_default: boolean;
 }
 
+interface PlanData {
+  success: boolean;
+  asc_count: number;
+  desc_count: number;
+  mode: "2D" | "LOS";
+}
+
 export default function MintPyAnalysis() {
   const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -407,6 +419,9 @@ export default function MintPyAnalysis() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const MIN_IGRAMS = 3;
 
+  const [plan, setPlan] = useState<PlanData | null>(null);
+  const [viewMode, setViewMode] = useState<"UP" | "EW">("UP");
+
   const [bounds, setBounds] = useState<BoundsType | null>(null);
   const [drawnBox, setDrawnBox] = useState<BoundsType | null>(null);
 
@@ -415,6 +430,20 @@ export default function MintPyAnalysis() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(drawnBox));
     }
   }, [drawnBox]);
+
+  const fetchPlan = async (fileList: File[]) => {
+    if (!fileList.length) return;
+    try {
+      const formData = new FormData();
+      fileList.forEach(f => formData.append("files", f));
+      const res = await axios.post(`${API_URL}/api/mintpy/preview_plan`, formData);
+      if (res.data.success) {
+        setPlan(res.data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const fetchBounds = async (fileList: File[]) => {
     if (!fileList.length) return;
@@ -443,10 +472,14 @@ export default function MintPyAnalysis() {
   };
 
   useEffect(() => {
-    if (files.length > 0 && !bounds && !busy) {
-      fetchBounds(files);
+    if (files.length > 0 && !busy) {
+      if (!bounds) fetchBounds(files);
+      if (!plan) fetchPlan(files);
+    } else if (files.length === 0) {
+      setPlan(null);
+      setBounds(null);
     }
-  }, [files, bounds, busy]);
+  }, [files, bounds, plan, busy]);
 
 
 
@@ -582,9 +615,13 @@ export default function MintPyAnalysis() {
 
   // ── Histogram data ───────────────────────────────────────────────────────────
 
-  const histogramData = results ? buildHistogram(results.sample) : [];
-  const velMin = results?.stats.min ?? 0;
-  const velMax = results?.stats.max ?? 0;
+  const activeData = results ? (results.mode === "2D" ? results.sample.map(p => ({
+    lat: p.lat, lon: p.lon, velocidad_mm_yr: viewMode === "EW" ? (p.vel_ew_mm_yr || 0) : (p.vel_up_mm_yr || 0)
+  })) : results.sample) : [];
+  
+  const histogramData = results ? buildHistogram(activeData) : [];
+  const velMin = results && results.mode === "2D" && viewMode === "EW" ? (results.stats.min_ew ?? 0) : (results?.stats.min ?? 0);
+  const velMax = results && results.mode === "2D" && viewMode === "EW" ? (results.stats.max_ew ?? 0) : (results?.stats.max ?? 0);
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -687,6 +724,28 @@ export default function MintPyAnalysis() {
                 : `⚠️ ${files.length}/${MIN_IGRAMS} — faltan ${MIN_IGRAMS - files.length} más`}
             </div>
           )}
+
+          {plan && (
+            <div
+              style={{
+                marginBottom: "12px",
+                padding: "8px 12px",
+                borderRadius: "8px",
+                background: plan.mode === "2D" ? "rgba(56,189,248,0.12)" : "rgba(255,255,255,0.05)",
+                border: `1px solid ${plan.mode === "2D" ? "rgba(56,189,248,0.3)" : "rgba(255,255,255,0.1)"}`,
+                fontSize: "0.8rem",
+                color: "#cbd5e1",
+              }}
+            >
+              <div style={{fontWeight: 600, color: plan.mode === "2D" ? "#38bdf8" : "#cbd5e1"}}>
+                {plan.mode === "2D" ? "🚀 Descomposición 2D" : "📏 LOS Estándar"}
+              </div>
+              <div style={{ color: "#94a3b8", marginTop: "4px", fontSize: "0.75rem" }}>
+                Ascendentes: {plan.asc_count} | Descendentes: {plan.desc_count}
+              </div>
+            </div>
+          )}
+
 
           {/* File list */}
           {files.length > 0 && (
@@ -992,6 +1051,27 @@ export default function MintPyAnalysis() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+
+              {results && results.mode === "2D" && (
+                <div style={{ display: "flex", gap: "10px", marginBottom: "4px" }}>
+                  <button
+                    onClick={() => setViewMode("UP")}
+                    style={{
+                      flex: 1, padding: "8px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)",
+                      background: viewMode === "UP" ? "rgba(56,189,248,0.2)" : "transparent",
+                      color: viewMode === "UP" ? "#e0f2fe" : "#94a3b8", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600
+                    }}
+                  >⬆️ Movimiento Vertical</button>
+                  <button
+                    onClick={() => setViewMode("EW")}
+                    style={{
+                      flex: 1, padding: "8px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)",
+                      background: viewMode === "EW" ? "rgba(56,189,248,0.2)" : "transparent",
+                      color: viewMode === "EW" ? "#e0f2fe" : "#94a3b8", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600
+                    }}
+                  >↔️ Movimiento Este-Oeste</button>
+                </div>
+              )}
               {/* Stats cards */}
               <div
                 style={{
@@ -1001,10 +1081,10 @@ export default function MintPyAnalysis() {
                 }}
               >
                 {[
-                  { label: "Vel. Mínima", value: `${results.stats.min.toFixed(2)} mm/a`, color: "#60a5fa" },
-                  { label: "Vel. Máxima", value: `${results.stats.max.toFixed(2)} mm/a`, color: "#f87171" },
-                  { label: "Vel. Media", value: `${results.stats.mean.toFixed(2)} mm/a`, color: "#34d399" },
-                  { label: "Desv. Est.", value: `${results.stats.std.toFixed(2)} mm/a`, color: "#a78bfa" },
+                  { label: "Vel. Mínima", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.min_ew !== undefined ? results.stats.min_ew : results.stats.min).toFixed(2)} mm/a`, color: "#60a5fa" },
+                  { label: "Vel. Máxima", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.max_ew !== undefined ? results.stats.max_ew : results.stats.max).toFixed(2)} mm/a`, color: "#f87171" },
+                  { label: "Vel. Media", value: `${(viewMode === "EW" && results.mode === "2D" ? 0 : results.stats.mean).toFixed(2)} mm/a`, color: "#34d399" },
+                  { label: "Desv. Est.", value: `${(viewMode === "EW" && results.mode === "2D" ? 0 : results.stats.std).toFixed(2)} mm/a`, color: "#a78bfa" },
                 ].map((s) => (
                   <div
                     key={s.label}
@@ -1048,6 +1128,23 @@ export default function MintPyAnalysis() {
                       🗺️ Mapa de Velocidad de Deformación
                     </h3>
                     <div style={{ display: "flex", gap: "8px" }}>
+                      {(results?.mode !== "2D") && (
+                        <a
+                          href={`${API_URL}/api/mintpy/export_xlsx`}
+                          download
+                          style={{
+                            padding: "6px 14px",
+                            background: "linear-gradient(135deg, #10b981, #059669)",
+                            color: "white",
+                            borderRadius: "8px",
+                            fontSize: "0.78rem",
+                            fontWeight: 600,
+                            textDecoration: "none",
+                          }}
+                        >
+                          📊 Resumen XLSX
+                        </a>
+                      )}
                       <a
                         href={`${API_URL}/api/mintpy/export_csv`}
                         download
@@ -1107,7 +1204,7 @@ export default function MintPyAnalysis() {
                         bounds={bounds}
                         drawnBox={drawnBox}
                         setDrawnBox={setDrawnBox}
-                        deformationData={results.sample}
+                        deformationData={activeData}
                         velMin={velMin}
                         velMax={velMax}
                       />
@@ -1252,6 +1349,23 @@ export default function MintPyAnalysis() {
                     </span>
                   </h3>
                   <div style={{ display: "flex", gap: "8px" }}>
+                    {(results?.mode !== "2D") && (
+                      <a
+                        href={`${API_URL}/api/mintpy/export_xlsx`}
+                        download
+                        style={{
+                          padding: "6px 14px",
+                          background: "linear-gradient(135deg, #10b981, #059669)",
+                          color: "white",
+                          borderRadius: "8px",
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          textDecoration: "none",
+                        }}
+                      >
+                        📊 Resumen XLSX
+                      </a>
+                    )}
                     <a
                       href={`${API_URL}/api/mintpy/export_csv`}
                       download
@@ -1313,8 +1427,15 @@ export default function MintPyAnalysis() {
                                 color,
                               }}
                             >
-                              {p.velocidad_mm_yr > 0 ? "+" : ""}
-                              {p.velocidad_mm_yr.toFixed(2)}
+                              {results.mode === "2D" ? (
+                                viewMode === "EW" ? (
+                                  (p.vel_ew_mm_yr || 0) > 0 ? "+" : ""
+                                ) + (p.vel_ew_mm_yr || 0).toFixed(2) : (
+                                  (p.vel_up_mm_yr || 0) > 0 ? "+" : ""
+                                ) + (p.vel_up_mm_yr || 0).toFixed(2)
+                              ) : (
+                                (p.velocidad_mm_yr > 0 ? "+" : "") + p.velocidad_mm_yr.toFixed(2)
+                              )}
                             </td>
                           </tr>
                         );

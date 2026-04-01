@@ -1,14 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import Navbar from "./components/Navbar";
 import BarraSuperior from "./components/BarraSuperior";
-import Era5 from "./pages/Era5/Era5";
+
 
 import AlaskaSearch from "./pages/Alaska/AlaskaSearch";
 import SentinelDashboard from "./pages/Alaska/SentinelDashboard";
 import DownloadFiles from "./pages/Alaska/DownloadFiles";
-import Alaska_procesamiento from "./pages/AlaskaProcessing/AlaskaProcessing";
 import SolicitarImagenesAutomatico from "./pages/SolicitarImagenesAutomatico/SolicitarImagenesAutomatico";
-import Era5SentinelComparative from "./pages/Era5SentinelComparative/Era5SentinelComparative";
+
 import MintPyAnalysis from "./pages/MintPy/MintPyAnalysis";
 
 import Inicio from "./pages/Home/Home";
@@ -155,13 +154,6 @@ const App: React.FC = () => {
           </div>
         );
 
-      case "procesamiento-imagenes":
-        return (
-          <div>
-            <Alaska_procesamiento />
-          </div>
-        );
-
 
       case "solicitud-automatico":
         return (
@@ -170,20 +162,10 @@ const App: React.FC = () => {
           </div>
         );
 
-      case "descargar-datos":
-        return (
-          <div>
-            <Era5 />
-          </div>
-        );
 
 
-      case "comparativa-era5-sentinel":
-        return (
-          <div>
-            <Era5SentinelComparative />
-          </div>
-        );
+
+
 
       case "mintpy-analysis":
         return (

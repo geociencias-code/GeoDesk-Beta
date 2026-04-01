@@ -1,17 +1,15 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 
 import { Globe2 } from "lucide-react";
 import Globe from "react-globe.gl";
 import type { GlobeMethods } from "react-globe.gl";
 
-import Alaska_procesamiento from "../AlaskaProcessing/AlaskaProcessing";
 
 type GeoDeskCoverProps = {
   onNavigate: (page: string) => void;
 };
 
 export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.ReactNode {
-  const [currentPage, setCurrentPage] = useState<string | null>(null);
   const globeEl = useRef<GlobeMethods>(null!);
 
   // Configuración de texturas para el globo
@@ -27,22 +25,7 @@ export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.R
     }
   }, []);
 
-  const renderPage = () => {
-    switch (currentPage) {
-      case "procesamiento-imagenes":
-        return (
-          <div className="p-4">
-            <Alaska_procesamiento />
-          </div>
-        );
-      default:
-        return null;
-    }
-  };
 
-  if (currentPage) {
-    return <>{renderPage()}</>;
-  }
 
   return (
     <div className="home-wrapper">
@@ -80,16 +63,10 @@ export default function GeoDeskCover({ onNavigate }: GeoDeskCoverProps): React.R
 
           <div className="home-actions">
             <button
-              onClick={() => setCurrentPage("procesamiento-imagenes")}
+              onClick={() => onNavigate("mintpy-analysis")}
               className="btn-primary"
             >
-              Iniciar Análisis InSAR
-            </button>
-            <button
-              onClick={() => onNavigate("descargar-datos")}
-              className="btn-secondary"
-            >
-              Explorar Clima ERA5
+              Iniciar Análisis InSAR (MintPy)
             </button>
           </div>
         </div>

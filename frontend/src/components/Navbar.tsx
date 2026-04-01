@@ -3,8 +3,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   Home, 
   Map, 
-  CloudRain, 
-  Settings, 
   ChevronDown, 
   Layers,
   Activity
@@ -143,32 +141,13 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
               { id: "solicitud-imagenes", label: "Solicitud manual" },
               { id: "solicitud-automatico", label: "Solicitud automático" },
               { id: "descarga-imagenes", label: "Descarga de imágenes" },
-              { id: "procesamiento-imagenes", label: "Recorte y deformación" },
             ]}
-            activeSection={activeSection}
-          />
-
-          <Item
-            id="era5"
-            label="Clima ERA5"
-            icon={<CloudRain size={18} />}
-            hasSubmenu={false}
-            onChangeSection={onChangeSection}
             activeSection={activeSection}
           />
 
           {/* Spacer */}
           <div style={{ margin: "16px 0" }} />
           <h3 className="sidebar__title">Herramientas</h3>
-
-          <Item 
-            id="comparativa-era5-sentinel"
-            label="Comparativa ERA5/Sentinel"
-            icon={<Settings size={18} />}
-            hasSubmenu={false}
-            onChangeSection={onChangeSection}
-            activeSection={activeSection}
-          />
 
           <Item
             id="mintpy-analysis"

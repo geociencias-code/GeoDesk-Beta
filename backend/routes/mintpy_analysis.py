@@ -23,6 +23,20 @@ from fastapi.responses import FileResponse
 import rasterio.warp
 from rasterio.windows import Window
 
+# Bugfix: MintPy's calc_inv_quality returns a 1D array of size 1 for single-pixel inversions,
+# which crashes NumPy 1.24+ with "ValueError: setting an array element with a sequence."
+# We monkey-patch the estimate_timeseries function globally here to prevent multi-patching
+# across sequential API calls.
+from mintpy.ifgram_inversion import estimate_timeseries as original_estimate_timeseries
+
+def patched_estimate_timeseries(*args, **kwargs):
+    tsi, inv_quali, num_obsi = original_estimate_timeseries(*args, **kwargs)
+    if getattr(inv_quali, "size", 0) == 1:
+        inv_quali = float(inv_quali.item())
+    return tsi, inv_quali, num_obsi
+
+inv.estimate_timeseries = patched_estimate_timeseries
+
 router = APIRouter(prefix="/api/mintpy", tags=["MintPy"])
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -90,27 +104,85 @@ def _make_cfg(
 
     tifs = list(zip_dir.glob("*/*_unw_phase.tif"))
     min_h = min_w = "auto"
+    subset_yx_val = "auto"
+    ref_yx_val = "auto"
+    
     if tifs:
         heights = []
         widths = []
+        lefts, bottoms, rights, tops = [], [], [], []
+        crs = None
         for t in tifs:
             try:
                 with rasterio.open(str(t)) as src:
                     heights.append(src.height)
                     widths.append(src.width)
+                    lefts.append(src.bounds.left)
+                    bottoms.append(src.bounds.bottom)
+                    rights.append(src.bounds.right)
+                    tops.append(src.bounds.top)
+                    if crs is None:
+                        crs = src.crs
             except Exception as e:
                 logging.warning(f"Error reading {t} con rasterio: {e}")
+                
+        if lefts:
+            common_bounds = (max(lefts), max(bottoms), min(rights), min(tops))
+            with rasterio.open(str(tifs[0])) as src:
+                window = rasterio.windows.from_bounds(*common_bounds, transform=src.transform)
+                width, height = int(window.width), int(window.height)
+                transform = rasterio.windows.transform(window, src.transform)
+
+            transformer = None
+            if crs and crs.to_epsg() != 4326:
+                transformer = pyproj.Transformer.from_crs(4326, crs.to_epsg() or 32616, always_xy=True)
+
+            c_off, r_off = 0, 0
+
+            if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
+                if transformer:
+                    ll_x, ll_y = transformer.transform(crop_lon_min, crop_lat_min)
+                    ur_x, ur_y = transformer.transform(crop_lon_max, crop_lat_max)
+                    lr_x, lr_y = transformer.transform(crop_lon_max, crop_lat_min)
+                    ul_x, ul_y = transformer.transform(crop_lon_min, crop_lat_max)
+                    
+                    min_x = min(ll_x, ur_x, lr_x, ul_x)
+                    max_x = max(ll_x, ur_x, lr_x, ul_x)
+                    min_y = min(ll_y, ur_y, lr_y, ul_y)
+                    max_y = max(ll_y, ur_y, lr_y, ul_y)
+                else:
+                    min_x, max_x = crop_lon_min, crop_lon_max
+                    min_y, max_y = crop_lat_min, crop_lat_max
+                
+                win = rasterio.windows.from_bounds(min_x, min_y, max_x, max_y, transform=transform)
+                c_off = int(max(0, win.col_off))
+                r_off = int(max(0, win.row_off))
+                c_end = int(min(width, win.col_off + win.width))
+                r_end = int(min(height, win.row_off + win.height))
+                
+                if c_end > c_off and r_end > r_off:
+                    subset_yx_val = f"{r_off}:{r_end},{c_off}:{c_end}"
+
+            if ref_lat is not None and ref_lon is not None:
+                if transformer:
+                    ref_lon_proj, ref_lat_proj = transformer.transform(ref_lon, ref_lat)
+                else:
+                    ref_lon_proj, ref_lat_proj = ref_lon, ref_lat
+                
+                r_ref, c_ref = rasterio.transform.rowcol(transform, ref_lon_proj, ref_lat_proj)
+                ry = int(r_ref) - r_off
+                rx = int(c_ref) - c_off
+                
+                ry = max(0, ry)
+                rx = max(0, rx)
+                ref_yx_val = f"{ry},{rx}"
+                
         if heights and widths:
             min_h = min(heights)
             min_w = min(widths)
     
-    subset_yx = f"0:{min_h},0:{min_w}" if min_h != "auto" else "auto"
-    ref_lalo = f"{ref_lat},{ref_lon}" if ref_lat is not None and ref_lon is not None else "auto"
-
-    subset_lalo = "auto"
-    if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
-        subset_lalo = f"{crop_lat_min}:{crop_lat_max},{crop_lon_min}:{crop_lon_max}"
-        subset_yx = "no"
+    if subset_yx_val == "auto" and min_h != "auto":
+        subset_yx_val = f"0:{min_h},0:{min_w}"
 
     return f"""mintpy.load.processor    = hyp3
 mintpy.load.unwFile      = {unw_pat}
@@ -118,11 +190,12 @@ mintpy.load.corFile      = {cor_pat}
 mintpy.load.demFile      = {dem_pat}
 mintpy.load.incAngleFile = {inc_pat}
 mintpy.load.azAngleFile  = {azi_pat}
-mintpy.subset.lalo       = {subset_lalo}
-mintpy.subset.yx         = {subset_yx}
+mintpy.subset.lalo       = no
+mintpy.subset.yx         = {subset_yx_val}
 mintpy.network.coherenceBased     = yes
 mintpy.network.minCoherence       = 0.4
-mintpy.reference.lalo             = {ref_lalo}
+mintpy.reference.lalo             = no
+mintpy.reference.yx               = {ref_yx_val}
 mintpy.troposphericDelay.method   = pyaps
 mintpy.troposphericDelay.weatherModel = ERA5
 mintpy.deramp                     = linear
@@ -196,24 +269,12 @@ def _run_mintpy_pipeline(
         cdsapirc_path.write_text(f"url: {cds_url}\nkey: {cds_key}\n")
 
     try:
+        original_cwd = os.getcwd()
         tsa = TimeSeriesAnalysis(
             customTemplateFile=str(cfg_path),
             workDir=str(work_dir),
         )
         tsa.open()
-
-        # Bugfix: MintPy's calc_inv_quality returns a 1D array of size 1 for single-pixel inversions,
-        # which crashes NumPy 1.24+ with "ValueError: setting an array element with a sequence."
-        # We monkey-patch the estimate_timeseries function to extract the scalar and prevent the crash.
-        original_estimate = inv.estimate_timeseries
-        
-        def patched_estimate(*args, **kwargs):
-            tsi, inv_quali, num_obsi = original_estimate(*args, **kwargs)
-            if getattr(inv_quali, "size", 0) == 1:
-                inv_quali = float(inv_quali.item())
-            return tsi, inv_quali, num_obsi
-            
-        inv.estimate_timeseries = patched_estimate
 
         steps = [
             "load_data",
@@ -240,6 +301,7 @@ def _run_mintpy_pipeline(
             
         raise ValueError(f"{type(e).__name__}: {e}\nLog:\n{log_tail}")
     finally:
+        os.chdir(original_cwd)
         mintpy_logger.removeHandler(fh)
         fh.close()
 

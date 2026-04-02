@@ -36,6 +36,7 @@ const App: React.FC = () => {
     "ASCENDING" | "DESCENDING" | ""
   >("");
   const [polarization, setPolarization] = useState<string>("");
+  const [dayInterval, setDayInterval] = useState<number>(12);
 
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -133,6 +134,8 @@ const App: React.FC = () => {
               setFlightDirection={setFlightDirection}
               polarization={polarization}
               setPolarization={setPolarization}
+              dayInterval={dayInterval}
+              setDayInterval={setDayInterval}
               onSearch={searchScenes}
               loading={loading}
               error={error}
@@ -143,6 +146,7 @@ const App: React.FC = () => {
               backendUrl={API_URL}
               ruta={ruta}
               marco={marco}
+              dayInterval={dayInterval}
             />
           </div>
         );

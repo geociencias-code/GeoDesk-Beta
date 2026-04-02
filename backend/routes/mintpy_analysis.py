@@ -22,6 +22,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, Form
 from fastapi.responses import FileResponse
 import rasterio.warp
 from rasterio.windows import Window
+from scipy.interpolate import griddata
 
 # Bugfix: MintPy's calc_inv_quality returns a 1D array of size 1 for single-pixel inversions,
 # which crashes NumPy 1.24+ with "ValueError: setting an array element with a sequence."
@@ -420,9 +421,40 @@ async def process_interferograms(
                 azi_asc = np.radians(gf_a["azimuthAngle"][:])
                 inc_desc = np.radians(gf_d["incidenceAngle"][:])
                 azi_desc = np.radians(gf_d["azimuthAngle"][:])
-                
-                lat_grid = gf_a["latitude"][:] if "latitude" in gf_a else None
-                lon_grid = gf_a["longitude"][:] if "longitude" in gf_a else None
+
+                def get_lat_lon(vf, gf):
+                    lat = gf["latitude"][:] if "latitude" in gf else None
+                    lon = gf["longitude"][:] if "longitude" in gf else None
+                    if lat is None or lon is None:
+                        attrs = dict(vf.attrs)
+                        lat0, lon0 = float(attrs.get("Y_FIRST", 0)), float(attrs.get("X_FIRST", 0))
+                        dlat, dlon = float(attrs.get("Y_STEP", -0.001)), float(attrs.get("X_STEP", 0.001))
+                        lat_arr = lat0 + np.arange(vf["velocity"].shape[0]) * dlat
+                        lon_arr = lon0 + np.arange(vf["velocity"].shape[1]) * dlon
+                        lon, lat = np.meshgrid(lon_arr, lat_arr)
+                        if abs(lat0) > 90 or abs(lon0) > 180:
+                            epsg = int(attrs.get("EPSG", 32616))
+                            transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
+                            lon, lat = transformer.transform(lon, lat)
+                    return lat, lon
+
+                lat_asc, lon_asc = get_lat_lon(vf_a, gf_a)
+                lat_desc, lon_desc = get_lat_lon(vf_d, gf_d)
+
+            # Spatial resampling (interpolation) of Ascending to Descending master grid
+            valid_mask_a = np.isfinite(vel_asc) & (vel_asc != 0)
+            
+            if np.any(valid_mask_a):
+                valid_pts_a = np.column_stack((lat_asc[valid_mask_a], lon_asc[valid_mask_a]))
+                vel_asc = griddata(valid_pts_a, vel_asc[valid_mask_a], (lat_desc, lon_desc), method='linear', fill_value=np.nan)
+                inc_asc = griddata(valid_pts_a, inc_asc[valid_mask_a], (lat_desc, lon_desc), method='linear', fill_value=np.nan)
+                azi_asc = griddata(valid_pts_a, azi_asc[valid_mask_a], (lat_desc, lon_desc), method='linear', fill_value=np.nan)
+            else:
+                vel_asc = np.full_like(vel_desc, np.nan)
+                inc_asc = np.full_like(vel_desc, np.nan)
+                azi_asc = np.full_like(vel_desc, np.nan)
+
+            lat_grid, lon_grid = lat_desc, lon_desc
 
             # Matrix inversion
             A_asc_up = np.cos(inc_asc)
@@ -440,22 +472,11 @@ async def process_interferograms(
             med_d = np.nanmedian(vel_desc[mask_d])
             if not np.isnan(med_d): vel_desc[mask_d] -= med_d
             
-            valid = mask_a & mask_d & (det != 0)
-            vel_ew = np.full_like(vel_asc, np.nan)
-            vel_up = np.full_like(vel_asc, np.nan)
+            valid = mask_a & mask_d & (det != 0) & np.isfinite(det)
+            vel_ew = np.full_like(vel_desc, np.nan)
+            vel_up = np.full_like(vel_desc, np.nan)
             vel_ew[valid] = (A_desc_up[valid] * vel_asc[valid] - A_asc_up[valid] * vel_desc[valid]) / det[valid]
             vel_up[valid] = (-A_desc_ew[valid] * vel_asc[valid] + A_asc_ew[valid] * vel_desc[valid]) / det[valid]
-
-            if lat_grid is None:
-                lat0, lon0 = float(vel_attrs.get("Y_FIRST", 0)), float(vel_attrs.get("X_FIRST", 0))
-                dlat, dlon = float(vel_attrs.get("Y_STEP", -0.001)), float(vel_attrs.get("X_STEP", 0.001))
-                lat_arr = lat0 + np.arange(vel_asc.shape[0]) * dlat
-                lon_arr = lon0 + np.arange(vel_asc.shape[1]) * dlon
-                lon_grid, lat_grid = np.meshgrid(lon_arr, lat_arr)
-                if abs(lat0) > 90 or abs(lon0) > 180:
-                    epsg = int(vel_attrs.get("EPSG", 32616))
-                    transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
-                    lon_grid, lat_grid = transformer.transform(lon_grid, lat_grid)
 
             lats_v, lons_v = lat_grid[valid].flatten(), lon_grid[valid].flatten()
             ew_v, up_v = vel_ew[valid].flatten(), vel_up[valid].flatten()

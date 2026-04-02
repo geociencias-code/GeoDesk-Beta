@@ -17,6 +17,8 @@ type Props = {
   setFlightDirection?: (v: "ASCENDING" | "DESCENDING" | "") => void;
   polarization?: string;
   setPolarization?: (v: string) => void;
+  dayInterval?: number;
+  setDayInterval?: (v: number) => void;
 
   onSearch: () => void;
   loading: boolean; 
@@ -32,6 +34,8 @@ const AlaskaSearch: React.FC<Props> = ({
   setFlightDirection,
   polarization = "",
   setPolarization,
+  dayInterval,
+  setDayInterval,
   onSearch, loading, error, lastCount
 }) => {
   return (
@@ -136,6 +140,31 @@ const AlaskaSearch: React.FC<Props> = ({
                 </select>
               </div>
             </div>
+
+            <>
+              <label style={{ color: "var(--color-primary)", fontWeight: "bold" }}>
+                4. Configuración de Pares (Opcional)
+              </label>
+              <div style={{ marginBottom: "20px", marginTop: "12px" }}>
+                <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
+                  Intervalo máximo de días (Temporal Baseline): {dayInterval ?? 12}
+                </label>
+                <input
+                  type="range"
+                  min="6"
+                  max="48"
+                  step="6"
+                  defaultValue={dayInterval ?? 12}
+                  onChange={(e) => setDayInterval?.(Number(e.target.value))}
+                  onInput={(e) => setDayInterval?.(Number((e.target as HTMLInputElement).value))}
+                  style={{ width: "100%", accentColor: "var(--color-primary)" }}
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+                  <span>6 días</span>
+                  <span>48 días</span>
+                </div>
+              </div>
+            </>
             
             <button
               onClick={onSearch}

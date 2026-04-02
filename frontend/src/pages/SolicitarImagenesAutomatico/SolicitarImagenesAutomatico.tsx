@@ -31,6 +31,7 @@ const SolicitarImagenesAutomatico: React.FC = () => {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [projectName, setProjectName] = useState("");
+  const [dayInterval, setDayInterval] = useState<number>(12);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ResponseData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +59,7 @@ const SolicitarImagenesAutomatico: React.FC = () => {
         start_date: `${startDate}T00:00:00Z`,
         end_date: `${endDate}T23:59:59Z`,
         project_name: projectName.trim(),
+        day_interval: dayInterval,
       };
 
       // Enviar la solicitud al backend
@@ -151,6 +153,26 @@ const SolicitarImagenesAutomatico: React.FC = () => {
               <small style={{ display: "block", marginTop: "8px", color: "var(--color-text-muted)", fontSize: "0.75rem", lineHeight: "1.4" }}>
                 Debe ser único. Si ya existe una carpeta con ese nombre, el servidor lo rechazará.
               </small>
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
+                Intervalo máximo de días entre imágenes: {dayInterval}
+              </label>
+              <input
+                type="range"
+                min="6"
+                max="48"
+                step="6"
+                defaultValue={dayInterval}
+                onChange={(e) => setDayInterval(Number(e.target.value))}
+                onInput={(e) => setDayInterval(Number((e.target as HTMLInputElement).value))}
+                style={{ width: "100%", accentColor: "var(--color-primary)" }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+                <span>6 días</span>
+                <span>48 días</span>
+              </div>
             </div>
 
             <button

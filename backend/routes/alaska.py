@@ -289,6 +289,9 @@ def health():
 
 @router.post("/api/search", response_model=List[SceneOut])
 def api_search(params: SearchParams):
+    if params.flight_direction == "ASCENDING" and params.ruta == 128 and params.marco == 547:
+        params.ruta = 63
+        params.marco = 39
     try:
         res = search_scenes(params)
         out: List[SceneOut] = []

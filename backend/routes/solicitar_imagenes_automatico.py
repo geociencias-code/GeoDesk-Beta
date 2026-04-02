@@ -55,6 +55,8 @@ class SolicitudAutoIn:
     end_date: str     # ISO-8601
     project_name: Optional[str] = None
     output_folder: Optional[str] = None
+    flight_direction: Optional[str] = "DESCENDING"
+    day_interval: int = 12
 
 
 @dataclass
@@ -165,21 +167,24 @@ def _validar_nombre_proyecto_unico(
 
 
 #  LÓGICA PRINCIPAL
-def search_scenes(start_iso: str, end_iso: str) -> List[Any]:
-    results = asf.search(
-        platform=PLATFORM,
-        processingLevel=PROC_LEVEL,
-        beamMode=BEAM_MODE,
-        intersectsWith=POLYGON,
-        start=start_iso,
-        end=end_iso,
-        relativeOrbit=RUTA,
-        frame=MARCO,
-    )
+def search_scenes(start_iso: str, end_iso: str, ruta: int = 128, marco: int = 547, direction: Optional[str] = None) -> List[Any]:
+    kwargs = {
+        "platform": PLATFORM,
+        "processingLevel": PROC_LEVEL,
+        "beamMode": BEAM_MODE,
+        "intersectsWith": POLYGON,
+        "start": start_iso,
+        "end": end_iso,
+        "relativeOrbit": ruta,
+        "frame": marco
+    }
+    if direction:
+        kwargs["flightDirection"] = direction
+    results = asf.search(**kwargs)
     return list(results)
 
 
-def build_pairs(results: Iterable[Any]) -> List[Tuple[str, str]]:
+def build_pairs(results: Iterable[Any], day_interval: int) -> List[Tuple[str, str]]:
     valid: List[Tuple[Any, str, datetime]] = []
     for r in results:
         g = get_granule_name(r)
@@ -201,7 +206,7 @@ def build_pairs(results: Iterable[Any]) -> List[Tuple[str, str]]:
         if plat1 and plat2 and plat1 != plat2:
             continue
         delta_days = abs((d2 - d1).days)
-        if delta_days <= DAY_INTERVAL:
+        if delta_days <= day_interval:
             pairs.append((g1, g2))
 
     return pairs
@@ -210,6 +215,8 @@ def build_pairs(results: Iterable[Any]) -> List[Tuple[str, str]]:
 def submit_jobs(
     pairs: List[Tuple[str, str]],
     project_name: str,
+    ruta: int = 128,
+    marco: int = 547
 ) -> List[JobSummary]:
     if not pairs:
         return []
@@ -218,7 +225,7 @@ def submit_jobs(
     summaries: List[JobSummary] = []
 
     for idx, (g1, g2) in enumerate(pairs, 1):
-        job_name = f"{project_name}_{RUTA}_{MARCO}_{idx:02d}"
+        job_name = f"{project_name}_{ruta}_{marco}_{idx:02d}"
         try:
             batch = hyp3.submit_insar_job(
                 granule1=g1,
@@ -283,8 +290,11 @@ def solicitar_imagenes_automatico(payload: SolicitudAutoIn) -> Dict[str, Any]:
 
     start_iso = _iso_utc(start_dt)
     end_iso = _iso_utc(end_dt)
+    
+    ruta_val = 63 if payload.flight_direction == "ASCENDING" else 128
+    marco_val = 39 if payload.flight_direction == "ASCENDING" else 547
 
-    results = search_scenes(start_iso, end_iso)
+    results = search_scenes(start_iso, end_iso, ruta=ruta_val, marco=marco_val, direction=payload.flight_direction)
 
     escenas: List[SceneInfo] = []
     for r in results:
@@ -295,9 +305,9 @@ def solicitar_imagenes_automatico(payload: SolicitudAutoIn) -> Dict[str, Any]:
             acquire_utc=_iso_utc(acq_dt) if acq_dt else None
         ))
 
-    pairs = build_pairs(results)
+    pairs = build_pairs(results, payload.day_interval)
 
-    jobs = submit_jobs(pairs, project_name=project_name)
+    jobs = submit_jobs(pairs, project_name=project_name, ruta=ruta_val, marco=marco_val)
 
     response: Dict[str, Any] = {
         "project_input": payload.project_name,
@@ -305,14 +315,15 @@ def solicitar_imagenes_automatico(payload: SolicitudAutoIn) -> Dict[str, Any]:
         "time_window": asdict(TimeWindow(start=start_iso, end=end_iso)),
         "aoi": {
             "polygon_wkt": POLYGON,
-            "relative_orbit": RUTA,
-            "frame": MARCO,
+            "relative_orbit": ruta_val,
+            "frame": marco_val,
             "beam_mode": BEAM_MODE,
             "processing_level": PROC_LEVEL,
             "platform": PLATFORM,
+            "flight_direction": payload.flight_direction
         },
         "insar_options": {
-            "day_interval": DAY_INTERVAL,
+            "day_interval": payload.day_interval,
             "include_dem": INCLUDE_DEM,
             "include_look_vectors": INCLUDE_LOOK_VECTORS,
             "looks": LOOKS,

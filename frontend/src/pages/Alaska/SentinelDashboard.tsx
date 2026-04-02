@@ -7,12 +7,13 @@ type Props = {
   backendUrl: string;
   ruta?: number;
   marco?: number;
+  dayInterval?: number;
 };
 
 const formatDate = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString() : "";
 
-const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco }) => {
+const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco, dayInterval }) => {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState<null | "download">(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +95,7 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco })
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          granules, ruta, marco,
+          granules, ruta, marco, day_interval: dayInterval ?? 12,
           options: { nombre_proyecto: projectName, include_dem: true, include_look_vectors: true, looks: "20x4" }
         }),
       });

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import AlaskaSearch from "./AlaskaSearch";
 import SentinelDashboard from "./SentinelDashboard";
 import axios from "axios";
@@ -32,6 +32,17 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
   const [marco, setMarco] = useState<number>(547);
   const [flightDirection, setFlightDirection] = useState<"ASCENDING" | "DESCENDING" | "">("");
   const [polarization, setPolarization] = useState<string>("");
+  const [dayInterval, setDayInterval] = useState<number>(12);
+
+  useEffect(() => {
+    if (flightDirection === "ASCENDING") {
+      setRuta(63);
+      setMarco(39);
+    } else if (flightDirection === "DESCENDING") {
+      setRuta(128);
+      setMarco(547);
+    }
+  }, [flightDirection]);
 
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [searching, setSearching] = useState(false);
@@ -54,7 +65,7 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
         ruta, marco,
         beam_mode: "IW",
         processing_level: "SLC",
-        day_interval: 12,
+        day_interval: dayInterval,
         same_platform: true,
         flight_direction: flightDirection || undefined,
         polarization: polarization || undefined,
@@ -106,6 +117,8 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
         setFlightDirection={setFlightDirection}
         polarization={polarization}
         setPolarization={setPolarization}
+        dayInterval={dayInterval}
+        setDayInterval={setDayInterval}
         onSearch={doSearch}
         loading={searching}
         error={error}
@@ -132,6 +145,7 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
           backendUrl={API_URL}
           ruta={ruta}
           marco={marco}
+          dayInterval={dayInterval}
         />
       </>
     );

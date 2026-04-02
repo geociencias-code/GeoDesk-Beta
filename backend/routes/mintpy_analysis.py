@@ -416,30 +416,30 @@ async def process_interferograms(
                 vel_desc = vf_d["velocity"][:] * 1000.0
                 vel_attrs = dict(vf_a.attrs)
                 
-            with h5py.File(geo_asc, "r") as gf_a, h5py.File(geo_desc, "r") as gf_d:
-                inc_asc = np.radians(gf_a["incidenceAngle"][:])
-                azi_asc = np.radians(gf_a["azimuthAngle"][:])
-                inc_desc = np.radians(gf_d["incidenceAngle"][:])
-                azi_desc = np.radians(gf_d["azimuthAngle"][:])
-
-                def get_lat_lon(vf, gf):
-                    lat = gf["latitude"][:] if "latitude" in gf else None
-                    lon = gf["longitude"][:] if "longitude" in gf else None
-                    if lat is None or lon is None:
-                        attrs = dict(vf.attrs)
-                        lat0, lon0 = float(attrs.get("Y_FIRST", 0)), float(attrs.get("X_FIRST", 0))
-                        dlat, dlon = float(attrs.get("Y_STEP", -0.001)), float(attrs.get("X_STEP", 0.001))
-                        lat_arr = lat0 + np.arange(vf["velocity"].shape[0]) * dlat
-                        lon_arr = lon0 + np.arange(vf["velocity"].shape[1]) * dlon
-                        lon, lat = np.meshgrid(lon_arr, lat_arr)
-                        if abs(lat0) > 90 or abs(lon0) > 180:
-                            epsg = int(attrs.get("EPSG", 32616))
-                            transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
-                            lon, lat = transformer.transform(lon, lat)
-                    return lat, lon
-
-                lat_asc, lon_asc = get_lat_lon(vf_a, gf_a)
-                lat_desc, lon_desc = get_lat_lon(vf_d, gf_d)
+                with h5py.File(geo_asc, "r") as gf_a, h5py.File(geo_desc, "r") as gf_d:
+                    inc_asc = np.radians(gf_a["incidenceAngle"][:])
+                    azi_asc = np.radians(gf_a["azimuthAngle"][:])
+                    inc_desc = np.radians(gf_d["incidenceAngle"][:])
+                    azi_desc = np.radians(gf_d["azimuthAngle"][:])
+    
+                    def get_lat_lon(vf, gf):
+                        lat = gf["latitude"][:] if "latitude" in gf else None
+                        lon = gf["longitude"][:] if "longitude" in gf else None
+                        if lat is None or lon is None:
+                            attrs = dict(vf.attrs)
+                            lat0, lon0 = float(attrs.get("Y_FIRST", 0)), float(attrs.get("X_FIRST", 0))
+                            dlat, dlon = float(attrs.get("Y_STEP", -0.001)), float(attrs.get("X_STEP", 0.001))
+                            lat_arr = lat0 + np.arange(vf["velocity"].shape[0]) * dlat
+                            lon_arr = lon0 + np.arange(vf["velocity"].shape[1]) * dlon
+                            lon, lat = np.meshgrid(lon_arr, lat_arr)
+                            if abs(lat0) > 90 or abs(lon0) > 180:
+                                epsg = int(attrs.get("EPSG", 32616))
+                                transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
+                                lon, lat = transformer.transform(lon, lat)
+                        return lat, lon
+    
+                    lat_asc, lon_asc = get_lat_lon(vf_a, gf_a)
+                    lat_desc, lon_desc = get_lat_lon(vf_d, gf_d)
 
             # Spatial resampling (interpolation) of Ascending to Descending master grid
             valid_mask_a = np.isfinite(vel_asc) & (vel_asc != 0)

@@ -132,14 +132,16 @@ def _make_cfg(
             common_bounds = (max(lefts), max(bottoms), min(rights), min(tops))
             with rasterio.open(str(tifs[0])) as src:
                 window = rasterio.windows.from_bounds(*common_bounds, transform=src.transform)
-                width, height = int(window.width), int(window.height)
                 transform = rasterio.windows.transform(window, src.transform)
 
             transformer = None
             if crs and crs.to_epsg() != 4326:
                 transformer = pyproj.Transformer.from_crs(4326, crs.to_epsg() or 32616, always_xy=True)
 
+            subset_yx_val = "no"
+
             c_off, r_off = 0, 0
+            width, height = int(window.width), int(window.height)
 
             if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
                 if transformer:
@@ -164,6 +166,8 @@ def _make_cfg(
                 
                 if c_end > c_off and r_end > r_off:
                     subset_yx_val = f"{r_off}:{r_end},{c_off}:{c_end}"
+                    width = c_end - c_off
+                    height = r_end - r_off
 
             if ref_lat is not None and ref_lon is not None:
                 if transformer:
@@ -175,16 +179,10 @@ def _make_cfg(
                 ry = int(r_ref) - r_off
                 rx = int(c_ref) - c_off
                 
-                ry = max(0, ry)
-                rx = max(0, rx)
-                ref_yx_val = f"{ry},{rx}"
+                ry = min(max(0, ry), height - 1)
+                rx = min(max(0, rx), width - 1)
                 
-        if heights and widths:
-            min_h = min(heights)
-            min_w = min(widths)
-    
-    if subset_yx_val == "auto" and min_h != "auto":
-        subset_yx_val = f"0:{min_h},0:{min_w}"
+                ref_yx_val = f"{ry},{rx}"
 
     return f"""mintpy.load.processor    = hyp3
 mintpy.load.unwFile      = {unw_pat}
@@ -480,9 +478,16 @@ async def process_interferograms(
 
             lats_v, lons_v = lat_grid[valid].flatten(), lon_grid[valid].flatten()
             ew_v, up_v = vel_ew[valid].flatten(), vel_up[valid].flatten()
+            los_v = vel_desc[valid].flatten()
             
             results = [
-                {"lat": round(float(lats_v[i]), 4), "lon": round(float(lons_v[i]), 4), "velocidad_mm_yr": round(float(up_v[i]), 2), "vel_ew_mm_yr": round(float(ew_v[i]), 2), "vel_up_mm_yr": round(float(up_v[i]), 2)}
+                {
+                    "lat": round(float(lats_v[i]), 4), 
+                    "lon": round(float(lons_v[i]), 4), 
+                    "velocidad_mm_yr": round(float(los_v[i]), 2), 
+                    "vel_ew_mm_yr": round(float(ew_v[i]), 2), 
+                    "vel_up_mm_yr": round(float(up_v[i]), 2)
+                }
                 for i in range(len(ew_v))
             ]
             

@@ -384,6 +384,41 @@ async def process_interferograms(
 
         is_2d_mode = len(asc_paths) >= MIN_INTERFEROGRAMS and len(desc_paths) >= MIN_INTERFEROGRAMS
         
+        def get_igram_stats(ts_dir, valid_msk, prefix=""):
+            stats_list = []
+            if_stack = ts_dir / "inputs" / "ifgramStack.h5"
+            if if_stack.exists():
+                with h5py.File(if_stack, 'r') as stack_f:
+                    if "unwrapPhase" in stack_f and "date" in stack_f:
+                        dates_array = stack_f["date"][:]
+                        phase_array = stack_f["unwrapPhase"][:]
+                        wvl = float(stack_f.attrs.get("WAVELENGTH", 0.05546576))
+                        rad2mm = (-1 * wvl / (4 * np.pi)) * 1000.0
+
+                        for idx, d_pair in enumerate(dates_array):
+                            if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
+                                d1 = d_pair[0].decode('utf-8')
+                                d2 = d_pair[1].decode('utf-8')
+                                
+                                phase_2d = phase_array[idx].copy()
+                                pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
+                                median_phase = np.nanmedian(phase_2d[pmask])
+                                if not np.isnan(median_phase):
+                                    phase_2d[pmask] -= median_phase
+
+                                def_mm_arr = phase_2d[valid_msk].flatten() * rad2mm
+                                if len(def_mm_arr) > 0:
+                                    stats_list.append({
+                                        "date1": d1,
+                                        "date2": d2,
+                                        "label": f"{prefix}{d1} -> {d2}",
+                                        "mean": round(float(np.mean(def_mm_arr)), 2),
+                                        "std": round(float(np.std(def_mm_arr)), 2),
+                                        "max": round(float(np.max(def_mm_arr)), 2),
+                                        "min": round(float(np.min(def_mm_arr)), 2),
+                                    })
+            return stats_list
+
         def append_interferograms(df_in, ts_dir, valid_msk, prefix=""):
             if_stack = ts_dir / "inputs" / "ifgramStack.h5"
             if if_stack.exists():
@@ -453,8 +488,8 @@ async def process_interferograms(
                             attrs = dict(vf.attrs)
                             lat0, lon0 = float(attrs.get("Y_FIRST", 0)), float(attrs.get("X_FIRST", 0))
                             dlat, dlon = float(attrs.get("Y_STEP", -0.001)), float(attrs.get("X_STEP", 0.001))
-                            lat_arr = lat0 + np.arange(vf["velocity"].shape[0]) * dlat
-                            lon_arr = lon0 + np.arange(vf["velocity"].shape[1]) * dlon
+                            lat_arr = lat0 + (np.arange(vf["velocity"].shape[0]) + 0.5) * dlat
+                            lon_arr = lon0 + (np.arange(vf["velocity"].shape[1]) + 0.5) * dlon
                             lon, lat = np.meshgrid(lon_arr, lat_arr)
                             if abs(lat0) > 90 or abs(lon0) > 180:
                                 epsg = int(attrs.get("EPSG", 32616))
@@ -508,8 +543,8 @@ async def process_interferograms(
             
             results = [
                 {
-                    "lat": round(float(lats_v[i]), 4), 
-                    "lon": round(float(lons_v[i]), 4), 
+                    "lat": round(float(lats_v[i]), 6), 
+                    "lon": round(float(lons_v[i]), 6), 
                     "velocidad_mm_yr": round(float(los_v[i]), 2), 
                     "vel_ew_mm_yr": round(float(ew_v[i]), 2), 
                     "vel_up_mm_yr": round(float(up_v[i]), 2)
@@ -523,7 +558,17 @@ async def process_interferograms(
             df_csv = append_interferograms(df_csv, work_dir_asc, valid, prefix="Asc_")
             df_csv = append_interferograms(df_csv, work_dir_desc, valid, prefix="Desc_")
             df_csv.to_csv(CSV_FILE, index=False)
-            if XLSX_FILE.exists(): XLSX_FILE.unlink()
+            
+            igram_stats_asc = get_igram_stats(work_dir_asc, valid, prefix="Asc_")
+            igram_stats_desc = get_igram_stats(work_dir_desc, valid, prefix="Desc_")
+            igram_stats_2d = igram_stats_asc + igram_stats_desc
+            if igram_stats_2d:
+                df_stats = pd.DataFrame(igram_stats_2d)
+                df_stats = df_stats[["label", "date1", "date2", "mean", "min", "max"]]
+                df_stats.columns = ["Interferograma", "Fecha Inicio", "Fecha Fin", "Velocidad Media (mm/a)", "Velocidad Min (mm/a)", "Velocidad Max (mm/a)"]
+                df_stats.to_excel(XLSX_FILE, index=False)
+            else:
+                if XLSX_FILE.exists(): XLSX_FILE.unlink()
             
             all_dates = [m["date1"] for m in igram_meta] + [m["date2"] for m in igram_meta]
             stats = {
@@ -531,6 +576,8 @@ async def process_interferograms(
                 "max": round(float(np.max(up_v) if len(up_v) else 0), 2),
                 "mean": round(float(np.mean(up_v) if len(up_v) else 0), 2),
                 "std": round(float(np.std(up_v) if len(up_v) else 0), 2),
+                "mean_ew": round(float(np.mean(ew_v) if len(ew_v) else 0), 2),
+                "std_ew": round(float(np.std(ew_v) if len(ew_v) else 0), 2),
                 "min_ew": round(float(np.min(ew_v) if len(ew_v) else 0), 2),
                 "max_ew": round(float(np.max(ew_v) if len(ew_v) else 0), 2),
                 "n_points": len(results),
@@ -543,7 +590,7 @@ async def process_interferograms(
             step_s = max(1, len(results) // 1000)
             sample = results[::step_s][:1000]
             
-            output = {"stats": stats, "interferograms": igram_meta, "igram_stats": [], "sample": sample, "mode": "2D"}
+            output = {"stats": stats, "interferograms": igram_meta, "igram_stats": igram_stats_2d, "sample": sample, "mode": "2D"}
             RESULTS_DIR.mkdir(parents=True, exist_ok=True)
             RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
             return output
@@ -578,11 +625,11 @@ async def process_interferograms(
                         use_grid = True
             
             if not use_grid:
-                lat0, lon0 = float(vel_attrs.get("Y_FIRST", 0)), float(vel_attrs.get("X_FIRST", 0))
                 dlat, dlon = float(vel_attrs.get("Y_STEP", -0.001)), float(vel_attrs.get("X_STEP", 0.001))
-                lat_arr = lat0 + np.arange(vel_mm.shape[0]) * dlat
-                lon_arr = lon0 + np.arange(vel_mm.shape[1]) * dlon
-                lon_grid, lat_grid = np.meshgrid(lon_arr, lat_arr)
+                lat0, lon0 = float(vel_attrs.get("Y_FIRST", 0)), float(vel_attrs.get("X_FIRST", 0))
+                lat_arr_desc  = lat0 + (np.arange(vel_mm.shape[0]) + 0.5) * dlat
+                lon_arr_desc  = lon0 + (np.arange(vel_mm.shape[1]) + 0.5) * dlon
+                lon_grid, lat_grid = np.meshgrid(lon_arr_desc, lat_arr_desc)
                 if abs(lat0) > 90 or abs(lon0) > 180:
                     epsg = int(vel_attrs.get("EPSG", 32616))
                     transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
@@ -593,7 +640,7 @@ async def process_interferograms(
             if len(vels_v) == 0:
                 raise HTTPException(status_code=422, detail="No coherentes.")
 
-            results = [{"lat": round(float(lats_v[i]), 4), "lon": round(float(lons_v[i]), 4), "velocidad_mm_yr": round(float(vels_v[i]), 2)} for i in range(len(vels_v))]
+            results = [{"lat": round(float(lats_v[i]), 6), "lon": round(float(lons_v[i]), 6), "velocidad_mm_yr": round(float(vels_v[i]), 2)} for i in range(len(vels_v))]
             
             all_dates = [m["date1"] for m in igram_meta] + [m["date2"] for m in igram_meta]
             stats = {
@@ -619,43 +666,7 @@ async def process_interferograms(
             df_csv = append_interferograms(df_csv, work_dir, valid)
             df_csv.to_csv(CSV_FILE, index=False)
             
-            igram_stats = []
-            if_stack = work_dir / "inputs" / "ifgramStack.h5"
-            if if_stack.exists():
-                with h5py.File(if_stack, "r") as stack_f:
-                    if "unwrapPhase" in stack_f and "date" in stack_f:
-                        dates_array = stack_f["date"][:]
-                        phase_array = stack_f["unwrapPhase"][:]
-                        wvl = float(stack_f.attrs.get("WAVELENGTH", 0.05546576))
-                        rad2mm = (-1 * wvl / (4 * np.pi)) * 1000.0
-
-                        for idx, d_pair in enumerate(dates_array):
-                            if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
-                                d1 = d_pair[0].decode("utf-8")
-                                d2 = d_pair[1].decode("utf-8")
-                            else:
-                                continue
-
-                            phase_2d = phase_array[idx].copy()
-                            pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
-                            median_phase = np.nanmedian(phase_2d[pmask])
-                            if not np.isnan(median_phase):
-                                phase_2d[pmask] -= median_phase
-
-                            phase_1d = phase_2d[valid].flatten()
-                            def_mm_arr = phase_1d * rad2mm
-                            
-                            if len(def_mm_arr) > 0 and d1 and d2:
-                                igram_stats.append({
-                                    "date1": d1,
-                                    "date2": d2,
-                                    "label": f"{d1} -> {d2}",
-                                    "mean": round(float(np.mean(def_mm_arr)), 2),
-                                    "std": round(float(np.std(def_mm_arr)), 2),
-                                    "max": round(float(np.max(def_mm_arr)), 2),
-                                    "min": round(float(np.min(def_mm_arr)), 2),
-                                })
-
+            igram_stats = get_igram_stats(work_dir, valid)
             if igram_stats:
                 df_stats = pd.DataFrame(igram_stats)
                 df_stats = df_stats[["label", "date1", "date2", "mean", "min", "max"]]

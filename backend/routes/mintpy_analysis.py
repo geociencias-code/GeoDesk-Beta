@@ -384,6 +384,32 @@ async def process_interferograms(
 
         is_2d_mode = len(asc_paths) >= MIN_INTERFEROGRAMS and len(desc_paths) >= MIN_INTERFEROGRAMS
         
+        def append_interferograms(df_in, ts_dir, valid_msk):
+            if_stack = ts_dir / "inputs" / "ifgramStack.h5"
+            if if_stack.exists():
+                with h5py.File(if_stack, 'r') as stack_f:
+                    if "unwrapPhase" in stack_f and "date" in stack_f:
+                        dates_array = stack_f["date"][:]
+                        phase_array = stack_f["unwrapPhase"][:]
+                        wvl = float(stack_f.attrs.get("WAVELENGTH", 0.05546576))
+                        rad2mm = (-1 * wvl / (4 * np.pi)) * 1000.0
+
+                        for idx, d_pair in enumerate(dates_array):
+                            if isinstance(d_pair, (list, tuple, np.ndarray)) and len(d_pair) >= 2:
+                                d1 = d_pair[0].decode('utf-8')
+                                d2 = d_pair[1].decode('utf-8')
+                                col_suffix = f"{d1}_{d2}"
+                                
+                                phase_2d = phase_array[idx].copy()
+                                pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
+                                median_phase = np.nanmedian(phase_2d[pmask])
+                                if not np.isnan(median_phase):
+                                    phase_2d[pmask] -= median_phase
+
+                                def_mm_arr = phase_2d[valid_msk].flatten() * rad2mm
+                                df_in[f"Deform_{col_suffix}_mm"] = np.round(def_mm_arr, 2)
+            return df_in
+
         if is_2d_mode:
             work_dir_asc = work_dir / "asc"
             work_dir_desc = work_dir / "desc"
@@ -491,8 +517,11 @@ async def process_interferograms(
                 for i in range(len(ew_v))
             ]
             
-            df_csv = pd.DataFrame(results)
-            df_csv.columns = ["Latitud", "Longitud", "Velocidad_mm_amo", "Velocidad_EW_mm_amo", "Velocidad_UP_mm_amo"]
+            cols = ["lat", "lon", "velocidad_mm_yr", "vel_ew_mm_yr", "vel_up_mm_yr"]
+            df_csv = pd.DataFrame([{k: r[k] for k in cols} for r in results])
+            df_csv.rename(columns={"lat": "Latitud", "lon": "Longitud", "velocidad_mm_yr": "Velocidad_mm_amo", "vel_ew_mm_yr": "Velocidad_EW_mm_amo"}, inplace=True)
+            df_csv["Velocidad_UP_mm_amo"] = [results[i]["vel_up_mm_yr"] for i in range(len(results))]
+            df_csv = append_interferograms(df_csv, work_dir_desc, valid)
             df_csv.to_csv(CSV_FILE, index=False)
             if XLSX_FILE.exists(): XLSX_FILE.unlink()
             
@@ -583,8 +612,11 @@ async def process_interferograms(
             sample = results[::step_s][:1000]
             
             # Simple dataframe
-            df_csv = pd.DataFrame(results)
-            df_csv.columns = ["Latitud", "Longitud", "Velocidad_mm_año"]
+            cols = ["lat", "lon"]
+            df_csv = pd.DataFrame([{k: r[k] for k in cols} for r in results])
+            df_csv.rename(columns={"lat": "Latitud", "lon": "Longitud"}, inplace=True)
+            df_csv["Velocidad_mm_año"] = [results[i]["velocidad_mm_yr"] for i in range(len(results))]
+            df_csv = append_interferograms(df_csv, work_dir, valid)
             df_csv.to_csv(CSV_FILE, index=False)
             
             igram_stats = []

@@ -288,6 +288,8 @@ interface VelocityStats {
   era5_successful?: boolean;
   min_ew?: number;
   max_ew?: number;
+  mean_ew?: number;
+  std_ew?: number;
 }
 
 interface VelocityPoint {
@@ -1083,8 +1085,8 @@ export default function MintPyAnalysis() {
                 {[
                   { label: "Vel. Mínima", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.min_ew !== undefined ? results.stats.min_ew : results.stats.min).toFixed(2)} mm/a`, color: "#60a5fa" },
                   { label: "Vel. Máxima", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.max_ew !== undefined ? results.stats.max_ew : results.stats.max).toFixed(2)} mm/a`, color: "#f87171" },
-                  { label: "Vel. Media", value: `${(viewMode === "EW" && results.mode === "2D" ? 0 : results.stats.mean).toFixed(2)} mm/a`, color: "#34d399" },
-                  { label: "Desv. Est.", value: `${(viewMode === "EW" && results.mode === "2D" ? 0 : results.stats.std).toFixed(2)} mm/a`, color: "#a78bfa" },
+                  { label: "Vel. Media", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.mean_ew !== undefined ? results.stats.mean_ew : results.stats.mean).toFixed(2)} mm/a`, color: "#34d399" },
+                  { label: "Desv. Est.", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.std_ew !== undefined ? results.stats.std_ew : results.stats.std).toFixed(2)} mm/a`, color: "#a78bfa" },
                 ].map((s) => (
                   <div
                     key={s.label}
@@ -1128,23 +1130,21 @@ export default function MintPyAnalysis() {
                       🗺️ Mapa de Velocidad de Deformación
                     </h3>
                     <div style={{ display: "flex", gap: "8px" }}>
-                      {(results?.mode !== "2D") && (
-                        <a
-                          href={`${API_URL}/api/mintpy/export_xlsx`}
-                          download
-                          style={{
-                            padding: "6px 14px",
-                            background: "linear-gradient(135deg, #10b981, #059669)",
-                            color: "white",
-                            borderRadius: "8px",
-                            fontSize: "0.78rem",
-                            fontWeight: 600,
-                            textDecoration: "none",
-                          }}
-                        >
-                          📊 Resumen XLSX
-                        </a>
-                      )}
+                      <a
+                        href={`${API_URL}/api/mintpy/export_xlsx`}
+                        download
+                        style={{
+                          padding: "6px 14px",
+                          background: "linear-gradient(135deg, #10b981, #059669)",
+                          color: "white",
+                          borderRadius: "8px",
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          textDecoration: "none",
+                        }}
+                      >
+                        📊 Resumen XLSX
+                      </a>
                       <a
                         href={`${API_URL}/api/mintpy/export_csv`}
                         download
@@ -1349,23 +1349,21 @@ export default function MintPyAnalysis() {
                     </span>
                   </h3>
                   <div style={{ display: "flex", gap: "8px" }}>
-                    {(results?.mode !== "2D") && (
-                      <a
-                        href={`${API_URL}/api/mintpy/export_xlsx`}
-                        download
-                        style={{
-                          padding: "6px 14px",
-                          background: "linear-gradient(135deg, #10b981, #059669)",
-                          color: "white",
-                          borderRadius: "8px",
-                          fontSize: "0.78rem",
-                          fontWeight: 600,
-                          textDecoration: "none",
-                        }}
-                      >
-                        📊 Resumen XLSX
-                      </a>
-                    )}
+                    <a
+                      href={`${API_URL}/api/mintpy/export_xlsx`}
+                      download
+                      style={{
+                        padding: "6px 14px",
+                        background: "linear-gradient(135deg, #10b981, #059669)",
+                        color: "white",
+                        borderRadius: "8px",
+                        fontSize: "0.78rem",
+                        fontWeight: 600,
+                        textDecoration: "none",
+                      }}
+                    >
+                      📊 Resumen XLSX
+                    </a>
                     <a
                       href={`${API_URL}/api/mintpy/export_csv`}
                       download

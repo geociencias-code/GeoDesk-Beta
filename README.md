@@ -68,9 +68,26 @@ MintPy aplica la técnica **SBAS (Small Baseline Subset)**. En vez de depender d
 
 GeoDesk invoca asíncronamente las siguientes capas científicas de MintPy:
 - Corrección de plano residual (Deramping).
-- Aislamiento y validación de puntos de referencia espacial con coherencia superior a 0.85.
-- Estimación lineal de velocidad estática (`velocity.h5`).
-- Mapeo dinámico y tabulación generada a Microsoft Excel, dividiendo el historial consolidado de velocidad y el vector discreto de cada paso temporal en múltiples hojas analíticas.
+- Aislamiento y validación de puntos de referencia espacial con coherencia superior a 0.85 (Seed Points), eliminando la necesidad de sustracciones empíricas (como restar la mediana estadística) que falsifican los movimientos sísmicos reales asimétricos oscureciéndolos a cero.
+- Mapeo dinámico y tabulación generada a Microsoft Excel, dividiendo el historial consolidado de velocidad y el vector discreto de cada paso temporal.
+
+### Descomposición Geométrica 2D (Vertical & Este-Oeste)
+
+Cuando se provee al motor una ingesta combinada de interferogramas de órbita **Ascendente** (apuntando al Este) y **Descendente** (apuntando al Oeste), GeoDesk resuelve automáticamente la descomposición 2D. Esta técnica aprovecha las matrices de ángulos de incidencia ($\theta$) y acimut ($\alpha$) del sensor para separar la velocidad unidimensional bidireccional (LOS) en vectores puros tridimensionales (Proyectando el vector Norte-Sur muy cercano al plano orbital como despreciable).
+
+Dada una geometría:
+- Componente Ascendente Este-Oeste: $A_{\text{asc\_ew}} = -\sin(\theta_{\text{asc}}) \cos(\alpha_{\text{asc}})$
+- Componente Ascendente Vertical: $A_{\text{asc\_up}} = \cos(\theta_{\text{asc}})$
+- La matriz analítica se resuelve mediante la Regla de Cramer iterando el determinante diferencial (Jacobiano) sobre cada píxel superpuesto geográficamente:
+$$ \text{Det} = (A_{\text{asc\_ew}} \cdot A_{\text{desc\_up}}) - (A_{\text{asc\_up}} \cdot A_{\text{desc\_ew}}) $$
+$$ V_{\text{EW}} = \frac{A_{\text{desc\_up}} V_{\text{asc}} - A_{\text{asc\_up}} V_{\text{desc}}}{\text{Det}} $$
+$$ V_{\text{UP}} = \frac{-A_{\text{desc\_ew}} V_{\text{asc}} + A_{\text{asc\_ew}} V_{\text{desc}}}{\text{Det}} $$
+
+### Precisión Topológica y Proyección Subpíxel (GDAL/WGS84)
+
+La integración entre backend (procesos matriz) e interfaz (Leaflet) requiere evitar truncamientos geométricos debido a la rotación entre el sistema coordenado universal (Lat/Lon) y las redes proyectadas (UTM) subyacentes a Sentinel-1 geocodificado:
+1. **Recorte Inteligente (`subset.lalo`)**: El geoprocesador delega el cálculo afín al parser interno GDAL nativo de MintPy, interceptando la caja delimitadora espacial real generada por el usuario en lugar de aproximar las áreas de memoria truncando con las esquinas rotadas (error clásico que causa desbordamientos subpíxel norte-sur).
+2. **Registro de Pixeles Grid-Node**: En topologías InSAR afines, las coordenadas almacenadas ($X_{\text{FIRST}}$, $Y_{\text{FIRST}}$) definen la **arista superior izquierda** absoluta de la matriz para facilitar las mallas de color continuo. GeoDesk aplica matemáticamente un *half-pixel shift* de mapeo ($+ 0.5 \cdot Y_{\text{STEP}}$) garantizando que la cartografía final posicione los centroides de manera que encajen perfectos a fracción de milímetro con variables geodésicas en GIS y MapBox/Leaflet.
 
 ---
 

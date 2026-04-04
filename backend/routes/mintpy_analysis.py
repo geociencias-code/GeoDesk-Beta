@@ -112,20 +112,26 @@ def generate_quiver_plots(results_list):
             ax.set_extent(extent, crs=ccrs.PlateCarree())
 
             # Dynamic zoom: ensure at least ~10 tiles across the narrowest extent
-            # Tile width at zoom z = 360 / 2^z degrees
-            # We want: 360/2^z < extent_span/10  =>  z > log2(360*10/extent_span)
-            span = min(d_lon_full, d_lat_full)  # use the narrower axis
+            span = min(d_lon_full, d_lat_full)
             zoom = min(14, max(10, int(math.log2(3600 / max(span, 0.001))) + 1))
+            
+            # Try providers in order of preference for scientific maps
+            class EsriShadedRelief(cimgt.GoogleWTS):
+                def _image_url(self, tile):
+                    x, y, z = tile
+                    return f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}"
+
+            class OpenTopoMap(cimgt.GoogleWTS):
+                def _image_url(self, tile):
+                    x, y, z = tile
+                    return f"https://a.tile.opentopomap.org/{z}/{x}/{y}.png"
+
             try:
-                ax.add_image(EsriImagery(), zoom)
+                ax.add_image(OpenTopoMap(), zoom)
             except Exception as e:
-                logging.warning(f"ESRI Imagery tiles failed ({e}), trying ShadedRelief")
-                try:
-                    ax.add_image(EsriShadedRelief(), zoom)
-                except Exception as e2:
-                    logging.warning(f"ESRI ShadedRelief tiles also failed: {e2}")
-                    ax.add_feature(cfeature.LAND, facecolor="#d4cfc9")
-                    ax.add_feature(cfeature.OCEAN, facecolor="#a8d8ea")
+                logging.warning(f"OpenTopoMap tiles failed: {e}")
+                ax.add_feature(cfeature.LAND, facecolor="#d4cfc9")
+                ax.add_feature(cfeature.OCEAN, facecolor="#a8d8ea")
 
             ax.add_feature(cfeature.COASTLINE, linewidth=0.6, edgecolor="#333")
             ax.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle=":", edgecolor="#555")

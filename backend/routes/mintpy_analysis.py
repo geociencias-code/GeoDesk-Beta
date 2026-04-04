@@ -63,18 +63,39 @@ def generate_quiver_plots(results_list):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        import matplotlib.colors as mcolors
+        import matplotlib.cm as cm
         import cartopy.crs as ccrs
         import cartopy.feature as cfeature
+        import cartopy.io.img_tiles as cimgt
+        import math
         has_cartopy = True
     except ImportError:
         has_cartopy = False
 
-    n_points = len(df)
-    frac = 0.33 if n_points > 100 else 1.0
-    df_sub = df.sample(frac=frac, random_state=42)
+    # Cap to exactly 75 points, evenly spaced across the dataset
+    n_target = 75
+    n_total = len(df)
+    if n_total > n_target:
+        step = max(1, n_total // n_target)
+        df_sub = df.iloc[::step].head(n_target)
+    else:
+        df_sub = df
 
     lons = df_sub["lon"].values
     lats = df_sub["lat"].values
+
+    # ESRI World Imagery — highest-resolution base map
+    class EsriImagery(cimgt.GoogleWTS):
+        def _image_url(self, tile):
+            x, y, z = tile
+            return f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+
+    # ESRI World Shaded Relief — greyscale terrain fallback
+    class EsriShadedRelief(cimgt.GoogleWTS):
+        def _image_url(self, tile):
+            x, y, z = tile
+            return f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}"
 
     for mode in ["UP", "EW"]:
         fig, ax = plt.subplots(figsize=(10, 8),
@@ -82,24 +103,34 @@ def generate_quiver_plots(results_list):
                                subplot_kw={'projection': ccrs.PlateCarree()} if has_cartopy else {})
 
         if has_cartopy:
-            import cartopy.io.img_tiles as cimgt
-            import math
-            d_lon_full = (lons.max() - lons.min())
-            d_lat_full = (lats.max() - lats.min())
-            try:
-                request = cimgt.OSM()
-                zoom = min(12, int(math.log2(360 / max(d_lon_full, d_lat_full, 0.001))))
-                ax.add_image(request, zoom)
-            except Exception as e:
-                logging.warning(f"Failed to load map tiles: {e}")
-                ax.add_feature(cfeature.LAND, facecolor="#e2e8f0")
-                ax.add_feature(cfeature.OCEAN, facecolor="#bae6fd")
+            d_lon_full = max(lons.max() - lons.min(), 0.01)
+            d_lat_full = max(lats.max() - lats.min(), 0.01)
+            d_lon = d_lon_full * 0.15
+            d_lat = d_lat_full * 0.15
+            extent = [lons.min() - d_lon, lons.max() + d_lon,
+                      lats.min() - d_lat, lats.max() + d_lat]
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
 
-            ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle=":")
-            d_lon = d_lon_full * 0.1 or 0.1
-            d_lat = d_lat_full * 0.1 or 0.1
-            ax.set_extent([lons.min() - d_lon, lons.max() + d_lon, lats.min() - d_lat, lats.max() + d_lat], crs=ccrs.PlateCarree())
+            # Dynamic zoom: ensure at least ~10 tiles across the narrowest extent
+            # Tile width at zoom z = 360 / 2^z degrees
+            # We want: 360/2^z < extent_span/10  =>  z > log2(360*10/extent_span)
+            span = min(d_lon_full, d_lat_full)  # use the narrower axis
+            zoom = min(14, max(10, int(math.log2(3600 / max(span, 0.001))) + 1))
+            try:
+                ax.add_image(EsriImagery(), zoom)
+            except Exception as e:
+                logging.warning(f"ESRI Imagery tiles failed ({e}), trying ShadedRelief")
+                try:
+                    ax.add_image(EsriShadedRelief(), zoom)
+                except Exception as e2:
+                    logging.warning(f"ESRI ShadedRelief tiles also failed: {e2}")
+                    ax.add_feature(cfeature.LAND, facecolor="#d4cfc9")
+                    ax.add_feature(cfeature.OCEAN, facecolor="#a8d8ea")
+
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.6, edgecolor="#333")
+            ax.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle=":", edgecolor="#555")
+            ax.gridlines(draw_labels=True, linewidth=0.4, color="gray",
+                         alpha=0.6, linestyle="--", x_inline=False, y_inline=False)
             transform = ccrs.PlateCarree()
         else:
             transform = None
@@ -117,22 +148,40 @@ def generate_quiver_plots(results_list):
             title = "Deformación Este-Oeste (mm/a)"
             save_path = RESULTS_DIR / "quiver_ew.png"
 
-        vmax = max(abs(np.nanmin(color_vals)), abs(np.nanmax(color_vals)))
-        if vmax == 0: vmax = 1
+        # Clip colormap to p5-p95 so near-zero values get saturated color
+        vmax = max(abs(float(np.nanmin(color_vals))), abs(float(np.nanmax(color_vals))))
+        if vmax == 0:
+            vmax = 1
+        p5  = float(np.nanpercentile(color_vals, 5))
+        p95 = float(np.nanpercentile(color_vals, 95))
+        clim = max(abs(p5), abs(p95))
+        if clim == 0:
+            clim = vmax
+        norm = mcolors.TwoSlopeNorm(vmin=-clim, vcenter=0, vmax=clim)
+        cmap = cm.get_cmap("RdBu_r")
 
+        # Scale quiver so the longest arrow spans ~10% of the map's lon extent
+        arrow_scale = (clim / (d_lon_full * 0.10)) if d_lon_full > 0 else clim
+
+        kw = dict(cmap=cmap, norm=norm, scale=arrow_scale, scale_units="x",
+                  pivot="tail", alpha=1.0, zorder=5, width=0.0025,
+                  edgecolors="black", linewidths=0.3)
         if has_cartopy:
-            ax.scatter(lons, lats, color="black", s=4, zorder=3, alpha=0.5, transform=transform)
-            q = ax.quiver(lons, lats, U, V, color_vals, cmap="seismic", scale=None,
-                          transform=transform, pivot="tail", alpha=0.9, zorder=4)
+            ax.scatter(lons, lats, color="white", s=25, zorder=4, transform=transform, linewidths=0)
+            ax.scatter(lons, lats, color="k", s=12, zorder=4, alpha=0.9, transform=transform)
+            q = ax.quiver(lons, lats, U, V, color_vals, transform=transform, **kw)
         else:
-            ax.scatter(lons, lats, color="black", s=4, zorder=3, alpha=0.5)
-            q = ax.quiver(lons, lats, U, V, color_vals, cmap="seismic", scale=None,
-                          pivot="tail", alpha=0.9, zorder=4)
+            ax.scatter(lons, lats, color="white", s=25, zorder=4, linewidths=0)
+            ax.scatter(lons, lats, color="k", s=12, zorder=4, alpha=0.9)
+            q = ax.quiver(lons, lats, U, V, color_vals, **kw)
 
-        plt.colorbar(q, ax=ax, label="Velocidad (mm/a)", orientation="horizontal", fraction=0.046, pad=0.04)
-        plt.title(title, fontsize=14, fontweight="bold")
+        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        plt.colorbar(sm, ax=ax, label="Velocidad (mm/a)", orientation="horizontal",
+                     fraction=0.046, pad=0.06)
+        ax.set_title(title, fontsize=13, fontweight="bold", pad=10)
 
-        plt.savefig(save_path, bbox_inches="tight")
+        plt.savefig(save_path, bbox_inches="tight", dpi=150)
         plt.close(fig)
 
 

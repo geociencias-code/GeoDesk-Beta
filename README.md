@@ -11,7 +11,8 @@ Plataforma interactiva de geoprocesamiento para análisis interferométrico de i
 3. [Procesamiento Híbrido: ASF HyP3](#procesamiento-híbrido-asf-hyp3)
 4. [Análisis de Series Temporales (SBAS) con MintPy](#análisis-de-series-temporales-sbas-con-mintpy)
 5. [Corrección Atmosférica (PyAPS + ERA5)](#corrección-atmosférica-pyaps--era5)
-6. [Instalación y Uso](#instalación-y-uso)
+6. [Stack Científico de Librerías Clave](#stack-científico-de-librerías-clave)
+7. [Instalación y Uso](#instalación-y-uso)
 
 ---
 
@@ -104,6 +105,91 @@ Para la validación científica de sus datos, el motor GeoDesk implementa una ca
 4. Extrapolando la elevación tridimensional de los píxeles radar a través del DEM, el **Phase Screen atmosférico** es calculado tridimensionalmente e invertido para ser sustraído del interferograma en la Línea de Visión (LOS), extinguiendo el error hidroestático antes del procesamiento de subsidencia.
 
 Esta robusta sinergia geofísica convierte el output crudo del radar en datos aptos para toma de decisión sísmica e infraestructura.
+
+---
+
+## Stack Científico de Librerías Clave
+
+A continuación se detalla el rol técnico de cada librería de cómputo científico especializada integrada en el pipeline de GeoDesk. Solo se incluyen las que tienen un propósito geodésico o InSAR específico.
+
+---
+
+### `rasterio`
+
+**Propósito**: Ingesta y escritura de datos geoespaciales ráster en formato GeoTIFF.
+
+En GeoDesk, `rasterio` es la capa de acceso de bajo nivel a los productos de HyP3/Sentinel-1. Permite:
+- Leer archivos `.tif` de fase desenrollada (`*_unw_phase.tif`), coherencia (`*_corr.tif`), DEM e ángulos topográficos.
+- Extraer la **transformación afín** (`GeoTransform`) que define la relación entre filas/columnas de la matriz y coordenadas geográficas reales superficiales.
+- Transformar los **límites de los datos** entre sistemas de referencia (UTM → WGS84) para pasarlos como entradas recortables a MintPy.
+- Calcular sub-ventanas espaciales (`rasterio.windows`) para delimitación de zonas de interés.
+
+Sin `rasterio`, el pipeline no sabría a qué coordenadas corresponde cada píxel de radar de las imágenes de entrada.
+
+---
+
+### `pyproj`
+
+**Propósito**: Transformaciones matemáticas exactas entre Sistemas de Referencia de Coordenadas (CRS).
+
+Los datos de Sentinel-1 geocodificados por GAMMA/HyP3 suelen estar en proyección **UTM** (Universal Transverse Mercator), cuyo eje de cuadrícula está rotado respecto al Norte geodésico verdadero. `pyproj` proporciona:
+- La transformación `EPSG_utm → EPSG:4326` a través de `pyproj.Transformer`, calculando la conversión bidireccional entre coordenadas planas (metros) y coordenadas angulares (Lat/Lon decimal).
+- La inversión de la proyección para convertir puntos de referencia (Seed Points) o esquinas de la región de interés seleccionada en el mapa Leaflet a coordenadas en la malla de datos rasterizada.
+
+> **Nota técnica**: Una simple aproximación lineal de la proyección en regiones con alta curvatura geodésica (latitudes $> 50°$ N/S) produce un desplazamiento visual de hasta varios píxeles en el mapa. `pyproj` elimina este error usando las ecuaciones exactas de la elipsoide WGS84.
+
+---
+
+### `h5py`
+
+**Propósito**: Lectura de los archivos de salida de MintPy en formato HDF5.
+
+MintPy almacena todos sus resultados interno (velocidades, series temporales, coherencia, ángulos geométricos) en archivos `.h5` (Hierarchical Data Format 5). `h5py` es la interfaz binaria que permite a GeoDesk:
+- Leer el dataset `velocity` del archivo `velocity.h5` para extraer la matriz de deformación lineal en m/año.
+- Acceder a los metadatos globales (`attrs`) del archivo, incluyendo `Y_FIRST`, `X_FIRST`, `Y_STEP`, `X_STEP`, que definen la rejilla cartográfica de la matriz.
+- Leer `geometryGeo.h5` para obtener las matrices experimentales de latitud, longitud, ángulo de incidencia y ángulo azimutal de cada píxel, necesarias para la descomposición 2D.
+
+---
+
+### `MintPy` (`mintpy`)
+
+**Propósito**: Motor central de inversión de series temporales InSAR mediante el algoritmo SBAS.
+
+MintPy es la columna vertebral científica de GeoDesk. Su integración incluye:
+- La clase `TimeSeriesAnalysis` que orquesta el pipeline completo: carga de datos, filtrado de red temporal, inversión SBAS, corrección troposférica, derampado y estimación de velocidad.
+- El módulo `ifgram_inversion` (específicamente `estimate_timeseries`) para ejecutar la inversión WLS/SVD por píxel — función que GeoDesk ha parcheado (`monkey-patch`) para garantizar compatibilidad con NumPy `>= 1.24`.
+- El sistema de configuración por fichero `.cfg` que controla todos los parámetros de procesamiento: región de interés (`subset.lalo`), coherencia mínima, método de corrección troposférica, referencia espacial, etc.
+
+---
+
+### `cartopy`
+
+**Propósito**: Cartografía científica y renderizado de mapas con proyecciones geodésicas.
+
+Cartopy es la librería que permite a GeoDesk generar los **Mapas Vectoriales Estáticos** de deformación (Quiver Maps) en un contexto geográfico realista:
+- Gestiona las **proyecciones cartográficas** (PlateCarree, Mercator, etc.) necesarias para superponer vectores de deformación sobre mapas base georreferenciados.
+- Proporciona las *features* vectoriales de alto detalle (costas, fronteras nacionales, ríos, orografía) a través de `cartopy.feature`.
+- Integra **proveedores de teselas Web Map Tile Service (WMTS)** externos (p.ej. ESRI World Shaded Relief) mediante la clase abstracta `GoogleWTS`, permitiendo descargar dinámicamente imágenes de relieve sombreado del terreno con el nivel de zoom exacto al área de estudio InSAR.
+- Garantiza que las flechas Quiver y los puntos dispersos se `reproyecten` correctamente en el CRS de la figura antes de renderizarse.
+
+---
+
+### `scipy`
+
+**Propósito**: Interpolación espacial y álgebra científica de soporte.
+
+En el módulo de Descomposición 2D, se utiliza `scipy.interpolate.griddata` para interpolar la rejilla de Ascendente al grid de referencia Descendente, alineando ambos conjuntos de datos a una malla geográfica común antes de resolver el sistema de ecuaciones matriciales por píxel. Esto es crítico cuando las imágenes de diferentes órbitas tienen resoluciones o extensiones geográficas distintas.
+
+---
+
+### `asf_search`
+
+**Propósito**: Acceso programático al catálogo de imágenes SAR de Arctic Satellite Facility (NASA/ASF).
+
+`asf_search` conecta el motor de GeoDesk directamente con el inventario satelital de la NASA para:
+- **Buscar pares de imágenes SLC** Sentinel-1 compatibles (misma trayectoria orbital, geometría de polarización similar) dentro de una ventana temporal y geográfica configurada por el usuario.
+- **Validar intervalos de línea de base temporal** para garantizar que los pares generados tendrán coherencia InSAR suficiente.
+- **Solicitar el procesamiento HyP3** de cada par seleccionado, iniciando el flujo de trabajo satelital GAMMA en la nube.
 
 ---
 

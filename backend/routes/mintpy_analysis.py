@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 import warnings
+
+from PIL.ImageOps import scale
 from dotenv import load_dotenv
 load_dotenv()
 import h5py
@@ -56,7 +58,7 @@ def generate_quiver_plots(results_list):
     df = pd.DataFrame(results_list)
     if "vel_ew_mm_yr" not in df.columns or "vel_up_mm_yr" not in df.columns:
         return
-    
+
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -70,14 +72,15 @@ def generate_quiver_plots(results_list):
     n_points = len(df)
     frac = 0.33 if n_points > 100 else 1.0
     df_sub = df.sample(frac=frac, random_state=42)
-    
+
     lons = df_sub["lon"].values
     lats = df_sub["lat"].values
-    
+
     for mode in ["UP", "EW"]:
-        fig, ax = plt.subplots(figsize=(10, 8), dpi=150, 
+        fig, ax = plt.subplots(figsize=(10, 8),
+                               dpi=150,
                                subplot_kw={'projection': ccrs.PlateCarree()} if has_cartopy else {})
-        
+
         if has_cartopy:
             import cartopy.io.img_tiles as cimgt
             import math
@@ -91,7 +94,7 @@ def generate_quiver_plots(results_list):
                 logging.warning(f"Failed to load map tiles: {e}")
                 ax.add_feature(cfeature.LAND, facecolor="#e2e8f0")
                 ax.add_feature(cfeature.OCEAN, facecolor="#bae6fd")
-                
+
             ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
             ax.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle=":")
             d_lon = d_lon_full * 0.1 or 0.1
@@ -100,7 +103,7 @@ def generate_quiver_plots(results_list):
             transform = ccrs.PlateCarree()
         else:
             transform = None
-        
+
         if mode == "UP":
             U = np.zeros_like(lons)
             V = df_sub["vel_up_mm_yr"].values
@@ -113,22 +116,22 @@ def generate_quiver_plots(results_list):
             color_vals = U
             title = "Deformación Este-Oeste (mm/a)"
             save_path = RESULTS_DIR / "quiver_ew.png"
-            
+
         vmax = max(abs(np.nanmin(color_vals)), abs(np.nanmax(color_vals)))
         if vmax == 0: vmax = 1
-        
+
         if has_cartopy:
             ax.scatter(lons, lats, color="black", s=4, zorder=3, alpha=0.5, transform=transform)
-            q = ax.quiver(lons, lats, U, V, color_vals, cmap="seismic", scale=None, 
+            q = ax.quiver(lons, lats, U, V, color_vals, cmap="seismic", scale=None,
                           transform=transform, pivot="tail", alpha=0.9, zorder=4)
         else:
             ax.scatter(lons, lats, color="black", s=4, zorder=3, alpha=0.5)
-            q = ax.quiver(lons, lats, U, V, color_vals, cmap="seismic", scale=None, 
+            q = ax.quiver(lons, lats, U, V, color_vals, cmap="seismic", scale=None,
                           pivot="tail", alpha=0.9, zorder=4)
-                      
+
         plt.colorbar(q, ax=ax, label="Velocidad (mm/a)", orientation="horizontal", fraction=0.046, pad=0.04)
         plt.title(title, fontsize=14, fontweight="bold")
-        
+
         plt.savefig(save_path, bbox_inches="tight")
         plt.close(fig)
 

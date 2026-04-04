@@ -136,7 +136,7 @@ function MapContent({
           <CircleMarker
             key={i}
             center={[pt.lat, pt.lon]}
-            radius={3}
+            radius={1.5}
             pathOptions={{
               fillColor: velocityColor(pt.velocidad_mm_yr, velMin, velMax),
               color: velocityColor(pt.velocidad_mm_yr, velMin, velMax),
@@ -615,7 +615,6 @@ export default function MintPyAnalysis() {
 
   const cropIsValid = drawnBox && bounds ? isCropWithinBounds(drawnBox, bounds) : !!drawnBox;
 
-  // ── Histogram data ───────────────────────────────────────────────────────────
 
   const activeData = results ? (results.mode === "2D" ? results.sample.map(p => ({
     lat: p.lat, lon: p.lon, velocidad_mm_yr: viewMode === "EW" ? (p.vel_ew_mm_yr || 0) : (p.vel_up_mm_yr || 0)
@@ -625,7 +624,6 @@ export default function MintPyAnalysis() {
   const velMin = results && results.mode === "2D" && viewMode === "EW" ? (results.stats.min_ew ?? 0) : (results?.stats.min ?? 0);
   const velMax = results && results.mode === "2D" && viewMode === "EW" ? (results.stats.max_ew ?? 0) : (results?.stats.max ?? 0);
 
-  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <div
@@ -650,7 +648,7 @@ export default function MintPyAnalysis() {
             marginBottom: "6px",
           }}
         >
-          🛰️ Análisis InSAR — Estilo MintPy
+          Análisis InSAR — MintPy
         </h1>
         <p style={{ color: "#94a3b8", fontSize: "0.9rem", margin: 0 }}>
           Inversión SBAS de velocidad de deformación del suelo (mm/año) a partir de múltiples interferogramas HyP3/ASF.
@@ -1455,6 +1453,56 @@ export default function MintPyAnalysis() {
                   </p>
                 )}
               </div>
+              
+              {/* Static Vector Map (Quiver) */}
+              {results.mode === "2D" && (
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: "14px",
+                    padding: "20px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "14px",
+                    }}
+                  >
+                    <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", margin: 0 }}>
+                      🧭 Mapa Vectorial Estático (Cartopy Quiver)
+                    </h3>
+                    <a
+                      href={`${API_URL}/api/mintpy/export_quiver_${viewMode.toLowerCase()}`}
+                      download
+                      style={{
+                        padding: "6px 14px",
+                        background: "linear-gradient(135deg, #8b5cf6, #7c3aed)",
+                        color: "white",
+                        borderRadius: "8px",
+                        fontSize: "0.78rem",
+                        fontWeight: 600,
+                        textDecoration: "none",
+                      }}
+                    >
+                      📸 Descargar Mapa
+                    </a>
+                  </div>
+                  <div style={{ textAlign: "center", background: "rgba(0,0,0,0.2)", borderRadius: "10px", padding: "10px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                    <img 
+                      src={`${API_URL}/api/mintpy/export_quiver_${viewMode.toLowerCase()}?t=${results.stats.date_end}`} 
+                      alt={`Mapa Vectorial ${viewMode}`} 
+                      style={{ maxWidth: "100%", maxHeight: "600px", borderRadius: "6px", objectFit: "contain" }}
+                    />
+                    <p style={{ color: "#94a3b8", fontSize: "0.75rem", marginTop: "10px", fontStyle: "italic" }}>
+                      Mostrando estadísticamente ~33% de los vectores calculados para preservar las direcciones y claridad visual (Proyección PlateCarree).
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

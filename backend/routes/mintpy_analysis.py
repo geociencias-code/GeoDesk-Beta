@@ -50,6 +50,89 @@ XLSX_FILE    = RESULTS_DIR / "resumen_interferogramas.xlsx"
 MIN_INTERFEROGRAMS = 3
 DATE_RE = re.compile(r"(20\d{6})T")
 
+def generate_quiver_plots(results_list):
+    if not results_list:
+        return
+    df = pd.DataFrame(results_list)
+    if "vel_ew_mm_yr" not in df.columns or "vel_up_mm_yr" not in df.columns:
+        return
+    
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import cartopy.crs as ccrs
+        import cartopy.feature as cfeature
+        has_cartopy = True
+    except ImportError:
+        has_cartopy = False
+
+    n_points = len(df)
+    frac = 0.33 if n_points > 100 else 1.0
+    df_sub = df.sample(frac=frac, random_state=42)
+    
+    lons = df_sub["lon"].values
+    lats = df_sub["lat"].values
+    
+    for mode in ["UP", "EW"]:
+        fig, ax = plt.subplots(figsize=(10, 8), dpi=150, 
+                               subplot_kw={'projection': ccrs.PlateCarree()} if has_cartopy else {})
+        
+        if has_cartopy:
+            import cartopy.io.img_tiles as cimgt
+            import math
+            d_lon_full = (lons.max() - lons.min())
+            d_lat_full = (lats.max() - lats.min())
+            try:
+                request = cimgt.OSM()
+                zoom = min(12, int(math.log2(360 / max(d_lon_full, d_lat_full, 0.001))))
+                ax.add_image(request, zoom)
+            except Exception as e:
+                logging.warning(f"Failed to load map tiles: {e}")
+                ax.add_feature(cfeature.LAND, facecolor="#e2e8f0")
+                ax.add_feature(cfeature.OCEAN, facecolor="#bae6fd")
+                
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+            ax.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle=":")
+            d_lon = d_lon_full * 0.1 or 0.1
+            d_lat = d_lat_full * 0.1 or 0.1
+            ax.set_extent([lons.min() - d_lon, lons.max() + d_lon, lats.min() - d_lat, lats.max() + d_lat], crs=ccrs.PlateCarree())
+            transform = ccrs.PlateCarree()
+        else:
+            transform = None
+        
+        if mode == "UP":
+            U = np.zeros_like(lons)
+            V = df_sub["vel_up_mm_yr"].values
+            color_vals = V
+            title = "Deformación Vertical (mm/a)"
+            save_path = RESULTS_DIR / "quiver_up.png"
+        else:
+            U = df_sub["vel_ew_mm_yr"].values
+            V = np.zeros_like(lons)
+            color_vals = U
+            title = "Deformación Este-Oeste (mm/a)"
+            save_path = RESULTS_DIR / "quiver_ew.png"
+            
+        vmax = max(abs(np.nanmin(color_vals)), abs(np.nanmax(color_vals)))
+        if vmax == 0: vmax = 1
+        
+        if has_cartopy:
+            ax.scatter(lons, lats, color="black", s=4, zorder=3, alpha=0.5, transform=transform)
+            q = ax.quiver(lons, lats, U, V, color_vals, cmap="seismic", scale=None, 
+                          transform=transform, pivot="tail", alpha=0.9, zorder=4)
+        else:
+            ax.scatter(lons, lats, color="black", s=4, zorder=3, alpha=0.5)
+            q = ax.quiver(lons, lats, U, V, color_vals, cmap="seismic", scale=None, 
+                          pivot="tail", alpha=0.9, zorder=4)
+                      
+        plt.colorbar(q, ax=ax, label="Velocidad (mm/a)", orientation="horizontal", fraction=0.046, pad=0.04)
+        plt.title(title, fontsize=14, fontweight="bold")
+        
+        plt.savefig(save_path, bbox_inches="tight")
+        plt.close(fig)
+
+
 
 def _extract_dates(filename: str):
     matches = DATE_RE.findall(filename)
@@ -138,51 +221,18 @@ def _make_cfg(
             if crs and crs.to_epsg() != 4326:
                 transformer = pyproj.Transformer.from_crs(4326, crs.to_epsg() or 32616, always_xy=True)
 
-            subset_yx_val = "no"
-
-            c_off, r_off = 0, 0
-            width, height = int(window.width), int(window.height)
+            subset_lalo_val = "no"
+            subset_yx_val = "auto"
+            ref_lalo_val = "no"
+            ref_yx_val = "auto"
 
             if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
-                if transformer:
-                    ll_x, ll_y = transformer.transform(crop_lon_min, crop_lat_min)
-                    ur_x, ur_y = transformer.transform(crop_lon_max, crop_lat_max)
-                    lr_x, lr_y = transformer.transform(crop_lon_max, crop_lat_min)
-                    ul_x, ul_y = transformer.transform(crop_lon_min, crop_lat_max)
-                    
-                    min_x = min(ll_x, ur_x, lr_x, ul_x)
-                    max_x = max(ll_x, ur_x, lr_x, ul_x)
-                    min_y = min(ll_y, ur_y, lr_y, ul_y)
-                    max_y = max(ll_y, ur_y, lr_y, ul_y)
-                else:
-                    min_x, max_x = crop_lon_min, crop_lon_max
-                    min_y, max_y = crop_lat_min, crop_lat_max
-                
-                win = rasterio.windows.from_bounds(min_x, min_y, max_x, max_y, transform=transform)
-                c_off = int(max(0, win.col_off))
-                r_off = int(max(0, win.row_off))
-                c_end = int(min(width, win.col_off + win.width))
-                r_end = int(min(height, win.row_off + win.height))
-                
-                if c_end > c_off and r_end > r_off:
-                    subset_yx_val = f"{r_off}:{r_end},{c_off}:{c_end}"
-                    width = c_end - c_off
-                    height = r_end - r_off
+                subset_lalo_val = f"{crop_lat_min}:{crop_lat_max},{crop_lon_min}:{crop_lon_max}"
+                subset_yx_val = "no"
 
             if ref_lat is not None and ref_lon is not None:
-                if transformer:
-                    ref_lon_proj, ref_lat_proj = transformer.transform(ref_lon, ref_lat)
-                else:
-                    ref_lon_proj, ref_lat_proj = ref_lon, ref_lat
-                
-                r_ref, c_ref = rasterio.transform.rowcol(transform, ref_lon_proj, ref_lat_proj)
-                ry = int(r_ref) - r_off
-                rx = int(c_ref) - c_off
-                
-                ry = min(max(0, ry), height - 1)
-                rx = min(max(0, rx), width - 1)
-                
-                ref_yx_val = f"{ry},{rx}"
+                ref_lalo_val = f"{ref_lat},{ref_lon}"
+                ref_yx_val = "no"
 
     return f"""mintpy.load.processor    = hyp3
 mintpy.load.unwFile      = {unw_pat}
@@ -190,11 +240,11 @@ mintpy.load.corFile      = {cor_pat}
 mintpy.load.demFile      = {dem_pat}
 mintpy.load.incAngleFile = {inc_pat}
 mintpy.load.azAngleFile  = {azi_pat}
-mintpy.subset.lalo       = no
+mintpy.subset.lalo       = {subset_lalo_val}
 mintpy.subset.yx         = {subset_yx_val}
 mintpy.network.coherenceBased     = yes
 mintpy.network.minCoherence       = 0.4
-mintpy.reference.lalo             = no
+mintpy.reference.lalo             = {ref_lalo_val}
 mintpy.reference.yx               = {ref_yx_val}
 mintpy.troposphericDelay.method   = pyaps
 mintpy.troposphericDelay.weatherModel = ERA5
@@ -401,6 +451,9 @@ async def process_interferograms(
                                 d2 = d_pair[1].decode('utf-8')
                                 
                                 phase_2d = phase_array[idx].copy()
+                                
+                                # Se resta la mediana de la velocidad para centrar la distribución de la deformación
+                                # al rededor del cero
                                 pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
                                 median_phase = np.nanmedian(phase_2d[pmask])
                                 if not np.isnan(median_phase):
@@ -436,6 +489,7 @@ async def process_interferograms(
                                 col_suffix = f"{d1}_{d2}"
                                 
                                 phase_2d = phase_array[idx].copy()
+                                # se resta la media de la velocidad a la velocidad
                                 pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
                                 median_phase = np.nanmedian(phase_2d[pmask])
                                 if not np.isnan(median_phase):
@@ -488,6 +542,7 @@ async def process_interferograms(
                             attrs = dict(vf.attrs)
                             lat0, lon0 = float(attrs.get("Y_FIRST", 0)), float(attrs.get("X_FIRST", 0))
                             dlat, dlon = float(attrs.get("Y_STEP", -0.001)), float(attrs.get("X_STEP", 0.001))
+                            # Pixel center offset restored for rendering
                             lat_arr = lat0 + (np.arange(vf["velocity"].shape[0]) + 0.5) * dlat
                             lon_arr = lon0 + (np.arange(vf["velocity"].shape[1]) + 0.5) * dlon
                             lon, lat = np.meshgrid(lon_arr, lat_arr)
@@ -525,6 +580,7 @@ async def process_interferograms(
             
             mask_a = np.isfinite(vel_asc) & (vel_asc != 0)
             med_a = np.nanmedian(vel_asc[mask_a])
+            #posible error
             if not np.isnan(med_a): vel_asc[mask_a] -= med_a
             
             mask_d = np.isfinite(vel_desc) & (vel_desc != 0)
@@ -554,6 +610,12 @@ async def process_interferograms(
             
             cols = ["lat", "lon", "velocidad_mm_yr", "vel_ew_mm_yr", "vel_up_mm_yr"]
             df_csv = pd.DataFrame([{k: r[k] for k in cols} for r in results])
+            
+            try:
+                generate_quiver_plots(results)
+            except Exception as exc:
+                logging.error(f"Error generando quivers: {exc}")
+                
             df_csv.rename(columns={"lat": "Latitud", "lon": "Longitud", "velocidad_mm_yr": "Velocidad_mm_amo", "vel_ew_mm_yr": "Velocidad_EW_mm_amo", "vel_up_mm_yr": "Velocidad_UP_mm_amo"}, inplace=True)
             df_csv = append_interferograms(df_csv, work_dir_asc, valid, prefix="Asc_")
             df_csv = append_interferograms(df_csv, work_dir_desc, valid, prefix="Desc_")
@@ -612,6 +674,7 @@ async def process_interferograms(
                 vel_attrs = dict(vf.attrs)
 
             vmask = np.isfinite(vel_mm) & (vel_mm != 0.0)
+            #posible error
             median_vel = np.nanmedian(vel_mm[vmask])
             if not np.isnan(median_vel):
                 vel_mm[vmask] -= median_vel
@@ -863,6 +926,20 @@ def export_xlsx():
         filename="resumen_interferogramas_mintpy.xlsx",
     )
 
+@router.get("/export_quiver_ew")
+def export_quiver_ew():
+    p = RESULTS_DIR / "quiver_ew.png"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="No hay mapa quiver EW.")
+    return FileResponse(p, media_type="image/png", filename="deformacion_ew_mintpy.png")
+
+@router.get("/export_quiver_up")
+def export_quiver_up():
+    p = RESULTS_DIR / "quiver_up.png"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="No hay mapa quiver UP.")
+    return FileResponse(p, media_type="image/png", filename="deformacion_up_mintpy.png")
+
 
 
 @router.post("/preview_bounds")
@@ -931,10 +1008,10 @@ async def preview_bounds(files: List[UploadFile] = File(...)):
         return {
             "success": True,
             "bounds": {
-                "lat_min": bottom,
-                "lon_min": left,
-                "lat_max": top,
-                "lon_max": right
+                "lat_min": min(bottom, top),
+                "lon_min": min(left, right),
+                "lat_max": max(bottom, top),
+                "lon_max": max(left, right)
             }
         }
 

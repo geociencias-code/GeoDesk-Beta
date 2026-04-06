@@ -228,4 +228,3 @@ docker compose up --build
 ```
 
 - La interfaz visual está delegada hacia `http://localhost:5173`.
-- El servicio orquestador de análisis Python / MintPy operando por debajo escuchará en `http://localhost:8000`.

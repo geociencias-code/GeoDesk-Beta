@@ -12,3 +12,4 @@ __pycache__/
 
 # El archivo de ejemplo SÍ se puede subir
 !.env.example
+.venv

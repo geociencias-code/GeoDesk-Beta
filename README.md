@@ -110,7 +110,7 @@ Esta robusta sinergia geofísica convierte el output crudo del radar en datos ap
 
 ## Stack Científico de Librerías Clave
 
-A continuación se detalla el rol técnico de cada librería de cómputo científico especializada integrada en el pipeline de GeoDesk. Solo se incluyen las que tienen un propósito geodésico o InSAR específico.
+A continuación se detalla el rol técnico de cada librería de cómputo científico especializada utilizada en la aplicación. Solo se incluyen las que tienen un propósito geodésico o InSAR específico.
 
 ---
 
@@ -124,7 +124,7 @@ En GeoDesk, `rasterio` es la capa de acceso de bajo nivel a los productos de HyP
 - Transformar los **límites de los datos** entre sistemas de referencia (UTM → WGS84) para pasarlos como entradas recortables a MintPy.
 - Calcular sub-ventanas espaciales (`rasterio.windows`) para delimitación de zonas de interés.
 
-Sin `rasterio`, el pipeline no sabría a qué coordenadas corresponde cada píxel de radar de las imágenes de entrada.
+Sin `rasterio`, la aplicación no sabría a qué coordenadas corresponde cada píxel de radar de las imágenes de entrada.
 
 ---
 
@@ -135,8 +135,6 @@ Sin `rasterio`, el pipeline no sabría a qué coordenadas corresponde cada píxe
 Los datos de Sentinel-1 geocodificados por GAMMA/HyP3 suelen estar en proyección **UTM** (Universal Transverse Mercator), cuyo eje de cuadrícula está rotado respecto al Norte geodésico verdadero. `pyproj` proporciona:
 - La transformación `EPSG_utm → EPSG:4326` a través de `pyproj.Transformer`, calculando la conversión bidireccional entre coordenadas planas (metros) y coordenadas angulares (Lat/Lon decimal).
 - La inversión de la proyección para convertir puntos de referencia (Seed Points) o esquinas de la región de interés seleccionada en el mapa Leaflet a coordenadas en la malla de datos rasterizada.
-
-> **Nota técnica**: Una simple aproximación lineal de la proyección en regiones con alta curvatura geodésica (latitudes $> 50°$ N/S) produce un desplazamiento visual de hasta varios píxeles en el mapa. `pyproj` elimina este error usando las ecuaciones exactas de la elipsoide WGS84.
 
 ---
 
@@ -157,7 +155,7 @@ MintPy almacena todos sus resultados interno (velocidades, series temporales, co
 
 MintPy es la columna vertebral científica de GeoDesk. Su integración incluye:
 - La clase `TimeSeriesAnalysis` que orquesta el pipeline completo: carga de datos, filtrado de red temporal, inversión SBAS, corrección troposférica, derampado y estimación de velocidad.
-- El módulo `ifgram_inversion` (específicamente `estimate_timeseries`) para ejecutar la inversión WLS/SVD por píxel — función que GeoDesk ha parcheado (`monkey-patch`) para garantizar compatibilidad con NumPy `>= 1.24`.
+- El módulo `ifgram_inversion` (específicamente `estimate_timeseries`) para ejecutar la inversión WLS/SVD por píxel.
 - El sistema de configuración por fichero `.cfg` que controla todos los parámetros de procesamiento: región de interés (`subset.lalo`), coherencia mínima, método de corrección troposférica, referencia espacial, etc.
 
 ---

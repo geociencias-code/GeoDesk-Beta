@@ -130,6 +130,15 @@ function MapContent({
           pathOptions={{ color: "#ef4444", weight: 2, fillColor: "#ef4444", fillOpacity: 0.2 }}
         />
       )}
+      <CircleMarker
+        center={[13.868, -89.601]}
+        radius={6}
+        pathOptions={{ color: "#f97316", fillColor: "#fde047", fillOpacity: 0.9, weight: 2 }}
+      >
+        <LeafletTooltip direction="top" offset={[0, -5]} opacity={1}>
+          <span style={{ fontWeight: 600 }}>📡 Estación GNSS (MAGNET)</span>
+        </LeafletTooltip>
+      </CircleMarker>
       {deformationData.map((pt, i) => {
         // Find color based on min/max of current data or just default to blue/red
         return (
@@ -401,6 +410,7 @@ interface SeedPoint {
   lat: number;
   lon: number;
   is_mintpy_default: boolean;
+  is_gnss?: boolean;
 }
 
 interface PlanData {
@@ -967,6 +977,11 @@ export default function MintPyAnalysis() {
                         Lat: {p.lat.toFixed(4)} <br/>
                         Lon: {p.lon.toFixed(4)}
                       </div>
+                      {p.is_gnss && (
+                        <div style={{ fontSize: "0.75rem", padding: "2px 6px", background: "rgba(245, 158, 11, 0.2)", color: "#fbbf24", borderRadius: "8px", border: "1px solid #f59e0b" }}>
+                          📡 Estación GNSS
+                        </div>
+                      )}
                       {p.is_mintpy_default && (
                         <span style={{ fontSize: "0.65rem", padding: "2px 6px", background: "#f59e0b", color: "#fff", borderRadius: "10px" }}>
                           MintPy Default

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { MapContainer, TileLayer, Polygon, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, Polygon, useMapEvents, CircleMarker, Tooltip as LeafletTooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -91,6 +91,16 @@ const MapComponent: React.FC<MapComponentProps> = ({
             doubleClickZoom={false}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+            <CircleMarker
+              center={[13.868, -89.601]}
+              radius={6}
+              pathOptions={{ color: "#f97316", fillColor: "#fde047", fillOpacity: 0.9, weight: 2 }}
+            >
+              <LeafletTooltip direction="top" offset={[0, -5]} opacity={1}>
+                <span style={{ fontWeight: 600 }}>📡 Estación GNSS (MAGNET)</span>
+              </LeafletTooltip>
+            </CircleMarker>
 
             {currentRect.length === 4 && (
               <Polygon

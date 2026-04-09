@@ -301,16 +301,17 @@ mintpy.load.azAngleFile  = {azi_pat}
 mintpy.subset.lalo       = {subset_lalo_val}
 mintpy.subset.yx         = {subset_yx_val}
 mintpy.network.coherenceBased     = yes
-mintpy.network.minCoherence       = 0.4
+mintpy.network.minCoherence       = 0.6
 mintpy.reference.lalo             = {ref_lalo_val}
 mintpy.reference.yx               = {ref_yx_val}
-mintpy.troposphericDelay.method   = pyaps
-mintpy.troposphericDelay.weatherModel = ERA5
+mintpy.troposphericDelay.method   = height_correlation
 mintpy.deramp                     = linear
 mintpy.topographicResidual        = no
 mintpy.topographicResidual.stepFuncDate = no
 mintpy.unwrapError.method         = no
-mintpy.networkInversion.minTempCoh = 0.4
+mintpy.interferogram.filter.type  = gaussian
+mintpy.interferogram.filter.wavelength = 400
+mintpy.networkInversion.minTempCoh = 0.7
 """
 
 
@@ -396,15 +397,23 @@ def _run_mintpy_pipeline(
 
     except SystemExit as e:
         if str(e) != "0" and e.code != 0:
-            log_tail = log_path.read_text()[-3000:] if log_path.exists() else "(no log)"
+            log_tail = log_path.read_text()[-5000:] if log_path.exists() else "(no log)"
+            logging.error("MintPy pipeline SystemExit(%s).\n--- MintPy log tail ---\n%s\n--- end ---", e.code, log_tail)
             raise ValueError(f"MintPy pipeline exited with code {e.code}.\nLog:\n{log_tail}")
     except Exception as e:
-        log_tail = log_path.read_text()[-3000:] if log_path.exists() else "(no log)"
+        log_tail = log_path.read_text()[-5000:] if log_path.exists() else "(no log)"
+        logging.exception("MintPy pipeline raised %s: %s\n--- MintPy log tail ---\n%s\n--- end ---",
+                          type(e).__name__, e, log_tail)
 
         err_str = str(e).lower()
         if isinstance(e, ValueError) and "sequence" in err_str:
             raise ValueError(
                 "MintPy falló en la inversión de red (network_inversion)."
+            )
+        if isinstance(e, ValueError) and "masked out" in err_str:
+            raise ValueError(
+                "El punto de referencia seleccionado cae en una zona enmascarada (sin fase en algún interferograma). "
+                "Vuelve a buscar puntos semilla y selecciona uno diferente."
             )
             
         raise ValueError(f"{type(e).__name__}: {e}\nLog:\n{log_tail}")
@@ -427,6 +436,25 @@ async def process_interferograms(
 ):
     if len(files) < MIN_INTERFEROGRAMS:
         raise HTTPException(status_code=400, detail=f"Se requieren al menos {MIN_INTERFEROGRAMS} interferogramas.")
+
+    # Validate that the reference point (if provided) is inside the crop region.
+    # If the user changed the crop box after selecting seeds, the seed may be
+    # from the old region → MintPy gets a reference pixel outside the subset → 500.
+    if ref_lat is not None and ref_lon is not None:
+        if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
+            eps = 1e-5
+            lat_lo = min(crop_lat_min, crop_lat_max) - eps
+            lat_hi = max(crop_lat_min, crop_lat_max) + eps
+            lon_lo = min(crop_lon_min, crop_lon_max) - eps
+            lon_hi = max(crop_lon_min, crop_lon_max) + eps
+            if not (lat_lo <= ref_lat <= lat_hi and lon_lo <= ref_lon <= lon_hi):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"El punto de referencia ({ref_lat:.6f}, {ref_lon:.6f}) está fuera "
+                        f"del área seleccionada. Vuelve a buscar puntos semilla con el nuevo recorte."
+                    )
+                )
 
     work_dir = Path(tempfile.mkdtemp(prefix="mintpy_run_"))
     zip_dir  = work_dir / "hyp3_products"
@@ -547,11 +575,6 @@ async def process_interferograms(
                                 col_suffix = f"{d1}_{d2}"
                                 
                                 phase_2d = phase_array[idx].copy()
-                                # se resta la media de la velocidad a la velocidad
-                                pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
-                                median_phase = np.nanmedian(phase_2d[pmask])
-                                if not np.isnan(median_phase):
-                                    phase_2d[pmask] -= median_phase
 
                                 def_mm_arr = phase_2d[valid_msk].flatten() * rad2mm
                                 df_in[f"Deform_{prefix}{col_suffix}_mm"] = np.round(def_mm_arr, 2)
@@ -569,8 +592,35 @@ async def process_interferograms(
             for p in desc_paths: shutil.move(str(p), str(zip_dir_desc / p.name))
                 
             try:
+                # Run ASC pipeline first
                 _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
-                _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
+
+                # If no reference was provided by the user, read the one MintPy auto-selected
+                # for ASC and force DESC to use the exact same geographic point.
+                # This is critical: LOS velocities are always relative to their reference point.
+                # If ASC and DESC have different reference points, the 2D decomposition is physically invalid.
+                forced_ref_lat, forced_ref_lon = ref_lat, ref_lon
+                if ref_lat is None or ref_lon is None:
+                    vel_h5_asc_check = work_dir_asc / "velocity.h5"
+                    if vel_h5_asc_check.exists():
+                        with h5py.File(vel_h5_asc_check, "r") as vf_check:
+                            va = dict(vf_check.attrs)
+                        _ref_lat = va.get("REF_LAT", None)
+                        _ref_lon = va.get("REF_LON", None)
+                        if _ref_lat is not None and _ref_lon is not None:
+                            try:
+                                forced_ref_lat = float(_ref_lat)
+                                forced_ref_lon = float(_ref_lon)
+                                # Validate that these are WGS84 coords (abs < 90/180)
+                                # If data is in UTM, REF_LAT/REF_LON may be projected coords
+                                if abs(forced_ref_lat) > 90 or abs(forced_ref_lon) > 180:
+                                    epsg = int(va.get("EPSG", 32616))
+                                    transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
+                                    forced_ref_lon, forced_ref_lat = transformer.transform(forced_ref_lon, forced_ref_lat)
+                            except (ValueError, TypeError):
+                                forced_ref_lat, forced_ref_lon = ref_lat, ref_lon
+
+                _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
                 
@@ -614,7 +664,7 @@ async def process_interferograms(
                     lat_desc, lon_desc = get_lat_lon(vf_d, gf_d)
 
             # Spatial resampling (interpolation) of Ascending to Descending master grid
-            valid_mask_a = np.isfinite(vel_asc) & (vel_asc != 0)
+            valid_mask_a = np.isfinite(vel_asc)
             
             if np.any(valid_mask_a):
                 valid_pts_a = np.column_stack((lat_asc[valid_mask_a], lon_asc[valid_mask_a]))
@@ -628,22 +678,26 @@ async def process_interferograms(
 
             lat_grid, lon_grid = lat_desc, lon_desc
 
-            # Matrix inversion
-            A_asc_up = np.cos(inc_asc)
-            A_asc_ew = -np.sin(inc_asc) * np.cos(azi_asc)
+            # Matrix inversion for 2D decomposition
+            # MintPy stores azimuthAngle in degrees from North (clockwise).
+            # The LOS unit vector (ground→satellite) projects onto:
+            #   East:  e_E = sin(inc) * sin(azi)   ← azimuth is clockwise from N
+            #   North: e_N = sin(inc) * cos(azi)
+            #   Up:    e_U = cos(inc)
+            # Ignoring North (near-polar orbits have low N sensitivity):
+            #   d_los = A_ew * d_E + A_up * d_U
+            # Previous code used -sin(inc)*cos(azi) for A_ew, which is the NORTH
+            # component — not East — causing both geometries to have nearly equal
+            # EW coefficients, a near-zero determinant, and 400 mm/a artifacts.
+            A_asc_ew  = np.sin(inc_asc)  * np.sin(azi_asc)
+            A_asc_up  = np.cos(inc_asc)
+            A_desc_ew = np.sin(inc_desc) * np.sin(azi_desc)
             A_desc_up = np.cos(inc_desc)
-            A_desc_ew = -np.sin(inc_desc) * np.cos(azi_desc)
             
             det = (A_asc_ew * A_desc_up) - (A_asc_up * A_desc_ew)
             
-            mask_a = np.isfinite(vel_asc) & (vel_asc != 0)
-            med_a = np.nanmedian(vel_asc[mask_a])
-            #posible error
-            if not np.isnan(med_a): vel_asc[mask_a] -= med_a
-            
-            mask_d = np.isfinite(vel_desc) & (vel_desc != 0)
-            med_d = np.nanmedian(vel_desc[mask_d])
-            if not np.isnan(med_d): vel_desc[mask_d] -= med_d
+            mask_a = np.isfinite(vel_asc)
+            mask_d = np.isfinite(vel_desc)
             
             valid = mask_a & mask_d & (det != 0) & np.isfinite(det)
             vel_ew = np.full_like(vel_desc, np.nan)
@@ -704,7 +758,14 @@ async def process_interferograms(
                 "n_interferograms": len(files),
                 "date_start": min(all_dates),
                 "date_end": max(all_dates),
-                "era5_successful": True,
+                "era5_successful": (
+                    (work_dir_asc / "inputs" / "ERA5.h5").exists() or
+                    (work_dir_desc / "inputs" / "ERA5.h5").exists()
+                ),
+                "tropo_method": "ERA5" if (
+                    (work_dir_asc / "inputs" / "ERA5.h5").exists() or
+                    (work_dir_desc / "inputs" / "ERA5.h5").exists()
+                ) else "height_correlation",
             }
             
             step_s = max(1, len(results) // 1000)
@@ -731,12 +792,6 @@ async def process_interferograms(
                 vel_mm    = vel_data * 1000.0
                 vel_attrs = dict(vf.attrs)
 
-            vmask = np.isfinite(vel_mm) & (vel_mm != 0.0)
-            #posible error
-            median_vel = np.nanmedian(vel_mm[vmask])
-            if not np.isnan(median_vel):
-                vel_mm[vmask] -= median_vel
-
             use_grid = False
             if geometry_geo.exists():
                 with h5py.File(geometry_geo, "r") as gf:
@@ -756,7 +811,7 @@ async def process_interferograms(
                     transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
                     lon_grid, lat_grid = transformer.transform(lon_grid, lat_grid)
 
-            valid = np.isfinite(vel_mm) & (vel_mm != 0.0)
+            valid = np.isfinite(vel_mm)
             lats_v, lons_v, vels_v = lat_grid[valid].flatten(), lon_grid[valid].flatten(), vel_mm[valid].flatten()
             if len(vels_v) == 0:
                 raise HTTPException(status_code=422, detail="No coherentes.")
@@ -774,6 +829,7 @@ async def process_interferograms(
                 "date_start": min(all_dates),
                 "date_end": max(all_dates),
                 "era5_successful": (work_dir / "inputs/ERA5.h5").exists(),
+                "tropo_method": "ERA5" if (work_dir / "inputs/ERA5.h5").exists() else "height_correlation",
             }
 
             step_s = max(1, len(results) // 1000)
@@ -892,6 +948,26 @@ async def preview_reference(
             transform = rasterio.windows.transform(window, src.transform)
 
         coh_sum = np.zeros((win_height, win_width), dtype=np.float32)
+        # Build maskConnComp: pixels where ALL interferograms have non-zero phase.
+        # This replicates what MintPy does so we never suggest a masked seed.
+        unw_tifs = list(zip_dir.glob("*/*_unw_phase.tif"))
+        conn_mask = np.ones((win_height, win_width), dtype=bool)
+        exact_window = None
+
+        for t in unw_tifs:
+            with rasterio.open(str(t)) as src:
+                if exact_window is None:
+                    t_window = rasterio.windows.from_bounds(*common_bounds, transform=src.transform)
+                    t_win_col, t_win_row = int(t_window.col_off), int(t_window.row_off)
+                    exact_window = Window(t_win_col, t_win_row, win_width, win_height)
+                data_unw = src.read(1, window=exact_window).astype(np.float32)
+
+                # MintPy masked logic: drop pixel if NaN or exactly 0.0 in ANY unw_phase file
+                valid_phase = ~np.isnan(data_unw)
+                if src.nodata is not None:
+                    valid_phase &= (data_unw != src.nodata)
+                valid_phase &= (data_unw != 0.0)
+                conn_mask &= valid_phase
 
         for t in tifs:
             with rasterio.open(str(t)) as src:
@@ -906,18 +982,26 @@ async def preview_reference(
                 valid = ~np.isnan(data)
                 coh_sum[valid] += data[valid]
 
-        if coh_sum is None:
-            raise HTTPException(status_code=500, detail="Error combinando mapas de coherencia.")
+        # Apply ConnComp mask so we never suggest a pixel that MintPy will mask out.
+        coh_sum[~conn_mask] = -1.0
 
         if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
+            # Generate meshgrid for the window
             c_arr = np.arange(win_width)
             r_arr = np.arange(win_height)
             c_grid, r_grid = np.meshgrid(c_arr, r_arr)
             lon_proj, lat_proj = transform * (c_grid + 0.5, r_grid + 0.5)
 
+            transformer = None
             if crs and crs.to_epsg() != 4326:
-                transformer_inv = pyproj.Transformer.from_crs(crs.to_epsg() or 32616, 4326, always_xy=True)
-                lon_val, lat_val = transformer_inv.transform(lon_proj, lat_proj)
+                transformer = pyproj.Transformer.from_crs(crs.to_epsg() or 32616, 4326, always_xy=True)
+
+            if transformer:
+                # Need to reshape for pyproj
+                lon_proj_flat, lat_proj_flat = lon_proj.flatten(), lat_proj.flatten()
+                lon_val_flat, lat_val_flat = transformer.transform(lon_proj_flat, lat_proj_flat)
+                lon_val = lon_val_flat.reshape(lon_proj.shape)
+                lat_val = lat_val_flat.reshape(lat_proj.shape)
             else:
                 lon_val, lat_val = lon_proj, lat_proj
 
@@ -947,17 +1031,17 @@ async def preview_reference(
                 lon_val, lat_val = lon_proj, lat_proj
 
             tied_points.append({
-                "lat": round(float(lat_val), 4),
-                "lon": round(float(lon_val), 4),
+                "lat": round(float(lat_val), 6),
+                "lon": round(float(lon_val), 6),
                 "is_mintpy_default": (i == 0)
             })
 
         return {"seed_points": tied_points}
 
     finally:
-
-        shutil.rmtree(work_dir, ignore_errors=True)
-
+        # TEMP DEBUG: Do not remove work_dir so we can inspect it inside the docker container
+        # shutil.rmtree(work_dir, ignore_errors=True)
+        pass
 @router.get("/export_csv")
 def export_csv():
     if not CSV_FILE.exists():

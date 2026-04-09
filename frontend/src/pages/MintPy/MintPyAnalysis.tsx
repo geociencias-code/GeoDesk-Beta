@@ -286,6 +286,7 @@ interface VelocityStats {
   date_start: string;
   date_end: string;
   era5_successful?: boolean;
+  tropo_method?: string;
   min_ew?: number;
   max_ew?: number;
   mean_ew?: number;
@@ -430,6 +431,11 @@ export default function MintPyAnalysis() {
   useEffect(() => {
     if (drawnBox) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(drawnBox));
+      // When the crop changes, the previously found seed points are no longer valid
+      // (a seed from a previous crop area may be outside the new one → 500 error).
+      // Force the user to re-run the preview so seeds are recalculated within the new bounds.
+      setSeedPoints([]);
+      setSelectedSeed(null);
     }
   }, [drawnBox]);
 
@@ -1226,11 +1232,13 @@ export default function MintPyAnalysis() {
                       <span style={{
                         padding: "2px 6px",
                         borderRadius: "4px",
-                        background: results.stats.era5_successful ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
-                        color: results.stats.era5_successful ? "#10b981" : "#ef4444",
+                        background: "rgba(16,185,129,0.15)",
+                        color: "#10b981",
                         fontWeight: 600
                       }}>
-                        {results.stats.era5_successful ? "☁️ ERA5 OK" : "⚠️ ERA5 Falló"}
+                        {results.stats.tropo_method === "ERA5"
+                          ? "☁️ ERA5 OK"
+                          : `🌄 Troposf: ${results.stats.tropo_method ?? "height_corr"}`}
                       </span>
                     )}
                   </div>

@@ -520,7 +520,7 @@ async def process_interferograms(
 
         is_2d_mode = len(asc_paths) >= MIN_INTERFEROGRAMS and len(desc_paths) >= MIN_INTERFEROGRAMS
         
-        def get_igram_stats(ts_dir, valid_msk, prefix=""):
+        def get_igram_stats(ts_dir, valid_msk, interp_args=None, prefix=""):
             stats_list = []
             if_stack = ts_dir / "inputs" / "ifgramStack.h5"
             if if_stack.exists():
@@ -545,7 +545,16 @@ async def process_interferograms(
                                 if not np.isnan(median_phase):
                                     phase_2d[pmask] -= median_phase
 
+                                if interp_args:
+                                    lat_src, lon_src, lat_grid_q, lon_grid_q = interp_args
+                                    if np.any(pmask):
+                                        valid_pts = np.column_stack((lat_src[pmask], lon_src[pmask]))
+                                        phase_2d = griddata(valid_pts, phase_2d[pmask], (lat_grid_q, lon_grid_q), method='linear', fill_value=np.nan)
+                                    else:
+                                        phase_2d = np.full_like(lat_grid_q, np.nan)
+
                                 def_mm_arr = phase_2d[valid_msk].flatten() * rad2mm
+                                def_mm_arr = def_mm_arr[np.isfinite(def_mm_arr)]
                                 if len(def_mm_arr) > 0:
                                     stats_list.append({
                                         "date1": d1,
@@ -558,7 +567,7 @@ async def process_interferograms(
                                     })
             return stats_list
 
-        def append_interferograms(df_in, ts_dir, valid_msk, prefix=""):
+        def append_interferograms(df_in, ts_dir, valid_msk, interp_args=None, prefix=""):
             if_stack = ts_dir / "inputs" / "ifgramStack.h5"
             if if_stack.exists():
                 with h5py.File(if_stack, 'r') as stack_f:
@@ -575,6 +584,20 @@ async def process_interferograms(
                                 col_suffix = f"{d1}_{d2}"
                                 
                                 phase_2d = phase_array[idx].copy()
+
+                                # Se resta la mediana para centrar la deformación al rededor del cero
+                                pmask = np.isfinite(phase_2d) & (phase_2d != 0.0)
+                                median_phase = np.nanmedian(phase_2d[pmask])
+                                if not np.isnan(median_phase):
+                                    phase_2d[pmask] -= median_phase
+
+                                if interp_args:
+                                    lat_src, lon_src, lat_grid_q, lon_grid_q = interp_args
+                                    if np.any(pmask):
+                                        valid_pts = np.column_stack((lat_src[pmask], lon_src[pmask]))
+                                        phase_2d = griddata(valid_pts, phase_2d[pmask], (lat_grid_q, lon_grid_q), method='linear', fill_value=np.nan)
+                                    else:
+                                        phase_2d = np.full_like(lat_grid_q, np.nan)
 
                                 def_mm_arr = phase_2d[valid_msk].flatten() * rad2mm
                                 df_in[f"Deform_{prefix}{col_suffix}_mm"] = np.round(def_mm_arr, 2)
@@ -635,6 +658,16 @@ async def process_interferograms(
             with h5py.File(vel_h5_asc, "r") as vf_a, h5py.File(vel_h5_desc, "r") as vf_d:
                 vel_asc = vf_a["velocity"][:] * 1000.0
                 vel_desc = vf_d["velocity"][:] * 1000.0
+                
+                # Se resta la mediana de la velocidad para centrar la distribución de la deformación al rededor del cero
+                pmask_a = np.isfinite(vel_asc) & (vel_asc != 0.0)
+                med_a = np.nanmedian(vel_asc[pmask_a])
+                if not np.isnan(med_a): vel_asc[pmask_a] -= med_a
+
+                pmask_d = np.isfinite(vel_desc) & (vel_desc != 0.0)
+                med_d = np.nanmedian(vel_desc[pmask_d])
+                if not np.isnan(med_d): vel_desc[pmask_d] -= med_d
+
                 vel_attrs = dict(vf_a.attrs)
                 
                 with h5py.File(geo_asc, "r") as gf_a, h5py.File(geo_desc, "r") as gf_d:
@@ -729,11 +762,11 @@ async def process_interferograms(
                 logging.error(f"Error generando quivers: {exc}")
                 
             df_csv.rename(columns={"lat": "Latitud", "lon": "Longitud", "velocidad_mm_yr": "Velocidad_mm_amo", "vel_ew_mm_yr": "Velocidad_EW_mm_amo", "vel_up_mm_yr": "Velocidad_UP_mm_amo"}, inplace=True)
-            df_csv = append_interferograms(df_csv, work_dir_asc, valid, prefix="Asc_")
+            df_csv = append_interferograms(df_csv, work_dir_asc, valid, interp_args=(lat_asc, lon_asc, lat_desc, lon_desc), prefix="Asc_")
             df_csv = append_interferograms(df_csv, work_dir_desc, valid, prefix="Desc_")
             df_csv.to_csv(CSV_FILE, index=False)
             
-            igram_stats_asc = get_igram_stats(work_dir_asc, valid, prefix="Asc_")
+            igram_stats_asc = get_igram_stats(work_dir_asc, valid, interp_args=(lat_asc, lon_asc, lat_desc, lon_desc), prefix="Asc_")
             igram_stats_desc = get_igram_stats(work_dir_desc, valid, prefix="Desc_")
             igram_stats_2d = igram_stats_asc + igram_stats_desc
             if igram_stats_2d:
@@ -791,6 +824,11 @@ async def process_interferograms(
                 vel_data  = vf["velocity"][:]
                 vel_mm    = vel_data * 1000.0
                 vel_attrs = dict(vf.attrs)
+
+            # Se resta la mediana de la velocidad para centrar la distribución de la deformación al rededor del cero
+            pmask_los = np.isfinite(vel_mm) & (vel_mm != 0.0)
+            med_los = np.nanmedian(vel_mm[pmask_los])
+            if not np.isnan(med_los): vel_mm[pmask_los] -= med_los
 
             use_grid = False
             if geometry_geo.exists():

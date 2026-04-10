@@ -309,10 +309,12 @@ mintpy.troposphericDelay.method   = height_correlation
 mintpy.deramp                     = linear
 mintpy.topographicResidual        = yes
 mintpy.topographicResidual.stepFuncDate = no
-mintpy.unwrapError.method         = {'bridging+phase_closure' if has_triplets else 'no'}
+mintpy.unwrapError.method         = {'phase_closure' if has_triplets else 'no'}
 mintpy.interferogram.filter.type  = gaussian
 mintpy.interferogram.filter.wavelength = 400
-mintpy.networkInversion.minTempCoh = 0.7
+mintpy.networkInversion.minTempCoh = 0.5
+mintpy.compute.cluster = local
+mintpy.compute.numWorker = 12
 """
 
 
@@ -387,20 +389,31 @@ def _run_mintpy_pipeline(
         )
         tsa.open()
 
-        steps = [
-            "load_data",
-            "reference_point",
-        ]
+        # Run initial steps
+        tsa.run(steps=["load_data", "reference_point"])
+
         if has_triplets:
-            steps.append("correct_unwrap_error")
-        steps.extend([
+            # HyP3 Gamma products lack 'connectComponent', which phase_closure explicitly requires.
+            # We inject a dummy single-component mask to prevent KeyError.
+            ifgram_file = work_dir / "inputs" / "ifgramStack.h5"
+            if ifgram_file.exists():
+                with h5py.File(ifgram_file, "a") as f:
+                    if "connectComponent" not in f and "unwrapPhase" in f:
+                        unw = f["unwrapPhase"][:]
+                        # Los píxeles nulos (NaN) o con valor 0.0 (máscara de agua de Gamma) deben ser 0.
+                        cc = np.where(np.isnan(unw) | (unw == 0), 0, 1).astype(np.int16)
+                        f.create_dataset("connectComponent", data=cc, compression="lzf")
+            
+            tsa.run(steps=["correct_unwrap_error"])
+
+        # Run remaining steps
+        tsa.run(steps=[
             "invert_network",
             "correct_troposphere",
             "deramp",
             "correct_topography",
             "velocity",
         ])
-        tsa.run(steps=steps)
 
     except SystemExit as e:
         if str(e) != "0" and e.code != 0:

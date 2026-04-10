@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { API_URL } from "../../services/api";
 import { toast } from "sonner";
@@ -37,7 +37,10 @@ const DownloadFiles: React.FC = () => {
   };
 
   const fetchFilesForProject = async (projectName: string) => {
-    if (!projectName) return;
+    if (!projectName) {
+      setFiles([]);
+      return;
+    }
     setLoading(true);
     setError(null);
 
@@ -52,9 +55,7 @@ const DownloadFiles: React.FC = () => {
       setSelectedFiles(new Set());
     } catch (e: unknown) {
       if (e instanceof Error) {
-        setError(
-          "No se pudieron cargar los archivos: " + (e.message || "Error desconocido")
-        );
+        setError("No se pudieron cargar los archivos: " + (e.message || "Error desconocido"));
       } else {
         setError("No se pudieron cargar los archivos: Error desconocido");
       }
@@ -69,44 +70,61 @@ const DownloadFiles: React.FC = () => {
     fetchFilesForProject(projectName);
   };
 
-  const handleFileSelection = (idx: number) => {
-    setSelectedFiles((prevSelectedFiles) => {
-      const newSelectedFiles = new Set(prevSelectedFiles);
-      if (newSelectedFiles.has(idx)) {
-        newSelectedFiles.delete(idx);
-      } else {
-        newSelectedFiles.add(idx);
-      }
-      return newSelectedFiles;
+  const allChecked = useMemo(
+    () => files.length > 0 && files.every((_, idx) => selectedFiles.has(idx)),
+    [files, selectedFiles]
+  );
+
+  const toggleAll = () => {
+    if (allChecked) {
+      setSelectedFiles(new Set());
+    } else {
+      const next = new Set<number>();
+      files.forEach((_, idx) => next.add(idx));
+      setSelectedFiles(next);
+    }
+  };
+
+  const toggleOne = (idx: number) => {
+    setSelectedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
     });
   };
 
-  // Manejar la descarga de archivos seleccionados vía backend
-  const handleDownload = async () => {
+  const handleDownload = async (all: boolean) => {
     setLoading(true);
     setError(null);
 
-    const selectedItems = Array.from(selectedFiles).map((idx) => files[idx]);
+    const itemsToDownload = all 
+      ? files 
+      : Array.from(selectedFiles).map((idx) => files[idx]);
+
+    if (!itemsToDownload.length) {
+      toast.warning("No hay archivos para descargar.");
+      setLoading(false);
+      return;
+    }
 
     try {
-      const downloadPromises = selectedItems.map(async (file) => {
+      const downloadPromises = itemsToDownload.map(async (file) => {
         const res = await axios.post(`${API_URL}/api/download`, {
           file_url: file.url,
           file_name: file.file_name,
         });
 
         const result = res.data;
-        console.log(result);
         return result;
       });
 
-      await Promise.all(downloadPromises);
-      toast.success("Archivos descargados correctamente.");
+      const results = await Promise.all(downloadPromises);
+      const sizeStr = itemsToDownload.length > 6 ? "\n…" : "";
+      toast.success(`Descargados ${results.length} archivo(s) conectamente en backend/alaska_descargas.${sizeStr}`);
     } catch (e: unknown) {
       if (e instanceof Error) {
-        setError(
-          "Error al descargar los archivos: " + (e.message || "Error desconocido")
-        );
+        setError("Error al descargar los archivos: " + (e.message || "Error desconocido"));
       } else {
         setError("Error al descargar los archivos: Error desconocido");
       }
@@ -120,55 +138,144 @@ const DownloadFiles: React.FC = () => {
   }, []);
 
   return (
-    <div className="download-files">
-      <div>
-        <label>Seleccionar Proyecto: </label>
-        <select value={selectedProject} onChange={handleProjectSelect}>
-          <option value="">Seleccionar un proyecto</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.name}>
-              {project.name}
-            </option>
-          ))}
-        </select>
+    <div className="page-container" style={{ padding: 0 }}>
+      {/* HEADER SECTION */}
+      <div className="header-section">
+        <div className="icon-wrapper">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 15v4c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-4M17 9l-5 5-5-5M12 12.8V2.5" />
+          </svg>
+        </div>
+        <div>
+          <h1 className="page-title">Descargar Resultados</h1>
+          <p className="page-subtitle">Gestiona y descarga los procesos terminados de HyP3 en un solo click.</p>
+        </div>
       </div>
 
-      {error && <div style={{ color: "red", marginTop: 8 }}>{error}</div>}
+      <div className="layout-grid">
+        <div className="upload-panel">
+          <div className="upload-card">
+            <h3>Seleccionar Proyecto</h3>
+            <p className="field-hint">Elige un proyecto para listar los archivos listos para descargar.</p>
+            <div style={{ marginTop: "1rem" }}>
+              <select className="input-field" value={selectedProject} onChange={handleProjectSelect} disabled={loading} style={{ width: "100%", padding: "12px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", background: "rgba(0,0,0,0.2)", color: "white" }}>
+                <option value="">-- Seleccionar --</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.name}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {error && <div className="error-banner" style={{ marginTop: "12px" }}>{error}</div>}
+          </div>
+        </div>
 
-      {files.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <h3>Archivos disponibles:</h3>
-          <ul>
-            {files.map((file, idx) => (
-              <li key={idx}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={selectedFiles.has(idx)}
-                    onChange={() => handleFileSelection(idx)}
+        <div className="results-panel">
+          <div className="data-widget" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", height: "100%", minHeight: "450px" }}>
+            
+            <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.1)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+              <h2 style={{ fontSize: "1.1rem", margin: 0, fontWeight: 500 }}>Archivos del Proyecto {files.length > 0 && `(${files.length})`}</h2>
+              {files.length > 0 && (
+                <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                  <button
+                    className="submit-btn"
+                    style={{ padding: "8px 16px", minWidth: "auto", fontSize: "0.9rem", background: "linear-gradient(135deg, #6366f1, #4f46e5)" }}
+                    onClick={() => handleDownload(false)}
+                    disabled={selectedFiles.size === 0 || loading}
+                  >
+                    {loading ? "Descargando..." : `Descargar Seleccionados (${selectedFiles.size})`}
+                  </button>
+                  <button
+                    className="submit-btn"
+                    style={{ padding: "8px 16px", minWidth: "auto", fontSize: "0.9rem", background: "linear-gradient(135deg, #10b981, #059669)" }}
+                    onClick={() => handleDownload(true)}
+                    disabled={loading}
+                  >
+                    {loading ? "Descargando..." : "Descargar Todo el Proyecto"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {loading && (
+              <div style={{ padding: "20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                  <span style={{ fontSize: "0.9rem", color: "#ccc" }}>Gestionando descargas en el servidor... (esto puede tardar según la red)</span>
+                </div>
+                <div style={{ width: "100%", height: "8px", backgroundColor: "#333", borderRadius: "4px", overflow: "hidden" }}>
+                  <div 
+                    style={{ 
+                      height: "100%", 
+                      backgroundColor: "#007bff", 
+                      width: "100%",
+                      animation: "indeterminate 1.5s infinite linear",
+                      transformOrigin: "left"
+                    }} 
                   />
-                  {" "}
-                  {file.file_name}{" "}
-                  {file.size_mb != null && `(${file.size_mb.toFixed(2)} MB)`}
-                </label>
-              </li>
-            ))}
-          </ul>
+                </div>
+              </div>
+            )}
 
-          <button
-            onClick={handleDownload}
-            disabled={selectedFiles.size === 0 || loading}
-          >
-            {loading ? "Descargando..." : "Descargar seleccionados"}
-          </button>
-        </div>
-      )}
+            {!loading && files.length > 0 && (
+              <div className="table-responsive" style={{ flex: 1, overflowY: "auto" }}>
+                <table className="modern-table" style={{ width: "100%" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: "50px", textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={allChecked}
+                          onChange={toggleAll}
+                        />
+                      </th>
+                      <th>Nombre de Archivo</th>
+                      <th style={{ width: "120px", textAlign: "right" }}>Tamaño</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {files.map((file, idx) => (
+                      <tr key={idx} style={{ backgroundColor: selectedFiles.has(idx) ? "rgba(79, 70, 229, 0.1)" : "transparent", transition: "all 0.2s" }}>
+                        <td style={{ textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedFiles.has(idx)}
+                            onChange={() => toggleOne(idx)}
+                          />
+                        </td>
+                        <td>
+                          <div className="granule-cell" title={file.file_name} style={{ fontWeight: 500 }}>
+                            {file.file_name}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: "right", color: "var(--text-secondary)" }}>
+                          {file.size_mb != null ? `${file.size_mb.toFixed(2)} MB` : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-      {files.length === 0 && !error && selectedProject && (
-        <div style={{ marginTop: 12 }}>
-          No se encontraron archivos para este proyecto.
+            {!loading && files.length === 0 && selectedProject && !error && (
+              <div style={{ padding: "48px 24px", color: "var(--text-secondary)", textAlign: "center" }}>
+                No se encontraron archivos procesados disponibles para "{selectedProject}".
+              </div>
+            )}
+
+            {!loading && files.length === 0 && !selectedProject && (
+              <div style={{ padding: "64px 24px", color: "var(--text-secondary)", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "16px" }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 15v4c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-4M17 9l-5 5-5-5M12 12.8V2.5" />
+                </svg>
+                <p>Selecciona un proyecto desde la columna izquierda para visualizar y descargar sus resultados.</p>
+              </div>
+            )}
+            
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };

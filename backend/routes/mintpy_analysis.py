@@ -211,7 +211,8 @@ def _make_cfg(
     crop_lat_min: float = None,
     crop_lat_max: float = None,
     crop_lon_min: float = None,
-    crop_lon_max: float = None
+    crop_lon_max: float = None,
+    has_triplets: bool = False
 ) -> str:
     """Generates a MintPy configuration file for SBAS processing.
 
@@ -306,9 +307,9 @@ mintpy.reference.lalo             = {ref_lalo_val}
 mintpy.reference.yx               = {ref_yx_val}
 mintpy.troposphericDelay.method   = height_correlation
 mintpy.deramp                     = linear
-mintpy.topographicResidual        = no
+mintpy.topographicResidual        = yes
 mintpy.topographicResidual.stepFuncDate = no
-mintpy.unwrapError.method         = no
+mintpy.unwrapError.method         = {'bridging+phase_closure' if has_triplets else 'no'}
 mintpy.interferogram.filter.type  = gaussian
 mintpy.interferogram.filter.wavelength = 400
 mintpy.networkInversion.minTempCoh = 0.7
@@ -323,7 +324,8 @@ def _run_mintpy_pipeline(
     crop_lat_min: float = None,
     crop_lat_max: float = None,
     crop_lon_min: float = None,
-    crop_lon_max: float = None
+    crop_lon_max: float = None,
+    has_triplets: bool = False
 ) -> None:
     """Executes the complete MintPy SBAS time-series analysis pipeline.
 
@@ -369,7 +371,7 @@ def _run_mintpy_pipeline(
     mintpy_logger.addHandler(fh)
 
     cfg_path = work_dir / "mintpy.cfg"
-    cfg_path.write_text(_make_cfg(zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max))
+    cfg_path.write_text(_make_cfg(zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets))
 
     cds_url = os.getenv("ERA5_URL", "https://cds.climate.copernicus.eu/api")
     cds_key = os.getenv("ERA5_KEY")
@@ -388,11 +390,16 @@ def _run_mintpy_pipeline(
         steps = [
             "load_data",
             "reference_point",
+        ]
+        if has_triplets:
+            steps.append("correct_unwrap_error")
+        steps.extend([
             "invert_network",
             "correct_troposphere",
             "deramp",
+            "correct_topography",
             "velocity",
-        ]
+        ])
         tsa.run(steps=steps)
 
     except SystemExit as e:
@@ -462,6 +469,7 @@ async def process_interferograms(
 
     try:
         igram_pre_meta = []
+        date_pairs = []
         for upload in files:
             raw  = await upload.read()
             zname = upload.filename or "interferogram.zip"
@@ -471,6 +479,8 @@ async def process_interferograms(
             d1, d2 = _extract_dates(zname)
             if d1 is None or d2 is None:
                 raise HTTPException(status_code=400, detail="Error fechas zip.")
+
+            date_pairs.append((d1, d2))
 
             with zipfile.ZipFile(zip_bytes, "r") as zf:
                 top_level = {p.split('/')[0] for p in zf.namelist() if '/' in p}
@@ -486,6 +496,19 @@ async def process_interferograms(
             })
 
         igram_pre_meta.sort(key=lambda x: (x["date1"], x["date2"], x["filename"]))
+
+        adj = {}
+        for d1, d2 in date_pairs:
+            a, b = min(d1, d2), max(d1, d2)
+            adj.setdefault(a, set()).add(b)
+            adj.setdefault(b, set()).add(a)
+
+        has_triplets = False
+        for d1, d2 in date_pairs:
+            a, b = min(d1, d2), max(d1, d2)
+            if adj.get(a) and adj.get(b) and adj[a].intersection(adj[b]):
+                has_triplets = True
+                break
 
         igram_meta = []
         asc_paths = []
@@ -607,7 +630,7 @@ async def process_interferograms(
                 
             try:
                 # Run ASC pipeline first
-                _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
+                _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
 
                 # If no reference was provided by the user, read the one MintPy auto-selected
                 # for ASC and force DESC to use the exact same geographic point.
@@ -634,7 +657,7 @@ async def process_interferograms(
                             except (ValueError, TypeError):
                                 forced_ref_lat, forced_ref_lon = ref_lat, ref_lon
 
-                _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
+                _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
                 
@@ -795,7 +818,7 @@ async def process_interferograms(
 
         else:
             try:
-                _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)
+                _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
 

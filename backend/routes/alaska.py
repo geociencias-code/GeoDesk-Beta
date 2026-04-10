@@ -365,15 +365,18 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
     valid.sort(key=lambda t: t[2])
 
     pairs: List[Tuple[str, str]] = []
-    for i in range(len(valid) - 1):
-        r1, g1, d1 = valid[i]
-        r2, g2, d2 = valid[i + 1]
-        if body.same_platform:
-            p1, p2 = get_platform(r1), get_platform(r2)
-            if p1 and p2 and p1 != p2:
-                continue
-        if abs((d2 - d1).days) <= body.day_interval:
-            pairs.append((g1, g2))
+    for i in range(len(valid)):
+        for j in range(i + 1, len(valid)):
+            r1, g1, d1 = valid[i]
+            r2, g2, d2 = valid[j]
+            if body.same_platform:
+                p1, p2 = get_platform(r1), get_platform(r2)
+                if p1 and p2 and p1 != p2:
+                    continue
+            if abs((d2 - d1).days) <= body.day_interval:
+                pairs.append((g1, g2))
+            else:
+                break
 
     try:
         hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
@@ -404,9 +407,14 @@ def get_projects():
         hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
         batch = hyp3.find_jobs().filter_jobs(running=False, include_expired=False, succeeded=True)
 
+        import re
         projects = []
         for job in batch.jobs:
-            project_name = job.name
+            if not job.name:
+                continue
+            m = re.match(r'^(.*?)_\d+_\d+_\d+$', job.name)
+            project_name = m.group(1) if m else job.name
+
             if project_name not in [p['name'] for p in projects]:
                 projects.append({"id": job.job_id, "name": project_name})
 
@@ -427,17 +435,27 @@ def get_project_files(body: ProjectFileDownloadRequest):
     try:
         hyp3 = sdk.HyP3(username=ASF_USERNAME, password=ASF_PASSWORD)
 
+        import re
         batch = (
-            hyp3.find_jobs(name=nombre_proyecto, job_type=product_type)
+            hyp3.find_jobs(job_type=product_type)
                 .filter_jobs(running=False, include_expired=False, succeeded=True)
         )
 
-        if len(batch) == 0:
-            raise HTTPException(status_code=404, detail="No se encontraron trabajos disponibles")
+        filtered_jobs = []
+        for job in batch.jobs:
+            if not job.name:
+                continue
+            m = re.match(r'^(.*?)_\d+_\d+_\d+$', job.name)
+            base_name = m.group(1) if m else job.name
+            if base_name == nombre_proyecto:
+                filtered_jobs.append(job)
+
+        if not filtered_jobs:
+            raise HTTPException(status_code=404, detail="No se encontraron trabajos disponibles para este proyecto")
 
         files = []
         index = 1
-        for job in batch.jobs:
+        for job in filtered_jobs:
             job_files = job.files or []
             for f in job_files:
                 name = f.get('name') or f.get('filename') or f.get('key') or 'archivo_sin_nombre'

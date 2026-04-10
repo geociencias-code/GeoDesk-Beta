@@ -198,16 +198,19 @@ def build_pairs(results: Iterable[Any], day_interval: int) -> List[Tuple[str, st
     valid.sort(key=lambda t: t[2])
 
     pairs: List[Tuple[str, str]] = []
-    for i in range(len(valid) - 1):
-        r1, g1, d1 = valid[i]
-        r2, g2, d2 = valid[i + 1]
-        plat1 = get_platform(r1)
-        plat2 = get_platform(r2)
-        if plat1 and plat2 and plat1 != plat2:
-            continue
-        delta_days = abs((d2 - d1).days)
-        if delta_days <= day_interval:
-            pairs.append((g1, g2))
+    for i in range(len(valid)):
+        for j in range(i + 1, len(valid)):
+            r1, g1, d1 = valid[i]
+            r2, g2, d2 = valid[j]
+            plat1 = get_platform(r1)
+            plat2 = get_platform(r2)
+            if plat1 and plat2 and plat1 != plat2:
+                continue
+            delta_days = abs((d2 - d1).days)
+            if delta_days <= day_interval:
+                pairs.append((g1, g2))
+            else:
+                break
 
     return pairs
 

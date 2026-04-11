@@ -541,7 +541,8 @@ async def process_interferograms(
                     mean_phi = np.nanmean(data)
                     if not np.isnan(mean_phi):
                         mean_phi_deg = (np.degrees(mean_phi) + 360) % 360
-                        if 90 < mean_phi_deg < 270: track_dir = "DESC"
+                        if 90 < mean_phi_deg < 270: track_dir = "ASC"
+                        else: track_dir = "DESC"
             
             if track_dir == "ASC": asc_paths.append(new_path)
             else: desc_paths.append(new_path)
@@ -1091,43 +1092,6 @@ async def preview_reference(
                 "is_mintpy_default": (i == 0)
             })
 
-        gnss_lat_target = 13.868
-        gnss_lon_target = -89.601
-        gnss_in_bounds = True
-        
-        if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
-            eps = 1e-4
-            if not (min(crop_lat_min, crop_lat_max) - eps <= gnss_lat_target <= max(crop_lat_min, crop_lat_max) + eps and
-                    min(crop_lon_min, crop_lon_max) - eps <= gnss_lon_target <= max(crop_lon_min, crop_lon_max) + eps):
-                gnss_in_bounds = False
-
-        if gnss_in_bounds:
-            valid_ys, valid_xs = np.where(coh_sum >= 0)
-            if len(valid_ys) > 0:
-                if transformer:
-                    transformer_inv = pyproj.Transformer.from_crs(4326, crs.to_epsg() or 32616, always_xy=True)
-                    gnss_img_lon, gnss_img_lat = transformer_inv.transform(gnss_lon_target, gnss_lat_target)
-                else:
-                    gnss_img_lon, gnss_img_lat = gnss_lon_target, gnss_lat_target
-
-                gnss_col, gnss_row = ~transform * (gnss_img_lon, gnss_img_lat)
-                dist_sq = (valid_ys - gnss_row)**2 + (valid_xs - gnss_col)**2
-                min_idx = np.argmin(dist_sq)
-                best_r, best_c = valid_ys[min_idx], valid_xs[min_idx]
-
-                lon_proj, lat_proj = transform * (best_c + 0.5, best_r + 0.5)
-                if transformer:
-                    lon_val, lat_val = transformer.transform(lon_proj, lat_proj)
-                else:
-                    lon_val, lat_val = lon_proj, lat_proj
-
-                tied_points.append({
-                    "lat": round(float(lat_val), 6),
-                    "lon": round(float(lon_val), 6),
-                    "is_mintpy_default": False,
-                    "is_gnss": True
-                })
-
         return {"seed_points": tied_points}
 
     finally:
@@ -1286,11 +1250,11 @@ async def preview_plan(files: List[UploadFile] = File(...)):
                         mean_phi = np.nanmean(data)
                         if not np.isnan(mean_phi):
                             mean_phi_deg = (np.degrees(mean_phi) + 360) % 360
-                            # Descending heading is ~192 deg, Ascending is ~348 deg
+                            # lv_phi ~90° (Este) = Ascendente, ~270° (Oeste) = Descendente
                             if 90 < mean_phi_deg < 270:
-                                desc_count += 1
-                            else:
                                 asc_count += 1
+                            else:
+                                desc_count += 1
             zip_bytes.unlink()
             
         mode = "2D" if asc_count >= MIN_INTERFEROGRAMS and desc_count >= MIN_INTERFEROGRAMS else "LOS"

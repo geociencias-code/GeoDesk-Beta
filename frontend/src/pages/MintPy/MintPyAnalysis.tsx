@@ -15,7 +15,7 @@ import {
 import { API_URL } from "../../services/api";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle, CircleMarker, Tooltip as LeafletTooltip } from "react-leaflet";
+import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle, CircleMarker, Marker, Tooltip as LeafletTooltip } from "react-leaflet";
 import { EditControl } from "react-leaflet-draw";
 import "leaflet-draw/dist/leaflet.draw.css";
 
@@ -58,6 +58,7 @@ function MapContent({
   drawnBox,
   setDrawnBox,
   deformationData = [],
+  seedPoints = [],
   velMin = 0,
   velMax = 0,
 }: {
@@ -65,6 +66,7 @@ function MapContent({
   drawnBox: BoundsType | null;
   setDrawnBox: (box: BoundsType | null) => void;
   deformationData?: Array<{ lat: number; lon: number; velocidad_mm_yr: number }>;
+  seedPoints?: Array<{ lat: number; lon: number }>;
   velMin?: number;
   velMax?: number;
 }) {
@@ -79,6 +81,20 @@ function MapContent({
       map.fitBounds(leafBounds, { padding: [50, 50] });
     }
   }, [bounds, map]);
+
+  useEffect(() => {
+    const styleId = "seed-pop-keyframes";
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = `@keyframes seed-pop {
+        0%   { transform: scale(0) rotate(-20deg); opacity: 0; }
+        60%  { transform: scale(1.3) rotate(8deg);  opacity: 1; }
+        100% { transform: scale(1)   rotate(0deg);  opacity: 1; }
+      }`;
+      document.head.appendChild(style);
+    }
+  }, []);
 
   const onCreated = (e: DrawEvent) => {
     if (!(e.layer instanceof L.Rectangle)) {
@@ -130,15 +146,29 @@ function MapContent({
           pathOptions={{ color: "#ef4444", weight: 2, fillColor: "#ef4444", fillOpacity: 0.2 }}
         />
       )}
-      <CircleMarker
-        center={[13.868, -89.601]}
-        radius={6}
-        pathOptions={{ color: "#f97316", fillColor: "#fde047", fillOpacity: 0.9, weight: 2 }}
-      >
-        <LeafletTooltip direction="top" offset={[0, -5]} opacity={1}>
-          <span style={{ fontWeight: 600 }}>📡 Estación GNSS (MAGNET)</span>
-        </LeafletTooltip>
-      </CircleMarker>
+      {seedPoints.map((pt, i) => (
+        <Marker
+          key={i}
+          position={[pt.lat, pt.lon]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="
+              font-size: 28px;
+              line-height: 1;
+              filter: drop-shadow(0 2px 6px rgba(0,0,0,0.7));
+              cursor: pointer;
+              animation: seed-pop 0.4s cubic-bezier(.175,.885,.32,1.275) both;
+            ">🌱</div>`,
+            iconAnchor: [14, 28],
+            popupAnchor: [0, -30],
+          })}
+        >
+          <LeafletTooltip direction="top" offset={[0, -32]} opacity={1}>
+            <span style={{ fontWeight: 600 }}>🌱 Punto semilla recomendado</span><br />
+            <span style={{ fontSize: "0.8em", color: "#555" }}>Lat: {pt.lat.toFixed(5)} · Lon: {pt.lon.toFixed(5)}</span>
+          </LeafletTooltip>
+        </Marker>
+      ))}
       {deformationData.map((pt, i) => {
         // Find color based on min/max of current data or just default to blue/red
         return (
@@ -410,7 +440,6 @@ interface SeedPoint {
   lat: number;
   lon: number;
   is_mintpy_default: boolean;
-  is_gnss?: boolean;
 }
 
 interface PlanData {
@@ -977,16 +1006,6 @@ export default function MintPyAnalysis() {
                         Lat: {p.lat.toFixed(4)} <br/>
                         Lon: {p.lon.toFixed(4)}
                       </div>
-                      {p.is_gnss && (
-                        <div style={{ fontSize: "0.75rem", padding: "2px 6px", background: "rgba(245, 158, 11, 0.2)", color: "#fbbf24", borderRadius: "8px", border: "1px solid #f59e0b" }}>
-                          📡 Estación GNSS
-                        </div>
-                      )}
-                      {p.is_mintpy_default && (
-                        <span style={{ fontSize: "0.65rem", padding: "2px 6px", background: "#f59e0b", color: "#fff", borderRadius: "10px" }}>
-                          MintPy Default
-                        </span>
-                      )}
                     </div>
                   );
                 })}
@@ -1044,10 +1063,11 @@ export default function MintPyAnalysis() {
                 style={{ height: "100%", width: "100%", background: "#1a1a1a" }}
               >
                 <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-                <MapContent
+              <MapContent
                   bounds={bounds}
                   drawnBox={drawnBox}
                   setDrawnBox={setDrawnBox}
+                  seedPoints={seedPoints}
                 />
               </MapContainer>
             </div>

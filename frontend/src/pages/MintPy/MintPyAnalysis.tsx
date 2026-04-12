@@ -330,6 +330,7 @@ interface VelocityStats {
   max_ew?: number;
   mean_ew?: number;
   std_ew?: number;
+  phase_closure_skipped?: boolean;
 }
 
 interface VelocityPoint {
@@ -454,6 +455,9 @@ export default function MintPyAnalysis() {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+  const [uploadedCount, setUploadedCount] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState("");
   const [results, setResults] = useState<ProcessingResults | null>(null);
   const [seedPoints, setSeedPoints] = useState<SeedPoint[]>([]);
@@ -478,11 +482,10 @@ export default function MintPyAnalysis() {
     }
   }, [drawnBox]);
 
-  const fetchPlan = async (fileList: File[]) => {
-    if (!fileList.length) return;
+  const fetchPlan = useCallback(async () => {
     try {
       const formData = new FormData();
-      fileList.forEach(f => formData.append("files", f));
+      formData.append("session_id", sessionId);
       const res = await axios.post(`${API_URL}/api/mintpy/preview_plan`, formData);
       if (res.data.success) {
         setPlan(res.data);
@@ -490,13 +493,12 @@ export default function MintPyAnalysis() {
     } catch (err) {
       console.error(err);
     }
-  };
+  }, [sessionId]);
 
-  const fetchBounds = async (fileList: File[]) => {
-    if (!fileList.length) return;
+  const fetchBounds = useCallback(async () => {
     try {
       const formData = new FormData();
-      formData.append("files", fileList[0]);
+      formData.append("session_id", sessionId);
       const res = await axios.post(`${API_URL}/api/mintpy/preview_bounds`, formData);
       if (res.data.success) {
         setBounds(res.data.bounds);
@@ -516,17 +518,40 @@ export default function MintPyAnalysis() {
     } catch (err) {
       console.error(err);
     }
-  };
+  }, [sessionId]);
 
   useEffect(() => {
-    if (files.length > 0 && !busy) {
-      if (!bounds) fetchBounds(files);
-      if (!plan) fetchPlan(files);
+    if (files.length > 0 && uploadedCount === files.length && !busy && !isUploading) {
+      if (!bounds) fetchBounds();
+      if (!plan) fetchPlan();
     } else if (files.length === 0) {
       setPlan(null);
       setBounds(null);
     }
-  }, [files, bounds, plan, busy]);
+  }, [files, bounds, plan, busy, uploadedCount, isUploading, sessionId]);
+
+  useEffect(() => {
+    const queue = files.slice(uploadedCount);
+    if (queue.length > 0 && !isUploading) {
+      const uploadQueue = async () => {
+        setIsUploading(true);
+        try {
+          for (const f of queue) {
+            const formData = new FormData();
+            formData.append("session_id", sessionId);
+            formData.append("file", f, f.name);
+            await axios.post(`${API_URL}/api/mintpy/upload_file`, formData);
+            setUploadedCount((prev) => prev + 1);
+          }
+        } catch (e) {
+          console.error("Upload error", e);
+        } finally {
+          setIsUploading(false);
+        }
+      };
+      uploadQueue();
+    }
+  }, [files, uploadedCount, isUploading, sessionId]);
 
 
 
@@ -569,7 +594,7 @@ export default function MintPyAnalysis() {
 
     try {
       const formData = new FormData();
-      files.forEach((f) => formData.append("files", f, f.name));
+      formData.append("session_id", sessionId);
       if (drawnBox) {
         formData.append("crop_lat_min", drawnBox.lat_min.toString());
         formData.append("crop_lat_max", drawnBox.lat_max.toString());
@@ -614,7 +639,7 @@ export default function MintPyAnalysis() {
 
     try {
       const formData = new FormData();
-      files.forEach((f) => formData.append("files", f, f.name));
+      formData.append("session_id", sessionId);
       if (selectedSeed) {
         formData.append("ref_lat", selectedSeed.lat.toString());
         formData.append("ref_lon", selectedSeed.lon.toString());
@@ -649,6 +674,7 @@ export default function MintPyAnalysis() {
   };
 
   const handleReset = () => {
+    const oldSession = sessionId;
     setFiles([]);
     setResults(null);
     setSeedPoints([]);
@@ -656,6 +682,11 @@ export default function MintPyAnalysis() {
     setBounds(null);
     setMessage("");
     setProgress(0);
+    setUploadedCount(0);
+    setSessionId(crypto.randomUUID());
+    const fd = new FormData();
+    fd.append("session_id", oldSession);
+    axios.post(`${API_URL}/api/mintpy/clear_session`, fd).catch(console.error);
   };
 
   const cropIsValid = drawnBox && bounds ? isCropWithinBounds(drawnBox, bounds) : !!drawnBox;
@@ -764,9 +795,9 @@ export default function MintPyAnalysis() {
                 color: files.length >= MIN_IGRAMS ? "#6ee7b7" : "#fca5a5",
               }}
             >
-              {files.length >= MIN_IGRAMS
-                ? `✅ ${files.length} interferogramas listos`
-                : `⚠️ ${files.length}/${MIN_IGRAMS} — faltan ${MIN_IGRAMS - files.length} más`}
+              {files.length >= MIN_IGRAMS && uploadedCount === files.length
+                ? `✅ ${uploadedCount} interferogramas listos`
+                : isUploading ? `⏳ Subiendo archivo ${uploadedCount + 1} de ${files.length}...` : `⚠️ ${files.length}/${MIN_IGRAMS} — faltan ${MIN_IGRAMS - files.length} más`}
             </div>
           )}
 
@@ -1113,6 +1144,28 @@ export default function MintPyAnalysis() {
                   >↔️ Movimiento Este-Oeste</button>
                 </div>
               )}
+
+              {results && results.stats.phase_closure_skipped && (
+                <div style={{
+                  padding: "16px",
+                  borderRadius: "12px",
+                  background: "rgba(234,179,8,0.1)",
+                  border: "1px solid rgba(234,179,8,0.3)",
+                  color: "#fef08a",
+                  fontSize: "0.85rem",
+                  marginBottom: "4px",
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "12px"
+                }}>
+                  <span style={{ fontSize: "1.4rem" }}>⚠️</span>
+                  <div>
+                    <strong style={{ display: "block", marginBottom: "4px", color: "#fde047" }}>Corrección de Clausura de Fase Omitida</strong>
+                    El área solicitada carece de conexiones de geometría coherente suficiente para calcular la topología de la clausura de fase (Phase Closure). MintPy omitió esta corrección para no corromper la señal. La inversión continuó satisfactoriamente con la fase sin procesar.
+                  </div>
+                </div>
+              )}
+
               {/* Stats cards */}
               <div
                 style={{

@@ -52,6 +52,29 @@ XLSX_FILE    = RESULTS_DIR / "resumen_interferogramas.xlsx"
 MIN_INTERFEROGRAMS = 3
 DATE_RE = re.compile(r"(20\d{6})T")
 
+SESSION_BASE = Path("/tmp/mintpy_sessions")
+SESSION_BASE.mkdir(parents=True, exist_ok=True)
+
+@router.post("/upload_file")
+async def upload_file(session_id: str = Form(...), file: UploadFile = File(...)):
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Falta session_id.")
+    session_dir = SESSION_BASE / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    file_path = session_dir / (file.filename or "interferogram.zip")
+    with file_path.open("wb") as f:
+        while chunk := await file.read(8192 * 1024):  # 8MB chunk buffer
+            f.write(chunk)
+    return {"success": True, "filename": file.filename}
+
+@router.post("/clear_session")
+async def clear_session(session_id: str = Form(...)):
+    if session_id:
+        session_dir = SESSION_BASE / session_id
+        if session_dir.exists():
+            shutil.rmtree(session_dir, ignore_errors=True)
+    return {"success": True}
+
 def generate_quiver_plots(results_list):
     if not results_list:
         return
@@ -328,7 +351,7 @@ def _run_mintpy_pipeline(
     crop_lon_min: float = None,
     crop_lon_max: float = None,
     has_triplets: bool = False
-) -> None:
+) -> bool:
     """Executes the complete MintPy SBAS time-series analysis pipeline.
 
     Orchestrates the full MintPy processing workflow from interferogram loading
@@ -343,7 +366,7 @@ def _run_mintpy_pipeline(
             Should have been populated by unzipping multiple HyP3 product archives.
 
     Returns:
-        None
+        bool: True if the phase closure correction was skipped by MintPy, False otherwise.
 
     Raises:
         ValueError: If the MintPy pipeline fails during any processing step. The
@@ -365,6 +388,7 @@ def _run_mintpy_pipeline(
           6. velocity: Calculate deformation velocities
     """
     warnings.filterwarnings("ignore")
+    skipped_phase_closure = False
 
     log_path = work_dir / "mintpy_run.log"
     mintpy_logger = logging.getLogger("mintpy")
@@ -406,6 +430,23 @@ def _run_mintpy_pipeline(
             
             tsa.run(steps=["correct_unwrap_error"])
 
+            if ifgram_file.exists():
+                with h5py.File(ifgram_file, "r") as f:
+                    if "unwrapPhase_phaseClosure" not in f:
+                        skipped_phase_closure = True
+                        mintpy_cfg = work_dir / "smallbaselineApp.cfg"
+                        if mintpy_cfg.exists():
+                            import re
+                            cfg_text = mintpy_cfg.read_text()
+                            cfg_text = re.sub(
+                                r"mintpy\.unwrapError\.method\s*=\s*phase_closure",
+                                "mintpy.unwrapError.method = no",
+                                cfg_text
+                            )
+                            mintpy_cfg.write_text(cfg_text)
+                            if hasattr(tsa, "_template"):
+                                tsa._template["mintpy.unwrapError.method"] = "no"
+
         # Run remaining steps
         tsa.run(steps=[
             "invert_network",
@@ -442,11 +483,13 @@ def _run_mintpy_pipeline(
         mintpy_logger.removeHandler(fh)
         fh.close()
 
+    return skipped_phase_closure
+
 
 
 @router.post("/process")
 async def process_interferograms(
-    files: List[UploadFile] = File(...),
+    session_id: str = Form(...),
     ref_lat: float = Form(None),
     ref_lon: float = Form(None),
     crop_lat_min: float = Form(None),
@@ -454,7 +497,9 @@ async def process_interferograms(
     crop_lon_min: float = Form(None),
     crop_lon_max: float = Form(None)
 ):
-    if len(files) < MIN_INTERFEROGRAMS:
+    session_dir = SESSION_BASE / session_id
+    zips = list(session_dir.glob("*.zip"))
+    if len(zips) < MIN_INTERFEROGRAMS:
         raise HTTPException(status_code=400, detail=f"Se requieren al menos {MIN_INTERFEROGRAMS} interferogramas.")
 
     # Validate that the reference point (if provided) is inside the crop region.
@@ -483,11 +528,10 @@ async def process_interferograms(
     try:
         igram_pre_meta = []
         date_pairs = []
-        for upload in files:
-            raw  = await upload.read()
-            zname = upload.filename or "interferogram.zip"
+        for zfile in zips:
+            zname = zfile.name
             zip_bytes = zip_dir / zname
-            zip_bytes.write_bytes(raw)
+            shutil.copy(zfile, zip_bytes)
 
             d1, d2 = _extract_dates(zname)
             if d1 is None or d2 is None:
@@ -644,7 +688,7 @@ async def process_interferograms(
                 
             try:
                 # Run ASC pipeline first
-                _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
+                skipped_asc = _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
 
                 # If no reference was provided by the user, read the one MintPy auto-selected
                 # for ASC and force DESC to use the exact same geographic point.
@@ -672,6 +716,7 @@ async def process_interferograms(
                                 forced_ref_lat, forced_ref_lon = ref_lat, ref_lon
 
                 _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
+                skipped_desc = _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
                 
@@ -809,7 +854,7 @@ async def process_interferograms(
                 "min_ew": round(float(np.min(ew_v) if len(ew_v) else 0), 2),
                 "max_ew": round(float(np.max(ew_v) if len(ew_v) else 0), 2),
                 "n_points": len(results),
-                "n_interferograms": len(files),
+                "n_interferograms": len(zips),
                 "date_start": min(all_dates),
                 "date_end": max(all_dates),
                 "era5_successful": (
@@ -820,6 +865,7 @@ async def process_interferograms(
                     (work_dir_asc / "inputs" / "ERA5.h5").exists() or
                     (work_dir_desc / "inputs" / "ERA5.h5").exists()
                 ) else "height_correlation",
+                "phase_closure_skipped": skipped_asc or skipped_desc,
             }
             
             step_s = max(1, len(results) // 1000)
@@ -832,7 +878,7 @@ async def process_interferograms(
 
         else:
             try:
-                _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
+                skipped = _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
 
@@ -881,11 +927,12 @@ async def process_interferograms(
                 "mean": round(float(np.mean(vels_v)), 2),
                 "std": round(float(np.std(vels_v)), 2),
                 "n_points": len(results),
-                "n_interferograms": len(files),
+                "n_interferograms": len(zips),
                 "date_start": min(all_dates),
                 "date_end": max(all_dates),
                 "era5_successful": (work_dir / "inputs/ERA5.h5").exists(),
                 "tropo_method": "ERA5" if (work_dir / "inputs/ERA5.h5").exists() else "height_correlation",
+                "phase_closure_skipped": skipped,
             }
 
             step_s = max(1, len(results) // 1000)
@@ -928,7 +975,7 @@ def get_results():
 
 @router.post("/preview_reference")
 async def preview_reference(
-        files: List[UploadFile] = File(...),
+        session_id: str = Form(...),
         crop_lat_min: float = Form(None),
         crop_lat_max: float = Form(None),
         crop_lon_min: float = Form(None),
@@ -957,7 +1004,9 @@ async def preview_reference(
         files are found, or if there are no valid pixels in the selected area.
     """
     
-    if len(files) < MIN_INTERFEROGRAMS:
+    session_dir = SESSION_BASE / session_id
+    zips = list(session_dir.glob("*.zip"))
+    if len(zips) < MIN_INTERFEROGRAMS:
         raise HTTPException(
             status_code=400,
             detail=f"Se requieren al menos {MIN_INTERFEROGRAMS} interferogramas."
@@ -968,11 +1017,10 @@ async def preview_reference(
     zip_dir.mkdir()
 
     try:
-        for upload in files:
-            raw = await upload.read()
-            zname = upload.filename or "interferogram.zip"
+        for zfile in zips:
+            zname = zfile.name
             zip_bytes = zip_dir / zname
-            zip_bytes.write_bytes(raw)
+            shutil.copy(zfile, zip_bytes)
             with zipfile.ZipFile(zip_bytes, "r") as zf:
                 zf.extractall(zip_dir)
             zip_bytes.unlink()
@@ -1141,7 +1189,7 @@ def export_quiver_up():
 
 
 @router.post("/preview_bounds")
-async def preview_bounds(files: List[UploadFile] = File(...)):
+async def preview_bounds(session_id: str = Form(...)):
     """Extracts geographic bounds from the first HyP3 interferogram ZIP file.
 
     Processes the first uploaded ZIP file containing HyP3 interferogram products,
@@ -1177,19 +1225,20 @@ async def preview_bounds(files: List[UploadFile] = File(...)):
         - DEM files (*_dem.tif) are preferred, but any *.tif file will be used
           if DEM files are not found.
     """
-    if not files:
+    session_dir = SESSION_BASE / session_id
+    zips = list(session_dir.glob("*.zip"))
+    if not zips:
         raise HTTPException(status_code=400, detail="No files provided.")
 
-    file = files[0]
+    file_path = zips[0]
     work_dir = Path(tempfile.mkdtemp(prefix="mintpy_prev_bounds_"))
     zip_dir = work_dir /"hyp3_products"
     zip_dir.mkdir()
 
     try:
-        raw = await file.read()
-        zname = file.filename or "interferogram.zip"
+        zname = file_path.name
         zip_bytes = zip_dir / zname
-        zip_bytes.write_bytes(raw)
+        shutil.copy(file_path, zip_bytes)
 
         with zipfile.ZipFile(zip_bytes, "r") as zf:
             zf.extractall(zip_dir)
@@ -1217,9 +1266,10 @@ async def preview_bounds(files: List[UploadFile] = File(...)):
         shutil.rmtree(work_dir, ignore_errors=True)
 
 @router.post("/preview_plan")
-async def preview_plan(files: List[UploadFile] = File(...)):
-    """Determines how many files are Ascending vs Descending to plan the 2D decomposition."""
-    if not files:
+async def preview_plan(session_id: str = Form(...)):
+    session_dir = SESSION_BASE / session_id
+    zips = list(session_dir.glob("*.zip"))
+    if not zips:
          raise HTTPException(status_code=400, detail="No files provided.")
 
     work_dir = Path(tempfile.mkdtemp(prefix="mintpy_prev_plan_"))
@@ -1229,11 +1279,10 @@ async def preview_plan(files: List[UploadFile] = File(...)):
     asc_count = 0
     desc_count = 0
     try:
-        for file in files:
-            raw = await file.read()
-            zname = file.filename or "interferogram.zip"
+        for zfile in zips:
+            zname = zfile.name
             zip_bytes = zip_dir / zname
-            zip_bytes.write_bytes(raw)
+            shutil.copy(zfile, zip_bytes)
             
             with zipfile.ZipFile(zip_bytes, "r") as zf:
                 phi_files = [f for f in zf.namelist() if f.endswith("_lv_phi.tif")]

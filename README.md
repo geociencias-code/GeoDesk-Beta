@@ -35,7 +35,8 @@ La **interferometría SAR** mide desplazamientos submétricos en la superficie d
 Cuando el radar emite un pulso, este rebota y vuelve con un retardo de ida y vuelta. Este retardo se registra como **fase** ($\phi$) en valores angulares cíclicos de $-\pi$ a $+\pi$. Al sustraer matemáticamente la fase de dos imágenes SLC de la misma trayectoria (formando un **interferograma**), las franjas espectrales resultantes mapean las alteraciones de distancia en la Línea de Visión del radar (LOS).
 
 La fase interferométrica $\Delta\phi$ agrupa múltiples componentes físicas:
-$$ \Delta\phi = \phi_{\text{def}} + \phi_{\text{topo}} + \phi_{\text{atm}} + \phi_{\text{orb}} + \phi_{\text{ruido}} $$
+
+$$\Delta\phi = \phi_{\text{def}} + \phi_{\text{topo}} + \phi_{\text{atm}} + \phi_{\text{orb}} + \phi_{\text{ruido}}$$
 
 Donde:
 - **$\phi_{\text{def}}$** = Señal real de deformación tectónica o geológica.
@@ -45,7 +46,8 @@ Donde:
 - **$\phi_{\text{ruido}}$** = Ruido térmico y decorrelación temporal/espacial.
 
 Mediante el algoritmo del sistema, la topografía se aísla, se "desenrolla" la fase (*unwrapping* a una serie métrica continua), y el residuo se despliega como movimiento en terreno:
-$$ d = \frac{-\Delta\phi \cdot \lambda}{4\pi} $$
+
+$$d = \frac{-\Delta\phi \cdot \lambda}{4\pi}$$
 
 ---
 
@@ -77,12 +79,18 @@ GeoDesk invoca asíncronamente las siguientes capas científicas de MintPy:
 Cuando se provee al motor una ingesta combinada de interferogramas de órbita **Ascendente** (apuntando al Este) y **Descendente** (apuntando al Oeste), GeoDesk resuelve automáticamente la descomposición 2D. Esta técnica aprovecha las matrices de ángulos de incidencia ($\theta$) y acimut ($\alpha$) del sensor para separar la velocidad unidimensional bidireccional (LOS) en vectores puros tridimensionales (Proyectando el vector Norte-Sur muy cercano al plano orbital como despreciable).
 
 Dada una geometría:
-- Componente Ascendente Este-Oeste: $A_{\text{asc\_ew}} = -\sin(\theta_{\text{asc}}) \cos(\alpha_{\text{asc}})$
-- Componente Ascendente Vertical: $A_{\text{asc\_up}} = \cos(\theta_{\text{asc}})$
+
+- Componente Ascendente Este-Oeste: $A_{\text{asc-ew}} = -\sin(\theta_{\text{asc}}) \cos(\alpha_{\text{asc}})$
+- Componente Ascendente Vertical: $A_{\text{asc-up}} = \cos(\theta_{\text{asc}})$
 - La matriz analítica se resuelve mediante la Regla de Cramer iterando el determinante diferencial (Jacobiano) sobre cada píxel superpuesto geográficamente:
-$$ \text{Det} = (A_{\text{asc\_ew}} \cdot A_{\text{desc\_up}}) - (A_{\text{asc\_up}} \cdot A_{\text{desc\_ew}}) $$
-$$ V_{\text{EW}} = \frac{A_{\text{desc\_up}} V_{\text{asc}} - A_{\text{asc\_up}} V_{\text{desc}}}{\text{Det}} $$
-$$ V_{\text{UP}} = \frac{-A_{\text{desc\_ew}} V_{\text{asc}} + A_{\text{asc\_ew}} V_{\text{desc}}}{\text{Det}} $$
+
+$$
+\begin{aligned}
+\text{Det} &= (A_{\text{asc-ew}} \cdot A_{\text{desc-up}}) - (A_{\text{asc-up}} \cdot A_{\text{desc-ew}}) \\
+V_{\text{EW}} &= \frac{A_{\text{desc-up}} V_{\text{asc}} - A_{\text{asc-up}} V_{\text{desc}}}{\text{Det}} \\
+V_{\text{UP}} &= \frac{-A_{\text{desc-ew}} V_{\text{asc}} + A_{\text{asc-ew}} V_{\text{desc}}}{\text{Det}}
+\end{aligned}
+$$
 
 ### Precisión Topológica y Proyección Subpíxel (GDAL/WGS84)
 

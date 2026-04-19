@@ -28,6 +28,7 @@ interface MapComponentProps {
   selectedMarco?: number | null;
   onPathFrameSelect?: (ruta: number, marco: number) => void;
   pathFrameLoading?: boolean;
+  onReset?: () => void;  // Called when user clicks "Reiniciar área"
 }
 
 function toWKT(p1: L.LatLng, p2: L.LatLng): string {
@@ -86,6 +87,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
   selectedMarco = null,
   onPathFrameSelect,
   pathFrameLoading = false,
+  onReset,
 }) => {
   const [anchor, setAnchor] = useState<L.LatLng | null>(null);
   const [live, setLive] = useState<L.LatLng | null>(null);
@@ -133,7 +135,8 @@ const MapComponent: React.FC<MapComponentProps> = ({
     setLive(null);
     setDone(false);
     onPolygonChangeRef.current("");
-  }, []);
+    onReset?.();
+  }, [onReset]);
 
   const aoi = anchor && live ? toLeafletRect(anchor, live) : null;
 

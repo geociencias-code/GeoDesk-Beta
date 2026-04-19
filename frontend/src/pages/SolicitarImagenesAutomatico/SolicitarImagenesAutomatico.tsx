@@ -30,11 +30,12 @@ interface ResponseData {
 }
 
 const SolicitarImagenesAutomatico: React.FC = () => {
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [startDate, setStartDateRaw] = useState("");
+  const [endDate, setEndDateRaw] = useState("");
   const [projectName, setProjectName] = useState("");
   const [dayInterval, setDayInterval] = useState<number>(12);
-  const [flightDirection, setFlightDirection] = useState<"ASCENDING" | "DESCENDING" | "">("");
+  const [flightDirection, setFlightDirectionRaw] = useState<"ASCENDING" | "DESCENDING" | "">("");
+  const [polarization, setPolarizationRaw] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ResponseData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +46,26 @@ const SolicitarImagenesAutomatico: React.FC = () => {
   const [pathFrameLoading, setPathFrameLoading] = useState(false);
   const [ruta, setRuta] = useState<number | null>(null);
   const [marco, setMarco] = useState<number | null>(null);
+
+  // Lock filters once routes are discovered
+  const fieldsLocked = pathFrameOptions.length > 0 || pathFrameLoading;
+  const drawingEnabled = !!flightDirection && !!polarization && !!startDate && !!endDate;
+
+  const resetDiscovery = useCallback(() => {
+    setPathFrameOptions([]);
+    setPathFrameLoading(false);
+    setPolygonWKT("");
+    setRuta(null);
+    setMarco(null);
+    setResult(null);
+    setError(null);
+  }, []);
+
+  // Wrap setters to reset discovery when filters change
+  const setStartDate = useCallback((v: string) => { resetDiscovery(); setStartDateRaw(v); }, [resetDiscovery]);
+  const setEndDate = useCallback((v: string) => { resetDiscovery(); setEndDateRaw(v); }, [resetDiscovery]);
+  const setFlightDirection = useCallback((v: "ASCENDING" | "DESCENDING" | "") => { resetDiscovery(); setFlightDirectionRaw(v); }, [resetDiscovery]);
+  const setPolarization = useCallback((v: string) => { resetDiscovery(); setPolarizationRaw(v); }, [resetDiscovery]);
 
   const discoverPaths = useCallback(async (polygon: string) => {
     if (!polygon) {
@@ -66,25 +87,25 @@ const SolicitarImagenesAutomatico: React.FC = () => {
         beam_mode: "IW",
         processing_level: "SLC",
         flight_direction: flightDirection || undefined,
+        polarization: polarization || undefined,
       };
 
       const res = await axios.post<PathFrameOption[]>(`${API_URL}/api/discover_paths`, body);
       const options = res.data;
       setPathFrameOptions(options);
 
-      // Auto-select preferred option
-      const preferred = options.find(o => o.is_preferred);
-      const autoSelect = preferred ?? options[0];
-      if (autoSelect) {
-        setRuta(autoSelect.ruta);
-        setMarco(autoSelect.marco);
+      // Auto-select the path/frame with the MOST scenes available
+      if (options.length > 0) {
+        const best = options.reduce((a, b) => b.scene_count > a.scene_count ? b : a, options[0]);
+        setRuta(best.ruta);
+        setMarco(best.marco);
       }
     } catch (e) {
       console.error("Error discovering paths:", e);
     } finally {
       setPathFrameLoading(false);
     }
-  }, [startDate, endDate, flightDirection]);
+  }, [startDate, endDate, flightDirection, polarization]);
 
   const handlePolygonChange = useCallback((wkt: string) => {
     setPolygonWKT(wkt);
@@ -153,6 +174,21 @@ const SolicitarImagenesAutomatico: React.FC = () => {
     }
   };
 
+
+  const inputStyle = (locked: boolean): React.CSSProperties => ({
+    width: "100%", padding: "10px", borderRadius: "8px",
+    background: locked ? "rgba(0,0,0,0.2)" : "var(--color-bg-main)",
+    border: `1px solid ${locked ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.1)"}`,
+    color: locked ? "#64748b" : "white",
+    cursor: locked ? "not-allowed" : "auto",
+    opacity: locked ? 0.6 : 1,
+  });
+
+  const missingFilters: string[] = [];
+  if (!flightDirection) missingFilters.push("Dirección de vuelo");
+  if (!polarization)   missingFilters.push("Polarización");
+  if (!startDate || !endDate) missingFilters.push("Fechas");
+
   const canSubmit = !!polygonWKT && ruta != null && marco != null;
 
   return (
@@ -178,13 +214,15 @@ const SolicitarImagenesAutomatico: React.FC = () => {
               1. Configuración de Solicitud
             </label>
 
+            {/* Dates */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: "20px" }}>
               <div>
                 <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>Fecha de inicio:</label>
                 <input
                   type="date" value={startDate}
+                  disabled={fieldsLocked}
                   onChange={(e) => setStartDate(e.target.value)}
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", background: "var(--color-bg-main)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
+                  style={inputStyle(fieldsLocked)}
                   required
                 />
               </div>
@@ -192,23 +230,50 @@ const SolicitarImagenesAutomatico: React.FC = () => {
                 <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>Fecha de fin:</label>
                 <input
                   type="date" value={endDate}
+                  disabled={fieldsLocked}
                   onChange={(e) => setEndDate(e.target.value)}
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", background: "var(--color-bg-main)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
+                  style={inputStyle(fieldsLocked)}
                   required
                 />
               </div>
             </div>
 
+            {/* Flight direction */}
             <div style={{ marginBottom: "20px" }}>
-              <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>Dirección de vuelo:</label>
+              <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
+                Dirección de vuelo: <span style={{ color: "#f87171" }}>*</span>
+              </label>
               <select
                 value={flightDirection}
+                disabled={fieldsLocked}
                 onChange={(e) => setFlightDirection(e.target.value as "" | "ASCENDING" | "DESCENDING")}
-                style={{ width: "100%", padding: "10px", borderRadius: "8px", background: "var(--color-bg-main)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
+                style={inputStyle(fieldsLocked)}
               >
+                <option value="">— Seleccionar —</option>
                 <option value="DESCENDING">DESCENDING</option>
                 <option value="ASCENDING">ASCENDING</option>
-                <option value="">Cualquiera</option>
+              </select>
+            </div>
+
+            {/* Polarization */}
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
+                Polarización: <span style={{ color: "#f87171" }}>*</span>
+              </label>
+              <select
+                value={polarization}
+                disabled={fieldsLocked}
+                onChange={(e) => setPolarization(e.target.value)}
+                style={inputStyle(fieldsLocked)}
+              >
+                <option value="">— Seleccionar —</option>
+                <option value="VV+VH">VV+VH</option>
+                <option value="HH+HV">HH+HV</option>
+                <option value="VV">VV</option>
+                <option value="HH">HH</option>
+                <option value="Dual HH">Dual HH</option>
+                <option value="Dual HV">Dual HV</option>
+                <option value="Dual VH">Dual VH</option>
               </select>
             </div>
 
@@ -217,23 +282,25 @@ const SolicitarImagenesAutomatico: React.FC = () => {
               2. Ruta y Marco Orbital
             </label>
             <p style={{ fontSize: "0.78rem", color: "var(--color-text-muted)", marginBottom: "10px" }}>
-              Dibuja el área y haz clic en un rectángulo del mapa.
+              {drawingEnabled
+                ? "Dibuja el área y la ruta con más imágenes se seleccionará automáticamente."
+                : `Completa primero: ${missingFilters.join(", ")}.`}
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: "20px" }}>
-              <div>
-                <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>Ruta (Path)</label>
-                <div style={{ padding: "10px", borderRadius: "8px", background: "rgba(0,0,0,0.3)", border: `1px solid ${ruta != null ? "rgba(34,197,94,0.5)" : "rgba(255,255,255,0.08)"}`, color: ruta != null ? "#86efac" : "#64748b", fontWeight: ruta != null ? 600 : 400, minHeight: "42px", display: "flex", alignItems: "center" }}>
-                  {pathFrameLoading ? "⏳" : ruta != null ? ruta : "—"}
-                </div>
-              </div>
-              <div>
-                <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>Marco (Frame)</label>
-                <div style={{ padding: "10px", borderRadius: "8px", background: "rgba(0,0,0,0.3)", border: `1px solid ${marco != null ? "rgba(34,197,94,0.5)" : "rgba(255,255,255,0.08)"}`, color: marco != null ? "#86efac" : "#64748b", fontWeight: marco != null ? 600 : 400, minHeight: "42px", display: "flex", alignItems: "center" }}>
-                  {pathFrameLoading ? "⏳" : marco != null ? marco : "—"}
-                </div>
-              </div>
+              {(["Ruta (Path)", "Marco (Frame)"] as const).map((label, i) => {
+                const val = i === 0 ? ruta : marco;
+                return (
+                  <div key={label}>
+                    <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>{label}</label>
+                    <div style={{ padding: "10px", borderRadius: "8px", background: "rgba(0,0,0,0.3)", border: `1px solid ${val != null ? "rgba(34,197,94,0.5)" : "rgba(255,255,255,0.08)"}`, color: val != null ? "#86efac" : "#64748b", fontWeight: val != null ? 600 : 400, minHeight: "42px", display: "flex", alignItems: "center" }}>
+                      {pathFrameLoading ? "⏳" : val != null ? val : "—"}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
+            {/* Project name */}
             <label style={{ color: "var(--color-primary)", fontWeight: "bold", display: "block", marginBottom: "8px" }}>
               3. Proyecto
             </label>
@@ -250,14 +317,14 @@ const SolicitarImagenesAutomatico: React.FC = () => {
               </small>
             </div>
 
+            {/* Day interval */}
             <div style={{ marginBottom: "20px" }}>
               <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
                 Intervalo máximo de días entre imágenes: {dayInterval}
               </label>
               <input
-                type="range" min="6" max="48" step="6" defaultValue={dayInterval}
+                type="range" min="6" max="48" step="6" value={dayInterval}
                 onChange={(e) => setDayInterval(Number(e.target.value))}
-                onInput={(e) => setDayInterval(Number((e.target as HTMLInputElement).value))}
                 style={{ width: "100%", accentColor: "var(--color-primary)" }}
               />
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
@@ -265,9 +332,29 @@ const SolicitarImagenesAutomatico: React.FC = () => {
               </div>
             </div>
 
-            {!canSubmit && (
+            {/* Lock notice */}
+            {fieldsLocked && (
+              <div style={{ marginBottom: "12px", padding: "10px 14px", borderRadius: "8px", background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)", fontSize: "0.8rem", color: "#93c5fd", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span>🔒 Parámetros bloqueados. Haz clic en "Reiniciar área" para modificarlos.</span>
+                <button
+                  type="button"
+                  onClick={resetDiscovery}
+                  style={{ whiteSpace: "nowrap", background: "rgba(59,130,246,0.2)", border: "1px solid rgba(59,130,246,0.4)", color: "#93c5fd", borderRadius: "6px", padding: "4px 10px", cursor: "pointer", fontSize: "0.78rem" }}
+                >
+                  Reiniciar área
+                </button>
+              </div>
+            )}
+
+            {!fieldsLocked && !drawingEnabled && (
               <div style={{ marginBottom: "12px", padding: "10px 14px", borderRadius: "8px", background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.25)", fontSize: "0.8rem", color: "#fde68a" }}>
-                ℹ️ Dibuja el área en el mapa y selecciona una ruta para continuar.
+                ⚠️ Selecciona <strong>{missingFilters.join(" y ")}</strong> para poder dibujar el área.
+              </div>
+            )}
+
+            {!fieldsLocked && drawingEnabled && !canSubmit && (
+              <div style={{ marginBottom: "12px", padding: "10px 14px", borderRadius: "8px", background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.25)", fontSize: "0.8rem", color: "#fde68a" }}>
+                ℹ️ Dibuja el área en el mapa para que se seleccione automáticamente la mejor ruta.
               </div>
             )}
 
@@ -299,19 +386,45 @@ const SolicitarImagenesAutomatico: React.FC = () => {
           <div className="data-widget" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
             <div style={{ padding: "16px 20px", background: "var(--color-bg-card)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
               <span style={{ fontWeight: 600, color: "var(--color-text-main)", fontSize: "0.95rem" }}>
-                {pathFrameOptions.length > 0
-                  ? `${pathFrameOptions.length} ruta(s) disponible(s) — haz clic para seleccionar`
-                  : "1. Dibuja el área de búsqueda"}
+                {pathFrameLoading
+                  ? "⏳ Buscando rutas disponibles…"
+                  : pathFrameOptions.length > 0
+                    ? `${pathFrameOptions.length} ruta(s) — mejor: ${ruta}/${marco} (${(pathFrameOptions.find(o => o.ruta === ruta && o.marco === marco)?.scene_count ?? 0)} imágenes)`
+                    : "Dibuja el área de búsqueda"}
               </span>
               {pathFrameOptions.length > 0 && (
                 <div style={{ marginTop: "6px", display: "flex", gap: "12px", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                  <span><span style={{ color: "#f59e0b" }}>■</span> Preferida</span>
+                  <span><span style={{ color: "#22c55e" }}>■</span> Mejor (auto-seleccionada)</span>
                   <span><span style={{ color: "#3b82f6" }}>■</span> Disponible</span>
-                  <span><span style={{ color: "#22c55e" }}>■</span> Seleccionada</span>
                 </div>
               )}
             </div>
-            <div style={{ minHeight: "400px" }}>
+
+            {/* Progress bar */}
+            {pathFrameLoading && (
+              <div style={{ height: "3px", background: "rgba(16,185,129,0.15)", position: "relative", overflow: "hidden" }}>
+                <div style={{
+                  position: "absolute", top: 0, left: 0, height: "100%", width: "40%",
+                  background: "linear-gradient(90deg, #10b981, #059669)",
+                  animation: "slide-bar 1.4s ease-in-out infinite",
+                }} />
+              </div>
+            )}
+
+            <div style={{ minHeight: "400px", position: "relative" }}>
+              {/* Overlay when drawing not allowed */}
+              {!drawingEnabled && !fieldsLocked && (
+                <div style={{
+                  position: "absolute", inset: 0, zIndex: 1000,
+                  background: "rgba(0,0,0,0.55)", display: "flex", flexDirection: "column",
+                  alignItems: "center", justifyContent: "center", gap: 12, backdropFilter: "blur(2px)",
+                }}>
+                  <span style={{ fontSize: "2rem" }}>🔒</span>
+                  <p style={{ color: "#fde68a", fontWeight: 600, textAlign: "center", maxWidth: 260, margin: 0 }}>
+                    Selecciona primero la dirección de vuelo y la polarización
+                  </p>
+                </div>
+              )}
               <MapComponent
                 onPolygonChange={handlePolygonChange}
                 pathFrameOptions={pathFrameOptions}
@@ -320,6 +433,7 @@ const SolicitarImagenesAutomatico: React.FC = () => {
                 onPathFrameSelect={handlePathFrameSelect}
                 pathFrameLoading={pathFrameLoading}
                 height="400px"
+                onReset={resetDiscovery}
               />
             </div>
           </div>

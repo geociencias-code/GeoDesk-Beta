@@ -87,11 +87,9 @@ const App: React.FC = () => {
     } finally {
       setPathFrameLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate, flightDirection, polarization]);
 
   const handlePolygonChange = useCallback((wkt: string) => {
-    console.log("[App] handlePolygonChange, wkt length:", wkt.length);
     setPolygonWKT(wkt);
     discoverPaths(wkt);
   }, [discoverPaths]);
@@ -103,6 +101,29 @@ const App: React.FC = () => {
     setLastCount(0);
   }, []);
 
+  // Called by "Reiniciar área" — clears routes & polygon but KEEPS all filter values
+  const resetDiscovery = useCallback(() => {
+    setPathFrameOptions([]);
+    setPathFrameLoading(false);
+    setPolygonWKT("");
+    setRuta(null);
+    setMarco(null);
+    setScenes([]);
+    setLastCount(0);
+    setError(null);
+  }, []);
+
+  // Changing any filter while routes are shown should reset so user re-draws
+  const handleSetStartDate = useCallback((v: string) => { resetDiscovery(); setStartDate(v); }, [resetDiscovery]);
+  const handleSetEndDate = useCallback((v: string) => { resetDiscovery(); setEndDate(v); }, [resetDiscovery]);
+  const handleSetFlightDirection = useCallback((v: "ASCENDING" | "DESCENDING" | "") => { resetDiscovery(); setFlightDirection(v); }, [resetDiscovery]);
+  const handleSetPolarization = useCallback((v: string) => { resetDiscovery(); setPolarization(v); }, [resetDiscovery]);
+  const handleSetDayInterval = useCallback((v: number) => { setDayInterval(v); }, []);
+
+  // Fields are locked once routes have been discovered
+  const fieldsLocked = pathFrameOptions.length > 0 || pathFrameLoading;
+  // Drawing only allowed when all required filters are filled
+  const drawingEnabled = !!flightDirection && !!polarization && !!startDate && !!endDate;
 
   const handleChangeSection = (section: string) => {
     setActiveSection(section);
@@ -185,16 +206,16 @@ const App: React.FC = () => {
               setPolygonWKT={handlePolygonChange}
               startDate={startDate}
               endDate={endDate}
-              setStartDate={setStartDate}
-              setEndDate={setEndDate}
+              setStartDate={handleSetStartDate}
+              setEndDate={handleSetEndDate}
               ruta={ruta}
               marco={marco}
               flightDirection={flightDirection}
-              setFlightDirection={setFlightDirection}
+              setFlightDirection={handleSetFlightDirection}
               polarization={polarization}
-              setPolarization={setPolarization}
+              setPolarization={handleSetPolarization}
               dayInterval={dayInterval}
-              setDayInterval={setDayInterval}
+              setDayInterval={handleSetDayInterval}
               onSearch={searchScenes}
               loading={loading}
               error={error}
@@ -202,6 +223,9 @@ const App: React.FC = () => {
               pathFrameOptions={pathFrameOptions}
               pathFrameLoading={pathFrameLoading}
               onPathFrameSelect={handlePathFrameSelect}
+              fieldsLocked={fieldsLocked}
+              drawingEnabled={drawingEnabled}
+              onResetDiscovery={resetDiscovery}
             />
             <SentinelDashboard
               scenes={scenes}

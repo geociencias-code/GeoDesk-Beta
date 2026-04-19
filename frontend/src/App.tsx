@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Navbar from "./components/Navbar";
 import BarraSuperior from "./components/BarraSuperior";
 
 
 import AlaskaSearch from "./pages/Alaska/AlaskaSearch";
+import type { PathFrameOption } from "./pages/Alaska/MapComponent";
 import SentinelDashboard from "./pages/Alaska/SentinelDashboard";
 import DownloadFiles from "./pages/Alaska/DownloadFiles";
 import SolicitarImagenesAutomatico from "./pages/SolicitarImagenesAutomatico/SolicitarImagenesAutomatico";
@@ -30,18 +31,78 @@ const App: React.FC = () => {
 
   const [startDate, setStartDate] = useState("2025-01-01");
   const [endDate, setEndDate] = useState("2025-01-15");
-  const [ruta, setRuta] = useState<number>(128);
-  const [marco, setMarco] = useState<number>(547);
+  const [ruta, setRuta] = useState<number | null>(null);
+  const [marco, setMarco] = useState<number | null>(null);
   const [flightDirection, setFlightDirection] = useState<
     "ASCENDING" | "DESCENDING" | ""
   >("");
   const [polarization, setPolarization] = useState<string>("");
   const [dayInterval, setDayInterval] = useState<number>(12);
 
+  // Path/frame discovery state
+  const [pathFrameOptions, setPathFrameOptions] = useState<PathFrameOption[]>([]);
+  const [pathFrameLoading, setPathFrameLoading] = useState(false);
+
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastCount, setLastCount] = useState<number>(0);
+
+  // Discover available (ruta, marco) pairs for the drawn polygon
+  const discoverPaths = useCallback(async (polygon: string) => {
+    console.log("[App] discoverPaths called, polygon length:", polygon.length);
+    if (!polygon) {
+      setPathFrameOptions([]);
+      setRuta(null);
+      setMarco(null);
+      return;
+    }
+    try {
+      setPathFrameLoading(true);
+      setPathFrameOptions([]);
+      setRuta(null);
+      setMarco(null);
+      const body = {
+        polygon,
+        start_date: `${startDate}T00:00:00Z`,
+        end_date: `${endDate}T23:59:59Z`,
+        beam_mode: "IW",
+        processing_level: "SLC",
+        flight_direction: flightDirection || undefined,
+        polarization: polarization || undefined,
+      };
+      console.log("[App] calling /api/discover_paths...");
+      const res = await api.post<PathFrameOption[]>("/api/discover_paths", body);
+      const options = res.data;
+      console.log("[App] discover_paths returned", options.length, "options");
+      setPathFrameOptions(options);
+      // Auto-select the preferred option
+      const preferred = options.find(o => o.is_preferred) ?? options[0];
+      if (preferred) {
+        setRuta(preferred.ruta);
+        setMarco(preferred.marco);
+      }
+    } catch (e) {
+      console.error("[App] discover_paths error:", e);
+    } finally {
+      setPathFrameLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDate, endDate, flightDirection, polarization]);
+
+  const handlePolygonChange = useCallback((wkt: string) => {
+    console.log("[App] handlePolygonChange, wkt length:", wkt.length);
+    setPolygonWKT(wkt);
+    discoverPaths(wkt);
+  }, [discoverPaths]);
+
+  const handlePathFrameSelect = useCallback((r: number, m: number) => {
+    setRuta(r);
+    setMarco(m);
+    setScenes([]);
+    setLastCount(0);
+  }, []);
+
 
   const handleChangeSection = (section: string) => {
     setActiveSection(section);
@@ -74,9 +135,9 @@ const App: React.FC = () => {
       setLoading(true);
 
       if (!polygonWKT)
-        throw new Error(
-          "Dibuja y cierra un polígono (doble clic) en el mapa."
-        );
+        throw new Error("Dibuja el área de interés en el mapa.");
+      if (ruta == null || marco == null)
+        throw new Error("Selecciona una ruta/marco en el mapa haciendo clic en uno de los rectángulos.");
 
       const body = {
         polygon: polygonWKT,
@@ -86,7 +147,7 @@ const App: React.FC = () => {
         marco,
         beam_mode: "IW",
         processing_level: "SLC",
-        day_interval: 12,
+        day_interval: dayInterval,
         same_platform: true,
         flight_direction: flightDirection || undefined,
         polarization: polarization || undefined,
@@ -121,15 +182,13 @@ const App: React.FC = () => {
           <div>
             <AlaskaSearch
               polygonWKT={polygonWKT}
-              setPolygonWKT={setPolygonWKT}
+              setPolygonWKT={handlePolygonChange}
               startDate={startDate}
               endDate={endDate}
               setStartDate={setStartDate}
               setEndDate={setEndDate}
               ruta={ruta}
               marco={marco}
-              setRuta={setRuta}
-              setMarco={setMarco}
               flightDirection={flightDirection}
               setFlightDirection={setFlightDirection}
               polarization={polarization}
@@ -140,12 +199,15 @@ const App: React.FC = () => {
               loading={loading}
               error={error}
               lastCount={lastCount}
+              pathFrameOptions={pathFrameOptions}
+              pathFrameLoading={pathFrameLoading}
+              onPathFrameSelect={handlePathFrameSelect}
             />
             <SentinelDashboard
               scenes={scenes}
               backendUrl={API_URL}
-              ruta={ruta}
-              marco={marco}
+              ruta={ruta ?? undefined}
+              marco={marco ?? undefined}
               dayInterval={dayInterval}
             />
           </div>

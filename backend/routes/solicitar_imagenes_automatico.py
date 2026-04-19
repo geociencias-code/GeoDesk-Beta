@@ -34,8 +34,11 @@ POLYGON = (
     "))"
 )
 
-RUTA = 128
-MARCO = 547
+RUTA_DEFAULT_DESCENDING = 128
+MARCO_DEFAULT_DESCENDING = 547
+RUTA_DEFAULT_ASCENDING = 63
+MARCO_DEFAULT_ASCENDING = 37   # frame 37 covers full El Salvador on asc path 63
+
 BEAM_MODE = "IW"
 PROC_LEVEL = "SLC"
 PLATFORM = "Sentinel-1"
@@ -57,6 +60,9 @@ class SolicitudAutoIn:
     output_folder: Optional[str] = None
     flight_direction: Optional[str] = "DESCENDING"
     day_interval: int = 12
+    ruta: Optional[int] = None         # Set by frontend via map selection
+    marco: Optional[int] = None        # Set by frontend via map selection
+    polygon: Optional[str] = None       # AOI from map; falls back to El Salvador bbox
 
 
 @dataclass
@@ -294,8 +300,19 @@ def solicitar_imagenes_automatico(payload: SolicitudAutoIn) -> Dict[str, Any]:
     start_iso = _iso_utc(start_dt)
     end_iso = _iso_utc(end_dt)
     
-    ruta_val = 63 if payload.flight_direction == "ASCENDING" else 128
-    marco_val = 39 if payload.flight_direction == "ASCENDING" else 547
+    ruta_val = payload.ruta
+    marco_val = payload.marco
+
+    # Fall back to preferred defaults if not provided by frontend
+    if ruta_val is None or marco_val is None:
+        if payload.flight_direction == "ASCENDING":
+            ruta_val = RUTA_DEFAULT_ASCENDING
+            marco_val = MARCO_DEFAULT_ASCENDING
+        else:
+            ruta_val = RUTA_DEFAULT_DESCENDING
+            marco_val = MARCO_DEFAULT_DESCENDING
+
+    aoi_polygon = payload.polygon or POLYGON
 
     results = search_scenes(start_iso, end_iso, ruta=ruta_val, marco=marco_val, direction=payload.flight_direction)
 
@@ -317,7 +334,7 @@ def solicitar_imagenes_automatico(payload: SolicitudAutoIn) -> Dict[str, Any]:
         "project": project_name,
         "time_window": asdict(TimeWindow(start=start_iso, end=end_iso)),
         "aoi": {
-            "polygon_wkt": POLYGON,
+            "polygon_wkt": aoi_polygon,
             "relative_orbit": ruta_val,
             "frame": marco_val,
             "beam_mode": BEAM_MODE,

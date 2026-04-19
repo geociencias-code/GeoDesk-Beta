@@ -34,6 +34,14 @@ else:
 router = APIRouter()
 
 
+# Preferred default (ruta, marco) for each flight direction
+# Values verified against live ASF data (pathNumber / frameNumber)
+PREFERRED_PATHS: Dict[Optional[str], Tuple[int, int]] = {
+    "DESCENDING": (128, 547),
+    "ASCENDING":  (63, 37),   # frame 37 covers full El Salvador on asc path 63
+    None: (128, 547),
+}
+
 class SearchParams(BaseModel):
     polygon: str = Field(
         default=(
@@ -57,6 +65,31 @@ class SearchParams(BaseModel):
     polarization: Optional[str] = None # VV, HH, VV+VH, HH+HV
     day_interval: int = 12
     same_platform: bool = True
+
+
+class DiscoverPathsRequest(BaseModel):
+    polygon: str
+    start_date: str = "2025-01-01T00:00:00Z"
+    end_date: str   = "2025-01-15T23:59:59Z"
+    beam_mode: str = "IW"
+    processing_level: str = "SLC"
+    flight_direction: Optional[str] = None
+    polarization: Optional[str] = None
+
+
+class BBox(BaseModel):
+    lat_min: float
+    lat_max: float
+    lon_min: float
+    lon_max: float
+
+
+class PathFrameOption(BaseModel):
+    ruta: int
+    marco: int
+    scene_count: int
+    bbox: BBox
+    is_preferred: bool
 
 class SceneOut(BaseModel):
     granule: str
@@ -169,13 +202,15 @@ def acquire_date(scene: Any) -> Optional[datetime]:
         return None
 
 def get_ruta(scene: Any) -> Optional[int]:
-    v = _get_prop(scene, "relativeOrbit", "pathNumber", "path")
+    # ASF returns pathNumber in properties; relativeOrbit is a search param name only
+    v = _get_prop(scene, "pathNumber", "relativeOrbit", "path")
     try: return int(v) if v is not None else None
     except (ValueError, TypeError):
         return None
 
 def get_marco(scene: Any) -> Optional[int]:
-    v = _get_prop(scene, "frame", "FRAME")
+    # ASF returns frameNumber in properties; "frame" is a search param name only
+    v = _get_prop(scene, "frameNumber", "frame", "FRAME")
     try: return int(v) if v is not None else None
     except (ValueError, TypeError):
         return None
@@ -287,11 +322,85 @@ def api_update_project_name(new_name: str):
 def health():
     return {"ok": True, "service": "Sentinel-1 HyP3 API"}
 
+@router.post("/api/discover_paths", response_model=List[PathFrameOption])
+def api_discover_paths(params: DiscoverPathsRequest):
+    """Search ASF without path/frame filters and return every unique
+    (ruta, marco) combination found in the results, with each combination's
+    aggregate bounding box and a flag for the preferred default."""
+    try:
+        kwargs: Dict[str, Any] = dict(
+            platform="Sentinel-1",
+            processingLevel=params.processing_level,
+            beamMode=params.beam_mode,
+            intersectsWith=params.polygon,
+            start=params.start_date,
+            end=params.end_date,
+        )
+        if params.flight_direction:
+            kwargs["flightDirection"] = params.flight_direction
+        if params.polarization:
+            kwargs["polarization"] = params.polarization
+
+        results = list(asf.search(**kwargs))
+
+        # Group by (ruta, marco)
+        groups: Dict[Tuple[int, int], Dict[str, Any]] = {}
+        for scene in results:
+            r = get_ruta(scene)
+            m = get_marco(scene)
+            if r is None or m is None:
+                continue
+            key = (r, m)
+            # Attempt to get spatial bounds from the scene
+            try:
+                bb = scene.geometry  # GeoJSON-like dict or object
+                if hasattr(bb, "get"):
+                    coords = bb.get("coordinates", [[]])[0]
+                elif hasattr(bb, "coordinates"):
+                    coords = bb.coordinates[0]
+                else:
+                    coords = []
+                lons = [c[0] for c in coords]
+                lats = [c[1] for c in coords]
+            except Exception:
+                lons, lats = [], []
+
+            if key not in groups:
+                groups[key] = {"count": 0, "lons": [], "lats": []}
+            groups[key]["count"] += 1
+            groups[key]["lons"].extend(lons)
+            groups[key]["lats"].extend(lats)
+
+        preferred_pair = PREFERRED_PATHS.get(params.flight_direction, PREFERRED_PATHS[None])
+
+        options: List[PathFrameOption] = []
+        for (ruta_val, marco_val), data in sorted(groups.items()):
+            lons = data["lons"]
+            lats = data["lats"]
+            if lons and lats:
+                bbox = BBox(
+                    lat_min=min(lats), lat_max=max(lats),
+                    lon_min=min(lons), lon_max=max(lons),
+                )
+            else:
+                # Fallback: use the search polygon's rough bbox if geometry missing
+                bbox = BBox(lat_min=13.0, lat_max=14.6, lon_min=-90.2, lon_max=-87.6)
+
+            options.append(PathFrameOption(
+                ruta=ruta_val,
+                marco=marco_val,
+                scene_count=data["count"],
+                bbox=bbox,
+                is_preferred=(ruta_val, marco_val) == preferred_pair,
+            ))
+
+        return options
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en discover_paths: {e}")
+
+
 @router.post("/api/search", response_model=List[SceneOut])
 def api_search(params: SearchParams):
-    if params.flight_direction == "ASCENDING" and params.ruta == 128 and params.marco == 547:
-        params.ruta = 63
-        params.marco = 39
     try:
         res = search_scenes(params)
         out: List[SceneOut] = []
@@ -305,7 +414,7 @@ def api_search(params: SearchParams):
                 beam_mode=params.beam_mode,
                 flight_direction=params.flight_direction,
                 polarization=params.polarization,
-                download_url=None,#??
+                download_url=None,
             ))
         out.sort(key=lambda x: (x.date_utc or "", x.granule))
         return out

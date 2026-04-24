@@ -59,6 +59,17 @@ SESSION_BASE.mkdir(parents=True, exist_ok=True)
 async def upload_file(session_id: str = Form(...), file: UploadFile = File(...)):
     if not session_id:
         raise HTTPException(status_code=400, detail="Falta session_id.")
+        
+    try:
+        import time
+        now = time.time()
+        for session_path in SESSION_BASE.iterdir():
+            if session_path.is_dir() and session_path.name != session_id:
+                if now - session_path.stat().st_mtime > 86400:
+                    shutil.rmtree(session_path, ignore_errors=True)
+    except Exception as e:
+        logging.warning(f"Error limpiando sesiones antiguas: {e}")
+
     session_dir = SESSION_BASE / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
     file_path = session_dir / (file.filename or "interferogram.zip")
@@ -495,7 +506,8 @@ async def process_interferograms(
     crop_lat_min: float = Form(None),
     crop_lat_max: float = Form(None),
     crop_lon_min: float = Form(None),
-    crop_lon_max: float = Form(None)
+    crop_lon_max: float = Form(None),
+    selected_mode: str = Form(None)
 ):
     session_dir = SESSION_BASE / session_id
     zips = list(session_dir.glob("*.zip"))
@@ -600,6 +612,22 @@ async def process_interferograms(
             })
 
         is_2d_mode = len(asc_paths) >= MIN_INTERFEROGRAMS and len(desc_paths) >= MIN_INTERFEROGRAMS
+        
+        if selected_mode == "LOS ASC":
+            is_2d_mode = False
+            for p in desc_paths:
+                shutil.rmtree(p)
+            desc_paths = []
+            igram_meta = [m for m in igram_meta if m["track"] == "ASC"]
+        elif selected_mode == "LOS DESC":
+            is_2d_mode = False
+            for p in asc_paths:
+                shutil.rmtree(p)
+            asc_paths = []
+            igram_meta = [m for m in igram_meta if m["track"] == "DESC"]
+        elif selected_mode == "2D":
+            if not is_2d_mode:
+                raise HTTPException(status_code=400, detail="No hay suficientes interferogramas para 2D.")
         
         def get_igram_stats(ts_dir, valid_msk, interp_args=None, prefix=""):
             stats_list = []
@@ -854,7 +882,7 @@ async def process_interferograms(
                 "min_ew": round(float(np.min(ew_v) if len(ew_v) else 0), 2),
                 "max_ew": round(float(np.max(ew_v) if len(ew_v) else 0), 2),
                 "n_points": len(results),
-                "n_interferograms": len(zips),
+                "n_interferograms": len(igram_meta),
                 "date_start": min(all_dates),
                 "date_end": max(all_dates),
                 "era5_successful": (
@@ -927,7 +955,7 @@ async def process_interferograms(
                 "mean": round(float(np.mean(vels_v)), 2),
                 "std": round(float(np.std(vels_v)), 2),
                 "n_points": len(results),
-                "n_interferograms": len(zips),
+                "n_interferograms": len(igram_meta),
                 "date_start": min(all_dates),
                 "date_end": max(all_dates),
                 "era5_successful": (work_dir / "inputs/ERA5.h5").exists(),
@@ -1021,6 +1049,10 @@ async def preview_reference(
             zname = zfile.name
             zip_bytes = zip_dir / zname
             shutil.copy(zfile, zip_bytes)
+            if not zipfile.is_zipfile(zip_bytes):
+                logging.warning(f"preview_reference: archivo ignorado (no es ZIP válido): {zname}")
+                zip_bytes.unlink()
+                continue
             with zipfile.ZipFile(zip_bytes, "r") as zf:
                 zf.extractall(zip_dir)
             zip_bytes.unlink()
@@ -1032,59 +1064,89 @@ async def preview_reference(
                 detail="No se encontraron archivos de coherencia en el ZIP."
             )
 
-        lefts, bottoms, rights, tops = [], [], [], []
-        crs = None
+        from rasterio.warp import transform_bounds, reproject, Resampling
+
+        lefts_ll, bottoms_ll, rights_ll, tops_ll = [], [], [], []
 
         for t in tifs:
             with rasterio.open(str(t)) as src:
-                lefts.append(src.bounds.left)
-                bottoms.append(src.bounds.bottom)
-                rights.append(src.bounds.right)
-                tops.append(src.bounds.top)
-                if crs is None:
-                    crs = src.crs
+                l, b, r, top_ = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+                lefts_ll.append(l)
+                bottoms_ll.append(b)
+                rights_ll.append(r)
+                tops_ll.append(top_)
 
-        common_bounds = (max(lefts), max(bottoms), min(rights), min(tops))
+        common_bounds_ll = (max(lefts_ll), max(bottoms_ll), min(rights_ll), min(tops_ll))
+        
+        # Check for empty intersection
+        if common_bounds_ll[2] <= common_bounds_ll[0] or common_bounds_ll[3] <= common_bounds_ll[1]:
+            raise HTTPException(
+                status_code=400, 
+                detail="No hay solapamiento geográfico entre las imágenes. Verifica que el área de estudio sea la misma."
+            )
 
-        with rasterio.open(str(tifs[0])) as src:
-            window = rasterio.windows.from_bounds(*common_bounds, transform=src.transform)
-            win_width, win_height = int(window.width), int(window.height)
-            transform = rasterio.windows.transform(window, src.transform)
+        with rasterio.open(str(tifs[0])) as src0:
+            # Replant bounding box in native CRS of the chosen "master" grid
+            l0, b0, r0, t0 = transform_bounds("EPSG:4326", src0.crs, *common_bounds_ll)
+            common_bounds_src0 = (l0, b0, r0, t0)
+            
+            # Use this bounds for a master window
+            window = rasterio.windows.from_bounds(*common_bounds_src0, transform=src0.transform)
+            win_col_off, win_row_off = int(np.floor(window.col_off)), int(np.floor(window.row_off))
+            win_width, win_height = int(np.ceil(window.width)), int(np.ceil(window.height))
+            
+            exact_window = Window(win_col_off, win_row_off, win_width, win_height)
+            transform = rasterio.windows.transform(exact_window, src0.transform)
+            target_crs = src0.crs
+            crs = src0.crs # expected downstream by transformer check
 
         coh_sum = np.zeros((win_height, win_width), dtype=np.float32)
         # Build maskConnComp: pixels where ALL interferograms have non-zero phase.
         # This replicates what MintPy does so we never suggest a masked seed.
         unw_tifs = list(zip_dir.glob("*/*_unw_phase.tif"))
         conn_mask = np.ones((win_height, win_width), dtype=bool)
-        exact_window = None
 
         for t in unw_tifs:
             with rasterio.open(str(t)) as src:
-                if exact_window is None:
-                    t_window = rasterio.windows.from_bounds(*common_bounds, transform=src.transform)
-                    t_win_col, t_win_row = int(t_window.col_off), int(t_window.row_off)
-                    exact_window = Window(t_win_col, t_win_row, win_width, win_height)
-                data_unw = src.read(1, window=exact_window).astype(np.float32)
+                # Read via reprojection to robustly cast mismatched grids into our master grid
+                dest_data = np.zeros((win_height, win_width), dtype=np.float32)
+                reproject(
+                    source=rasterio.band(src, 1),
+                    destination=dest_data,
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=target_crs,
+                    resampling=Resampling.nearest,
+                    dst_nodata=np.nan
+                )
 
                 # MintPy masked logic: drop pixel if NaN or exactly 0.0 in ANY unw_phase file
-                valid_phase = ~np.isnan(data_unw)
+                valid_phase = ~np.isnan(dest_data)
                 if src.nodata is not None:
-                    valid_phase &= (data_unw != src.nodata)
-                valid_phase &= (data_unw != 0.0)
+                    valid_phase &= (dest_data != src.nodata)
+                valid_phase &= (dest_data != 0.0)
                 conn_mask &= valid_phase
 
         for t in tifs:
             with rasterio.open(str(t)) as src:
-                t_window = rasterio.windows.from_bounds(*common_bounds, transform=src.transform)
-                t_win_col, t_win_row = int(t_window.col_off), int(t_window.row_off)
-                exact_window = Window(t_win_col, t_win_row, win_width, win_height)
+                dest_data = np.zeros((win_height, win_width), dtype=np.float32)
+                reproject(
+                    source=rasterio.band(src, 1),
+                    destination=dest_data,
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=target_crs,
+                    resampling=Resampling.bilinear,
+                    dst_nodata=np.nan
+                )
                 
-                data = src.read(1, window=exact_window).astype(np.float32)
                 if src.nodata is not None:
-                    data[data == src.nodata] = np.nan
+                    dest_data[dest_data == src.nodata] = np.nan
 
-                valid = ~np.isnan(data)
-                coh_sum[valid] += data[valid]
+                valid = ~np.isnan(dest_data)
+                coh_sum[valid] += dest_data[valid]
 
         # Apply ConnComp mask so we never suggest a pixel that MintPy will mask out.
         coh_sum[~conn_mask] = -1.0
@@ -1143,9 +1205,7 @@ async def preview_reference(
         return {"seed_points": tied_points}
 
     finally:
-        # TEMP DEBUG: Do not remove work_dir so we can inspect it inside the docker container
-        # shutil.rmtree(work_dir, ignore_errors=True)
-        pass
+        shutil.rmtree(work_dir, ignore_errors=True)
 @router.get("/export_csv")
 def export_csv():
     if not CSV_FILE.exists():
@@ -1240,6 +1300,8 @@ async def preview_bounds(session_id: str = Form(...)):
         zip_bytes = zip_dir / zname
         shutil.copy(file_path, zip_bytes)
 
+        if not zipfile.is_zipfile(zip_bytes):
+            raise HTTPException(status_code=400, detail=f"El archivo '{zname}' no es un ZIP válido (puede estar incompleto).")
         with zipfile.ZipFile(zip_bytes, "r") as zf:
             zf.extractall(zip_dir)
         zip_bytes.unlink()
@@ -1283,6 +1345,10 @@ async def preview_plan(session_id: str = Form(...)):
             zname = zfile.name
             zip_bytes = zip_dir / zname
             shutil.copy(zfile, zip_bytes)
+            if not zipfile.is_zipfile(zip_bytes):
+                logging.warning(f"preview_plan: archivo ignorado (no es ZIP válido): {zname}")
+                zip_bytes.unlink()
+                continue
             
             with zipfile.ZipFile(zip_bytes, "r") as zf:
                 phi_files = [f for f in zf.namelist() if f.endswith("_lv_phi.tif")]
@@ -1306,12 +1372,22 @@ async def preview_plan(session_id: str = Form(...)):
                                 desc_count += 1
             zip_bytes.unlink()
             
-        mode = "2D" if asc_count >= MIN_INTERFEROGRAMS and desc_count >= MIN_INTERFEROGRAMS else "LOS"
+        available_modes = []
+        if asc_count >= MIN_INTERFEROGRAMS and desc_count >= MIN_INTERFEROGRAMS:
+            available_modes = ["2D", "LOS ASC", "LOS DESC"]
+        else:
+            if asc_count >= MIN_INTERFEROGRAMS:
+                available_modes.append("LOS ASC")
+            if desc_count >= MIN_INTERFEROGRAMS:
+                available_modes.append("LOS DESC")
+                
+        mode = "2D" if "2D" in available_modes else (available_modes[0] if available_modes else "LOS")
         return {
             "success": True,
             "asc_count": asc_count,
             "desc_count": desc_count,
-            "mode": mode
+            "mode": mode,
+            "available_modes": available_modes
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error previewing plan: {str(e)}")

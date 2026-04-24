@@ -448,6 +448,7 @@ interface PlanData {
   asc_count: number;
   desc_count: number;
   mode: "2D" | "LOS";
+  available_modes?: string[];
 }
 
 export default function MintPyAnalysis() {
@@ -466,6 +467,7 @@ export default function MintPyAnalysis() {
   const MIN_IGRAMS = 3;
 
   const [plan, setPlan] = useState<PlanData | null>(null);
+  const [selectedMode, setSelectedMode] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"UP" | "EW">("UP");
 
   const [bounds, setBounds] = useState<BoundsType | null>(null);
@@ -527,8 +529,19 @@ export default function MintPyAnalysis() {
     } else if (files.length === 0) {
       setPlan(null);
       setBounds(null);
+      setSelectedMode(null);
     }
-  }, [files, bounds, plan, busy, uploadedCount, isUploading, sessionId]);
+  }, [files, bounds, plan, busy, uploadedCount, isUploading, sessionId, fetchBounds, fetchPlan]);
+
+  useEffect(() => {
+    if (plan) {
+      if (plan.available_modes && plan.available_modes.length > 0) {
+        setSelectedMode(plan.available_modes.includes("2D") ? "2D" : plan.available_modes[0]);
+      } else {
+        setSelectedMode(plan.mode);
+      }
+    }
+  }, [plan]);
 
   useEffect(() => {
     const queue = files.slice(uploadedCount);
@@ -640,6 +653,9 @@ export default function MintPyAnalysis() {
     try {
       const formData = new FormData();
       formData.append("session_id", sessionId);
+      if (selectedMode) {
+        formData.append("selected_mode", selectedMode);
+      }
       if (selectedSeed) {
         formData.append("ref_lat", selectedSeed.lat.toString());
         formData.append("ref_lon", selectedSeed.lon.toString());
@@ -678,6 +694,10 @@ export default function MintPyAnalysis() {
     setFiles([]);
     setResults(null);
     setSeedPoints([]);
+    setSelectedSeed(null);
+    setBounds(null);
+    setPlan(null);
+    setSelectedMode(null);
     setSelectedSeed(null);
     setBounds(null);
     setMessage("");
@@ -807,17 +827,17 @@ export default function MintPyAnalysis() {
                 marginBottom: "12px",
                 padding: "8px 12px",
                 borderRadius: "8px",
-                background: plan.mode === "2D" ? "rgba(56,189,248,0.12)" : "rgba(255,255,255,0.05)",
-                border: `1px solid ${plan.mode === "2D" ? "rgba(56,189,248,0.3)" : "rgba(255,255,255,0.1)"}`,
+                background: selectedMode === "2D" ? "rgba(56,189,248,0.12)" : "rgba(255,255,255,0.05)",
+                border: `1px solid ${selectedMode === "2D" ? "rgba(56,189,248,0.3)" : "rgba(255,255,255,0.1)"}`,
                 fontSize: "0.8rem",
                 color: "#cbd5e1",
               }}
             >
-              <div style={{fontWeight: 600, color: plan.mode === "2D" ? "#38bdf8" : "#cbd5e1"}}>
-                {plan.mode === "2D" ? "🚀 Descomposición 2D" : "📏 LOS Estándar"}
+              <div style={{fontWeight: 600, color: selectedMode === "2D" ? "#38bdf8" : "#cbd5e1"}}>
+                {selectedMode === "2D" ? "🚀 Descomposición 2D" : selectedMode === "LOS ASC" ? "📏 LOS Ascendentes" : selectedMode === "LOS DESC" ? "📏 LOS Descendentes" : "📏 LOS Estándar"}
               </div>
               <div style={{ color: "#94a3b8", marginTop: "4px", fontSize: "0.75rem" }}>
-                Ascendentes: {plan.asc_count} | Descendentes: {plan.desc_count}
+                {selectedMode === "LOS ASC" ? `Ascendentes: ${plan.asc_count}` : selectedMode === "LOS DESC" ? `Descendentes: ${plan.desc_count}` : `Ascendentes: ${plan.asc_count} | Descendentes: ${plan.desc_count}`}
               </div>
             </div>
           )}
@@ -936,6 +956,28 @@ export default function MintPyAnalysis() {
               setDrawnBox={setDrawnBox}
               imageBounds={bounds}
             />
+          )}
+
+          {/* Mode Selector */}
+          {plan && plan.available_modes && plan.available_modes.length > 1 && !results && (
+            <div style={{ marginTop: "16px", padding: "12px", background: "rgba(255,255,255,0.03)", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <label style={{ display: "block", marginBottom: "8px", fontWeight: 600, color: "#e2e8f0", fontSize: "0.9rem" }}>⚙️ Método de procesamiento:</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {plan.available_modes.map(m => (
+                  <label key={m} style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: "0.85rem", color: "#cbd5e1" }}>
+                    <input 
+                      type="radio" 
+                      name="processing_mode" 
+                      value={m} 
+                      checked={selectedMode === m} 
+                      onChange={() => setSelectedMode(m)} 
+                      style={{ marginRight: "8px", accentColor: "#38bdf8" }} 
+                    />
+                    {m === "2D" ? "🚀 Descomposición 2D" : m === "LOS ASC" ? "📏 LOS Ascendentes" : "📏 LOS Descendentes"}
+                  </label>
+                ))}
+              </div>
+            </div>
           )}
 
           {/* Action Buttons */}

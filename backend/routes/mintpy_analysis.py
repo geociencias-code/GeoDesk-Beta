@@ -1064,7 +1064,7 @@ async def preview_reference(
                 detail="No se encontraron archivos de coherencia en el ZIP."
             )
 
-        from rasterio.warp import transform_bounds, reproject, Resampling
+        from rasterio.warp import transform_bounds
 
         lefts_ll, bottoms_ll, rights_ll, tops_ll = [], [], [], []
 
@@ -1086,67 +1086,64 @@ async def preview_reference(
             )
 
         with rasterio.open(str(tifs[0])) as src0:
+            crs = src0.crs
+            base_transform = src0.transform
+            
             # Replant bounding box in native CRS of the chosen "master" grid
-            l0, b0, r0, t0 = transform_bounds("EPSG:4326", src0.crs, *common_bounds_ll)
+            l0, b0, r0, t0 = transform_bounds("EPSG:4326", crs, *common_bounds_ll)
             common_bounds_src0 = (l0, b0, r0, t0)
             
-            # Use this bounds for a master window
-            window = rasterio.windows.from_bounds(*common_bounds_src0, transform=src0.transform)
-            win_col_off, win_row_off = int(np.floor(window.col_off)), int(np.floor(window.row_off))
-            win_width, win_height = int(np.ceil(window.width)), int(np.ceil(window.height))
+            window = rasterio.windows.from_bounds(*common_bounds_src0, transform=base_transform)
+            
+            # Snap the window to integer pixels to avoid floating point shifts on aligned grids!
+            window = window.round_offsets().round_shape()
+            win_col_off, win_row_off = int(window.col_off), int(window.row_off)
+            win_width, win_height = int(window.width), int(window.height)
             
             exact_window = Window(win_col_off, win_row_off, win_width, win_height)
-            transform = rasterio.windows.transform(exact_window, src0.transform)
+            transform = rasterio.windows.transform(exact_window, base_transform)
             target_crs = src0.crs
-            crs = src0.crs # expected downstream by transformer check
 
         coh_sum = np.zeros((win_height, win_width), dtype=np.float32)
-        # Build maskConnComp: pixels where ALL interferograms have non-zero phase.
-        # This replicates what MintPy does so we never suggest a masked seed.
         unw_tifs = list(zip_dir.glob("*/*_unw_phase.tif"))
         conn_mask = np.ones((win_height, win_width), dtype=bool)
 
-        for t in unw_tifs:
-            with rasterio.open(str(t)) as src:
-                # Read via reprojection to robustly cast mismatched grids into our master grid
-                dest_data = np.zeros((win_height, win_width), dtype=np.float32)
-                reproject(
-                    source=rasterio.band(src, 1),
-                    destination=dest_data,
-                    src_transform=src.transform,
-                    src_crs=src.crs,
-                    dst_transform=transform,
-                    dst_crs=target_crs,
-                    resampling=Resampling.nearest,
-                    dst_nodata=np.nan
-                )
+        def read_to_dest(src_file, is_unw=False):
+            with rasterio.open(str(src_file)) as src:
+                out_data = np.zeros((win_height, win_width), dtype=np.float32)
+                # Ensure pixel-perfect match and identical results for aligned grids (e.g. single Asc/Desc tracks)
+                if src.crs == target_crs and src.transform == base_transform:
+                    out_data = src.read(1, window=exact_window).astype(np.float32)
+                else:
+                    from rasterio.warp import reproject, Resampling
+                    target_nodata = 0.0 if is_unw else np.nan
+                    reproject(
+                        source=rasterio.band(src, 1),
+                        destination=out_data,
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=transform,
+                        dst_crs=target_crs,
+                        resampling=Resampling.nearest if is_unw else Resampling.bilinear,
+                        dst_nodata=target_nodata
+                    )
+                return out_data, src.nodata
 
-                # MintPy masked logic: drop pixel if NaN or exactly 0.0 in ANY unw_phase file
-                valid_phase = ~np.isnan(dest_data)
-                if src.nodata is not None:
-                    valid_phase &= (dest_data != src.nodata)
-                valid_phase &= (dest_data != 0.0)
-                conn_mask &= valid_phase
+        for t in unw_tifs:
+            data_unw, nodataval = read_to_dest(t, is_unw=True)
+            valid_phase = ~np.isnan(data_unw)
+            if nodataval is not None:
+                valid_phase &= (data_unw != nodataval)
+            valid_phase &= (data_unw != 0.0)
+            conn_mask &= valid_phase
 
         for t in tifs:
-            with rasterio.open(str(t)) as src:
-                dest_data = np.zeros((win_height, win_width), dtype=np.float32)
-                reproject(
-                    source=rasterio.band(src, 1),
-                    destination=dest_data,
-                    src_transform=src.transform,
-                    src_crs=src.crs,
-                    dst_transform=transform,
-                    dst_crs=target_crs,
-                    resampling=Resampling.bilinear,
-                    dst_nodata=np.nan
-                )
-                
-                if src.nodata is not None:
-                    dest_data[dest_data == src.nodata] = np.nan
+            data_coh, nodataval = read_to_dest(t, is_unw=False)
+            if nodataval is not None:
+                data_coh[data_coh == nodataval] = np.nan
 
-                valid = ~np.isnan(dest_data)
-                coh_sum[valid] += dest_data[valid]
+            valid = ~np.isnan(data_coh)
+            coh_sum[valid] += data_coh[valid]
 
         # Apply ConnComp mask so we never suggest a pixel that MintPy will mask out.
         coh_sum[~conn_mask] = -1.0

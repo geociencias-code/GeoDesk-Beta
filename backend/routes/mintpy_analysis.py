@@ -424,8 +424,84 @@ def _run_mintpy_pipeline(
         )
         tsa.open()
 
-        # Run initial steps
-        tsa.run(steps=["load_data", "reference_point"])
+        # Run initial steps — with auto-recovery if the reference falls in a masked zone.
+        # MintPy's maskConnComp.h5 is stricter than our preview (it requires non-zero phase
+        # in ALL interferograms). If the pre-selected seed fails, we pick the best pixel
+        # directly from the files MintPy already generated and retry once.
+        try:
+            tsa.run(steps=["load_data", "reference_point"])
+        except (ValueError, Exception) as ref_err:
+            if "masked out" not in str(ref_err).lower():
+                raise
+
+            logging.warning(
+                "Reference point in masked area — auto-recovering from maskConnComp.h5 and avgSpatialCoh.h5"
+            )
+            mask_file = work_dir / "maskConnComp.h5"
+            coh_file = work_dir / "avgSpatialCoh.h5"
+
+            if not mask_file.exists() or not coh_file.exists():
+                raise ValueError(
+                    "El punto de referencia cae en zona enmascarada y no se encontraron "
+                    "los archivos de máscara para auto-recuperarse. "
+                    "Selecciona manualmente un punto de referencia diferente."
+                )
+
+            with h5py.File(mask_file, "r") as f:
+                mask = f["mask"][:]        # bool array (rows, cols)
+            with h5py.File(coh_file, "r") as f:
+                coh = f["coherence"][:]    # float32 array (rows, cols)
+
+            # Find best coherence pixel that is inside the valid mask
+            coh_masked = np.where(mask, coh, np.nan)
+            if np.all(np.isnan(coh_masked)):
+                raise ValueError(
+                    "No hay píxeles válidos en la máscara de MintPy. "
+                    "Revisa los datos de entrada o amplía el área de estudio."
+                )
+
+            best_yx = np.unravel_index(np.nanargmax(coh_masked), coh_masked.shape)
+            best_y, best_x = int(best_yx[0]), int(best_yx[1])
+
+            # Read the geometric reference from the geometry file so we can convert y/x → lat/lon.
+            # IMPORTANT: After MintPy's load_data runs "update Y/X_FIRST", the Y_FIRST/X_FIRST
+            # attributes in geometryGeo.h5 already point to pixel (0,0) of the CROPPED domain.
+            # So best_y/best_x (in the cropped 435×470 space) map DIRECTLY via:
+            #   lat = Y_FIRST + best_y * Y_STEP   (no need to add SUBSET_YMIN)
+            geom_file = work_dir / "inputs" / "geometryGeo.h5"
+            with h5py.File(geom_file, "r") as f:
+                meta = dict(f.attrs)
+
+            y_first = float(meta.get("Y_FIRST", 0))
+            x_first = float(meta.get("X_FIRST", 0))
+            y_step = float(meta.get("Y_STEP", 0))
+            x_step = float(meta.get("X_STEP", 0))
+
+            new_lat = round(y_first + best_y * y_step, 6)
+            new_lon = round(x_first + best_x * x_step, 6)
+
+            logging.info(
+                "Auto-recovered reference point: y/x=(%d,%d) → lat/lon=(%.6f, %.6f)",
+                best_y, best_x, new_lat, new_lon
+            )
+
+            # Rewrite the cfg with the corrected reference and re-run load+reference
+            cfg_path.write_text(
+                _make_cfg(
+                    zip_dir, new_lat, new_lon,
+                    crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max,
+                    has_triplets
+                )
+            )
+            # Restart TSA with updated config
+            tsa2 = TimeSeriesAnalysis(
+                customTemplateFile=str(cfg_path),
+                workDir=str(work_dir),
+            )
+            tsa2.open()
+            tsa2.run(steps=["load_data", "reference_point"])
+            # Continue using tsa2 for the remaining steps
+            tsa = tsa2
 
         if has_triplets:
             # HyP3 Gamma products lack 'connectComponent', which phase_closure explicitly requires.
@@ -1066,43 +1142,70 @@ async def preview_reference(
 
         from rasterio.warp import transform_bounds
 
-        lefts_ll, bottoms_ll, rights_ll, tops_ll = [], [], [], []
-
+        lefts, bottoms, rights, tops = [], [], [], []
+        crs_list = []
+        
         for t in tifs:
             with rasterio.open(str(t)) as src:
-                l, b, r, top_ = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
-                lefts_ll.append(l)
-                bottoms_ll.append(b)
-                rights_ll.append(r)
-                tops_ll.append(top_)
+                crs_list.append(src.crs)
+                
+        all_same_crs = all(c == crs_list[0] for c in crs_list)
 
-        common_bounds_ll = (max(lefts_ll), max(bottoms_ll), min(rights_ll), min(tops_ll))
-        
-        # Check for empty intersection
-        if common_bounds_ll[2] <= common_bounds_ll[0] or common_bounds_ll[3] <= common_bounds_ll[1]:
-            raise HTTPException(
-                status_code=400, 
-                detail="No hay solapamiento geográfico entre las imágenes. Verifica que el área de estudio sea la misma."
-            )
+        if all_same_crs:
+            for t in tifs:
+                with rasterio.open(str(t)) as src:
+                    lefts.append(src.bounds.left)
+                    bottoms.append(src.bounds.bottom)
+                    rights.append(src.bounds.right)
+                    tops.append(src.bounds.top)
+            
+            cb_left, cb_bottom = max(lefts), max(bottoms)
+            cb_right, cb_top = min(rights), min(tops)
+            
+            if cb_right <= cb_left or cb_top <= cb_bottom:
+                raise HTTPException(status_code=400, detail="No hay solapamiento geográfico entre las imágenes.")
+                
+            common_bounds_src0 = (cb_left, cb_bottom, cb_right, cb_top)
+            
+            with rasterio.open(str(tifs[0])) as src0:
+                base_transform = src0.transform
+                window = rasterio.windows.from_bounds(*common_bounds_src0, transform=base_transform)
+                window = window.round_offsets().round_shape()
+                win_col_off, win_row_off = int(window.col_off), int(window.row_off)
+                win_width, win_height = int(window.width), int(window.height)
+                
+                exact_window = Window(win_col_off, win_row_off, win_width, win_height)
+                transform = rasterio.windows.transform(exact_window, base_transform)
+                target_crs = src0.crs
+        else:
+            for t in tifs:
+                with rasterio.open(str(t)) as src:
+                    l, b, r, top_ = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+                    lefts.append(l)
+                    bottoms.append(b)
+                    rights.append(r)
+                    tops.append(top_)
 
-        with rasterio.open(str(tifs[0])) as src0:
-            crs = src0.crs
-            base_transform = src0.transform
+            common_bounds_ll = (max(lefts), max(bottoms), min(rights), min(tops))
             
-            # Replant bounding box in native CRS of the chosen "master" grid
-            l0, b0, r0, t0 = transform_bounds("EPSG:4326", crs, *common_bounds_ll)
-            common_bounds_src0 = (l0, b0, r0, t0)
-            
-            window = rasterio.windows.from_bounds(*common_bounds_src0, transform=base_transform)
-            
-            # Snap the window to integer pixels to avoid floating point shifts on aligned grids!
-            window = window.round_offsets().round_shape()
-            win_col_off, win_row_off = int(window.col_off), int(window.row_off)
-            win_width, win_height = int(window.width), int(window.height)
-            
-            exact_window = Window(win_col_off, win_row_off, win_width, win_height)
-            transform = rasterio.windows.transform(exact_window, base_transform)
-            target_crs = src0.crs
+            if common_bounds_ll[2] <= common_bounds_ll[0] or common_bounds_ll[3] <= common_bounds_ll[1]:
+                raise HTTPException(status_code=400, detail="No hay solapamiento geográfico entre las imágenes.")
+
+            with rasterio.open(str(tifs[0])) as src0:
+                crs = src0.crs
+                base_transform = src0.transform
+                
+                l0, b0, r0, t0 = transform_bounds("EPSG:4326", crs, *common_bounds_ll)
+                common_bounds_src0 = (l0, b0, r0, t0)
+                
+                window = rasterio.windows.from_bounds(*common_bounds_src0, transform=base_transform)
+                window = window.round_offsets().round_shape()
+                win_col_off, win_row_off = int(window.col_off), int(window.row_off)
+                win_width, win_height = int(window.width), int(window.height)
+                
+                exact_window = Window(win_col_off, win_row_off, win_width, win_height)
+                transform = rasterio.windows.transform(exact_window, base_transform)
+                target_crs = src0.crs
 
         coh_sum = np.zeros((win_height, win_width), dtype=np.float32)
         unw_tifs = list(zip_dir.glob("*/*_unw_phase.tif"))
@@ -1110,11 +1213,12 @@ async def preview_reference(
 
         def read_to_dest(src_file, is_unw=False):
             with rasterio.open(str(src_file)) as src:
-                out_data = np.zeros((win_height, win_width), dtype=np.float32)
                 # Ensure pixel-perfect match and identical results for aligned grids (e.g. single Asc/Desc tracks)
                 if src.crs == target_crs and src.transform == base_transform:
-                    out_data = src.read(1, window=exact_window).astype(np.float32)
+                    target_nodata = 0.0 if is_unw else np.nan
+                    out_data = src.read(1, window=exact_window, boundless=True, fill_value=target_nodata).astype(np.float32)
                 else:
+                    out_data = np.zeros((win_height, win_width), dtype=np.float32)
                     from rasterio.warp import reproject, Resampling
                     target_nodata = 0.0 if is_unw else np.nan
                     reproject(
@@ -1153,6 +1257,8 @@ async def preview_reference(
             c_arr = np.arange(win_width)
             r_arr = np.arange(win_height)
             c_grid, r_grid = np.meshgrid(c_arr, r_arr)
+            # Use 0.5 for evaluating inclusion precisely inside bounds. 
+            # This is safe because it only determines the geographical mask filtering array.
             lon_proj, lat_proj = transform * (c_grid + 0.5, r_grid + 0.5)
 
             transformer = None
@@ -1186,7 +1292,10 @@ async def preview_reference(
         tied_points = []
         for i in range(len(ys)):
             r, c = ys[i], xs[i]
-            lon_proj, lat_proj = transform * (c + 0.5, r + 0.5)
+            # Instead of 0.5 (center), we use 0.1 to avoid numpy's "round half to even" bug!
+            # Mintpy will `np.round((lat - Y_FIRST) / Y_STEP)`. If we pass exactly the center (0.5), it will
+            # shift odd numbered pixels randomly into adjacent invalid zones. 0.1 locks it safely.
+            lon_proj, lat_proj = transform * (c + 0.1, r + 0.1)
 
             if transformer:
                 lon_val, lat_val = transformer.transform(lon_proj, lat_proj)

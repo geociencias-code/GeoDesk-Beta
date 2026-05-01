@@ -819,7 +819,6 @@ async def process_interferograms(
                             except (ValueError, TypeError):
                                 forced_ref_lat, forced_ref_lon = ref_lat, ref_lon
 
-                _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
                 skipped_desc = _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
@@ -853,9 +852,10 @@ async def process_interferograms(
                             attrs = dict(vf.attrs)
                             lat0, lon0 = float(attrs.get("Y_FIRST", 0)), float(attrs.get("X_FIRST", 0))
                             dlat, dlon = float(attrs.get("Y_STEP", -0.001)), float(attrs.get("X_STEP", 0.001))
-                            # Pixel center offset restored for rendering
-                            lat_arr = lat0 + (np.arange(vf["velocity"].shape[0]) + 0.5) * dlat
-                            lon_arr = lon0 + (np.arange(vf["velocity"].shape[1]) + 0.5) * dlon
+                            # MintPy convention: Y_FIRST / X_FIRST is the CENTER of pixel (0,0).
+                            # No +0.5 offset needed.
+                            lat_arr = lat0 + np.arange(vf["velocity"].shape[0]) * dlat
+                            lon_arr = lon0 + np.arange(vf["velocity"].shape[1]) * dlon
                             lon, lat = np.meshgrid(lon_arr, lat_arr)
                             if abs(lat0) > 90 or abs(lon0) > 180:
                                 epsg = int(attrs.get("EPSG", 32616))
@@ -881,17 +881,14 @@ async def process_interferograms(
 
             lat_grid, lon_grid = lat_desc, lon_desc
 
-            # Matrix inversion for 2D decomposition
-            # MintPy stores azimuthAngle in degrees from North (clockwise).
-            # The LOS unit vector (ground→satellite) projects onto:
-            #   East:  e_E = sin(inc) * sin(azi)   ← azimuth is clockwise from N
-            #   North: e_N = sin(inc) * cos(azi)
-            #   Up:    e_U = cos(inc)
-            # Ignoring North (near-polar orbits have low N sensitivity):
-            #   d_los = A_ew * d_E + A_up * d_U
-            # Previous code used -sin(inc)*cos(azi) for A_ew, which is the NORTH
-            # component — not East — causing both geometries to have nearly equal
-            # EW coefficients, a near-zero determinant, and 400 mm/a artifacts.
+            # MintPy stores azimuthAngle as the azimuth of the HORIZONTAL COMPONENT of the
+            # LOS vector — NOT the satellite heading. Values are typically:
+            #   Ascending  S1: ~90–100° (looking toward ESE)  → sin(azi) ≈ +0.98
+            #   Descending S1: ~260–280° (looking toward WNW) → sin(azi) ≈ -0.98
+            # This gives a healthy determinant (~0.96) and physically correct E/U decomposition.
+            # LOS unit vector (ground → satellite) in ENU:
+            #   e_E = sin(inc) * sin(azi)
+            #   e_U = cos(inc)
             A_asc_ew  = np.sin(inc_asc)  * np.sin(azi_asc)
             A_asc_up  = np.cos(inc_asc)
             A_desc_ew = np.sin(inc_desc) * np.sin(azi_desc)
@@ -1009,8 +1006,10 @@ async def process_interferograms(
             if not use_grid:
                 dlat, dlon = float(vel_attrs.get("Y_STEP", -0.001)), float(vel_attrs.get("X_STEP", 0.001))
                 lat0, lon0 = float(vel_attrs.get("Y_FIRST", 0)), float(vel_attrs.get("X_FIRST", 0))
-                lat_arr_desc  = lat0 + (np.arange(vel_mm.shape[0]) + 0.5) * dlat
-                lon_arr_desc  = lon0 + (np.arange(vel_mm.shape[1]) + 0.5) * dlon
+                # MintPy convention: Y_FIRST / X_FIRST is the CENTER of pixel (0,0).
+                # No +0.5 offset needed.
+                lat_arr_desc  = lat0 + np.arange(vel_mm.shape[0]) * dlat
+                lon_arr_desc  = lon0 + np.arange(vel_mm.shape[1]) * dlon
                 lon_grid, lat_grid = np.meshgrid(lon_arr_desc, lat_arr_desc)
                 if abs(lat0) > 90 or abs(lon0) > 180:
                     epsg = int(vel_attrs.get("EPSG", 32616))
@@ -1177,6 +1176,7 @@ async def preview_reference(
                 exact_window = Window(win_col_off, win_row_off, win_width, win_height)
                 transform = rasterio.windows.transform(exact_window, base_transform)
                 target_crs = src0.crs
+                crs = src0.crs  # also set crs for the crop-mask transform below
         else:
             for t in tifs:
                 with rasterio.open(str(t)) as src:

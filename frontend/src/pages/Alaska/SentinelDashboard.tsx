@@ -96,7 +96,7 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco, d
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           granules, ruta, marco, day_interval: dayInterval ?? 12,
-          options: { nombre_proyecto: projectName, include_dem: true, include_look_vectors: true, looks: "20x4" }
+          options: { nombre_proyecto: projectName, include_dem: true, include_look_vectors: true, include_displacement_maps: true, looks: "20x4" }
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -105,8 +105,16 @@ const SentinelDashboard: React.FC<Props> = ({ scenes, backendUrl, ruta, marco, d
       const ok = (data.submitted || []).filter(s => s.status === "submitted").length;
 
       if (ok === 0) {
-        toast.warning("No se pudieron crear pares válidos. Verifica que los granules sean consecutivos (≤12 días) y de la misma plataforma.", {
-          duration: 6000,
+        const errors = (data.submitted || []).filter(s => s.status && s.status.startsWith("error:"));
+        let errMsg = "No se pudieron crear pares válidos. Verifica que los granules seleccionados sean de la misma plataforma y ruta/marco.";
+        if (errors.length > 0) {
+          errMsg = `Fallo en HyP3: ${errors[0].status}`;
+        } else if (data.submitted?.length === 0) {
+          errMsg = "No se formó ningún par para procesar. (Cero pares generados).";
+        }
+        
+        toast.error(errMsg, {
+          duration: 10000,
         });
         return;
       }

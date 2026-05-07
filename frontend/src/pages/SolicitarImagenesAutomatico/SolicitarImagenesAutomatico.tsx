@@ -13,6 +13,8 @@ interface Summary {
   found_scenes: number;
   built_pairs: number;
   submitted_jobs: number;
+  failed_jobs?: number;
+  job_errors?: string[];
   output_folder_hint: string;
 }
 
@@ -456,12 +458,21 @@ const SolicitarImagenesAutomatico: React.FC = () => {
                       ["Escenas encontradas", String(result.summary?.found_scenes ?? 0)],
                       ["Pares construidos", String(result.summary?.built_pairs ?? 0)],
                       ["Jobs enviados", String(result.summary?.submitted_jobs ?? 0)],
+                      ...(result.summary?.failed_jobs ? [["Jobs fallidos", String(result.summary.failed_jobs)]] : []),
                     ].map(([label, value]) => (
                       <div key={label} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: "8px" }}>
-                        <span style={{ color: "var(--color-text-muted)" }}>{label}:</span>
-                        <strong>{value}</strong>
+                        <span style={{ color: label === "Jobs fallidos" ? "#f87171" : "var(--color-text-muted)" }}>{label}:</span>
+                        <strong style={{ color: label === "Jobs fallidos" ? "#f87171" : undefined }}>{value}</strong>
                       </div>
                     ))}
+                    {result.summary?.job_errors && result.summary.job_errors.length > 0 && (
+                      <div style={{ marginTop: "8px", padding: "10px", borderRadius: "8px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)" }}>
+                        <div style={{ fontSize: "0.75rem", color: "#f87171", fontWeight: 600, marginBottom: "6px" }}>⚠️ Error en envío de jobs:</div>
+                        {result.summary.job_errors.map((err, i) => (
+                          <div key={i} style={{ fontSize: "0.75rem", color: "#fca5a5", wordBreak: "break-word" }}>{err}</div>
+                        ))}
+                      </div>
+                    )}
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <span style={{ color: "var(--color-text-muted)" }}>Carpeta sugerida:</span>
                       <strong style={{ color: "var(--color-primary)" }}>{result.summary?.output_folder_hint}</strong>

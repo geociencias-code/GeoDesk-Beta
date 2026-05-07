@@ -351,12 +351,32 @@ interface IgramStat {
   max: number;
 }
 
+interface HyP3Stats {
+  min: number;
+  max: number;
+  mean: number;
+  std: number;
+  n_points: number;
+  n_interferograms: number;
+  min_up?: number;
+  max_up?: number;
+  mean_up?: number;
+  std_up?: number;
+}
+
+interface HyP3Results {
+  stats: HyP3Stats;
+  sample: VelocityPoint[];
+  igram_stats?: IgramStat[];
+}
+
 interface ProcessingResults {
   stats: VelocityStats;
   interferograms: IgramMeta[];
   igram_stats?: IgramStat[];
   sample: VelocityPoint[];
   mode?: "2D" | "LOS";
+  hyp3?: HyP3Results | null;
 }
 
 
@@ -468,6 +488,7 @@ export default function MintPyAnalysis() {
 
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [selectedMode, setSelectedMode] = useState<string | null>(null);
+  const [activeMethod, setActiveMethod] = useState<"mintpy" | "hyp3">("mintpy");
   const [viewMode, setViewMode] = useState<"UP" | "EW">("UP");
 
   const [bounds, setBounds] = useState<BoundsType | null>(null);
@@ -712,13 +733,30 @@ export default function MintPyAnalysis() {
   const cropIsValid = drawnBox && bounds ? isCropWithinBounds(drawnBox, bounds) : !!drawnBox;
 
 
-  const activeData = results ? (results.mode === "2D" ? results.sample.map(p => ({
-    lat: p.lat, lon: p.lon, velocidad_mm_yr: viewMode === "EW" ? (p.vel_ew_mm_yr || 0) : (p.vel_up_mm_yr || 0)
-  })) : results.sample) : [];
-  
+  const hasHyp3 = !!(results?.hyp3);
+
+  const activeSample = activeMethod === "hyp3" && hasHyp3
+    ? (results!.hyp3!.sample)
+    : results?.sample ?? [];
+
+  const activeData = results ? (
+    activeMethod === "hyp3" && hasHyp3
+      ? activeSample
+      : results.mode === "2D" ? results.sample.map(p => ({
+          lat: p.lat, lon: p.lon, velocidad_mm_yr: viewMode === "EW" ? (p.vel_ew_mm_yr || 0) : (p.vel_up_mm_yr || 0)
+        }))
+      : results.sample
+  ) : [];
+
   const histogramData = results ? buildHistogram(activeData) : [];
-  const velMin = results && results.mode === "2D" && viewMode === "EW" ? (results.stats.min_ew ?? 0) : (results?.stats.min ?? 0);
-  const velMax = results && results.mode === "2D" && viewMode === "EW" ? (results.stats.max_ew ?? 0) : (results?.stats.max ?? 0);
+  const hyp3HistogramData = hasHyp3 ? buildHistogram(results!.hyp3!.sample) : [];
+
+  const velMin = activeMethod === "hyp3" && hasHyp3
+    ? (results!.hyp3!.stats.min)
+    : (results && results.mode === "2D" && viewMode === "EW" ? (results.stats.min_ew ?? 0) : (results?.stats.min ?? 0));
+  const velMax = activeMethod === "hyp3" && hasHyp3
+    ? (results!.hyp3!.stats.max)
+    : (results && results.mode === "2D" && viewMode === "EW" ? (results.stats.max_ew ?? 0) : (results?.stats.max ?? 0));
 
 
   return (
@@ -1166,7 +1204,7 @@ export default function MintPyAnalysis() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
 
-              {results && results.mode === "2D" && (
+              {results && results.mode === "2D" && activeMethod === "mintpy" && (
                 <div style={{ display: "flex", gap: "10px", marginBottom: "4px" }}>
                   <button
                     onClick={() => setViewMode("UP")}
@@ -1184,6 +1222,53 @@ export default function MintPyAnalysis() {
                       color: viewMode === "EW" ? "#e0f2fe" : "#94a3b8", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600
                     }}
                   >↔️ Movimiento Este-Oeste</button>
+                </div>
+              )}
+
+              {/* HyP3 comparison banner + method tabs */}
+              {hasHyp3 && (
+                <div style={{
+                  padding: "12px 16px",
+                  borderRadius: "12px",
+                  background: "linear-gradient(135deg, rgba(245,158,11,0.12), rgba(249,115,22,0.08))",
+                  border: "1px solid rgba(245,158,11,0.35)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  flexWrap: "wrap",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span style={{ fontSize: "1.3rem" }}>🛰️</span>
+                    <div>
+                      <div style={{ fontWeight: 700, color: "#fbbf24", fontSize: "0.9rem" }}>Modo Comparación Activo</div>
+                      <div style={{ fontSize: "0.75rem", color: "#d97706" }}>
+                        Visualizando MintPy SBAS vs cálculo directo de desplazamiento HyP3 por interferograma
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      id="tab-mintpy"
+                      onClick={() => setActiveMethod("mintpy")}
+                      style={{
+                        padding: "8px 16px", borderRadius: "8px", border: "none", cursor: "pointer",
+                        fontWeight: 700, fontSize: "0.82rem", transition: "all 0.2s",
+                        background: activeMethod === "mintpy" ? "linear-gradient(135deg, #38bdf8, #6366f1)" : "rgba(255,255,255,0.07)",
+                        color: activeMethod === "mintpy" ? "white" : "#94a3b8",
+                      }}
+                    >🔬 MintPy SBAS</button>
+                    <button
+                      id="tab-hyp3"
+                      onClick={() => setActiveMethod("hyp3")}
+                      style={{
+                        padding: "8px 16px", borderRadius: "8px", border: "none", cursor: "pointer",
+                        fontWeight: 700, fontSize: "0.82rem", transition: "all 0.2s",
+                        background: activeMethod === "hyp3" ? "linear-gradient(135deg, #f59e0b, #ef4444)" : "rgba(255,255,255,0.07)",
+                        color: activeMethod === "hyp3" ? "white" : "#94a3b8",
+                      }}
+                    >📦 HyP3 Directo</button>
+                  </div>
                 </div>
               )}
 
@@ -1208,39 +1293,47 @@ export default function MintPyAnalysis() {
                 </div>
               )}
 
-              {/* Stats cards */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(4, 1fr)",
-                  gap: "12px",
-                }}
-              >
-                {[
-                  { label: "Vel. Mínima", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.min_ew !== undefined ? results.stats.min_ew : results.stats.min).toFixed(2)} mm/a`, color: "#60a5fa" },
-                  { label: "Vel. Máxima", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.max_ew !== undefined ? results.stats.max_ew : results.stats.max).toFixed(2)} mm/a`, color: "#f87171" },
-                  { label: "Vel. Media", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.mean_ew !== undefined ? results.stats.mean_ew : results.stats.mean).toFixed(2)} mm/a`, color: "#34d399" },
-                  { label: "Desv. Est.", value: `${(viewMode === "EW" && results.mode === "2D" && results.stats.std_ew !== undefined ? results.stats.std_ew : results.stats.std).toFixed(2)} mm/a`, color: "#a78bfa" },
-                ].map((s) => (
-                  <div
-                    key={s.label}
-                    style={{
-                      background: "rgba(255,255,255,0.03)",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      borderRadius: "12px",
-                      padding: "16px",
-                      textAlign: "center",
-                    }}
-                  >
-                    <div style={{ fontSize: "1.3rem", fontWeight: 700, color: s.color }}>
-                      {s.value}
-                    </div>
-                    <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "4px" }}>
-                      {s.label}
+              {/* Stats cards — muestra el método activo */}
+              {(() => {
+                const s = activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats : results.stats;
+                const isEW = viewMode === "EW" && results.mode === "2D" && activeMethod === "mintpy";
+                const statRows = [
+                  { label: "Vel. Mínima", value: `${(isEW && (s as VelocityStats).min_ew !== undefined ? (s as VelocityStats).min_ew! : s.min).toFixed(2)} mm/a`, color: "#60a5fa" },
+                  { label: "Vel. Máxima", value: `${(isEW && (s as VelocityStats).max_ew !== undefined ? (s as VelocityStats).max_ew! : s.max).toFixed(2)} mm/a`, color: "#f87171" },
+                  { label: "Vel. Media", value: `${(isEW && (s as VelocityStats).mean_ew !== undefined ? (s as VelocityStats).mean_ew! : s.mean).toFixed(2)} mm/a`, color: "#34d399" },
+                  { label: "Desv. Est.", value: `${(isEW && (s as VelocityStats).std_ew !== undefined ? (s as VelocityStats).std_ew! : s.std).toFixed(2)} mm/a`, color: "#a78bfa" },
+                ];
+                const methodLabel = activeMethod === "hyp3" ? "📦 HyP3" : "🔬 MintPy";
+                const methodColor = activeMethod === "hyp3" ? "rgba(245,158,11,0.2)" : "rgba(56,189,248,0.08)";
+                const methodBorder = activeMethod === "hyp3" ? "rgba(245,158,11,0.3)" : "rgba(56,189,248,0.2)";
+                return (
+                  <div>
+                    {hasHyp3 && (
+                      <div style={{ fontSize: "0.75rem", color: activeMethod === "hyp3" ? "#f59e0b" : "#38bdf8", fontWeight: 700, marginBottom: "8px" }}>
+                        {methodLabel} — Estadísticas de velocidad
+                      </div>
+                    )}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
+                      {statRows.map((st) => (
+                        <div
+                          key={st.label}
+                          style={{
+                            background: methodColor,
+                            border: `1px solid ${methodBorder}`,
+                            borderRadius: "12px",
+                            padding: "16px",
+                            textAlign: "center",
+                            transition: "all 0.3s",
+                          }}
+                        >
+                          <div style={{ fontSize: "1.3rem", fontWeight: 700, color: st.color }}>{st.value}</div>
+                          <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "4px" }}>{st.label}</div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })()}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
                 {/* Velocity legend map */}
@@ -1261,39 +1354,36 @@ export default function MintPyAnalysis() {
                     }}
                   >
                     <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", margin: 0 }}>
-                      🗺️ Mapa de Velocidad de Deformación
+                      🗺️ Mapa de Velocidad — {activeMethod === "hyp3" ? "📦 HyP3 Directo" : "🔬 MintPy SBAS"}
                     </h3>
                     <div style={{ display: "flex", gap: "8px" }}>
-                      <a
-                        href={`${API_URL}/api/mintpy/export_xlsx`}
-                        download
-                        style={{
-                          padding: "6px 14px",
-                          background: "linear-gradient(135deg, #10b981, #059669)",
-                          color: "white",
-                          borderRadius: "8px",
-                          fontSize: "0.78rem",
-                          fontWeight: 600,
-                          textDecoration: "none",
-                        }}
-                      >
-                        📊 Resumen XLSX
-                      </a>
-                      <a
-                        href={`${API_URL}/api/mintpy/export_csv`}
-                        download
-                        style={{
-                          padding: "6px 14px",
-                          background: "linear-gradient(135deg, #6366f1, #4f46e5)",
-                          color: "white",
-                          borderRadius: "8px",
-                          fontSize: "0.78rem",
-                          fontWeight: 600,
-                          textDecoration: "none",
-                        }}
-                      >
-                        ⬇️ Exportar Datos a CSV
-                      </a>
+                      {activeMethod === "hyp3" && hasHyp3 ? (
+                        <>
+                          <a
+                            href={`${API_URL}/api/mintpy/export_xlsx_hyp3`}
+                            download
+                            style={{ padding: "6px 14px", background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}
+                          >📊 XLSX HyP3</a>
+                          <a
+                            href={`${API_URL}/api/mintpy/export_csv_hyp3`}
+                            download
+                            style={{ padding: "6px 14px", background: "linear-gradient(135deg, #ef4444, #dc2626)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}
+                          >⬇️ CSV HyP3</a>
+                        </>
+                      ) : (
+                        <>
+                          <a
+                            href={`${API_URL}/api/mintpy/export_xlsx`}
+                            download
+                            style={{ padding: "6px 14px", background: "linear-gradient(135deg, #10b981, #059669)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}
+                          >📊 Resumen XLSX</a>
+                          <a
+                            href={`${API_URL}/api/mintpy/export_csv`}
+                            download
+                            style={{ padding: "6px 14px", background: "linear-gradient(135deg, #6366f1, #4f46e5)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}
+                          >⬇️ Exportar CSV</a>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -1384,75 +1474,80 @@ export default function MintPyAnalysis() {
                   }}
                 >
                   <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", marginBottom: "14px" }}>
-                    📊 Distribución de Velocidades
+                    📊 Distribución de Velocidades {hasHyp3 ? "— MintPy vs HyP3" : ""}
                   </h3>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={histogramData} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                      <XAxis
-                        dataKey="range"
-                        tick={{ fontSize: 9, fill: "#64748b" }}
-                        angle={-45}
-                        textAnchor="end"
-                        label={{ value: "Velocidad (mm/a)", position: "insideBottom", offset: -16, fill: "#64748b", fontSize: 10 }}
-                      />
-                      <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
-                      <Tooltip
-                        contentStyle={{
-                          background: "#0f172a",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          borderRadius: "8px",
-                          color: "white",
-                          fontSize: "0.8rem",
-                        }}
-                        formatter={(v: number) => [`${v} píxeles`, "Frecuencia"]}
-                      />
-                      <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {hasHyp3 ? (
+                    // Dual histogram: merge MintPy and HyP3 bins into one chart
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart
+                        data={histogramData.map((b, i) => ({
+                          range: b.range,
+                          mintpy: b.count,
+                          hyp3: hyp3HistogramData[i]?.count ?? 0,
+                        }))}
+                        margin={{ top: 4, right: 8, left: 0, bottom: 24 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                        <XAxis dataKey="range" tick={{ fontSize: 9, fill: "#64748b" }} angle={-45} textAnchor="end"
+                          label={{ value: "Velocidad (mm/a)", position: "insideBottom", offset: -16, fill: "#64748b", fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
+                        <Tooltip
+                          contentStyle={{ background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", color: "white", fontSize: "0.8rem" }}
+                          formatter={(v: number, name: string) => [`${v} px`, name === "mintpy" ? "🔬 MintPy" : "📦 HyP3"]}
+                        />
+                        <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: "0.8rem", color: "#94a3b8" }}
+                          formatter={(v) => v === "mintpy" ? "🔬 MintPy SBAS" : "📦 HyP3 Directo"} />
+                        <Bar dataKey="mintpy" fill="#6366f1" radius={[4, 4, 0, 0]} opacity={0.85} />
+                        <Bar dataKey="hyp3" fill="#f59e0b" radius={[4, 4, 0, 0]} opacity={0.85} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart data={histogramData} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                        <XAxis dataKey="range" tick={{ fontSize: 9, fill: "#64748b" }} angle={-45} textAnchor="end"
+                          label={{ value: "Velocidad (mm/a)", position: "insideBottom", offset: -16, fill: "#64748b", fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
+                        <Tooltip
+                          contentStyle={{ background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", color: "white", fontSize: "0.8rem" }}
+                          formatter={(v: number) => [`${v} píxeles`, "Frecuencia"]}
+                        />
+                        <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
               </div>
 
               {/* Line Chart for Igram Stats */}
-              {results?.igram_stats && results.igram_stats.length > 0 && (
-                <div
-                  style={{
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    borderRadius: "14px",
-                    padding: "20px",
-                  }}
-                >
-                  <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", marginBottom: "14px" }}>
-                    📈 Deformación Media por Par de Fechas (Población Total)
-                  </h3>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <LineChart data={results?.igram_stats} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                      <XAxis
-                        dataKey="label"
-                        tick={{ fontSize: 9, fill: "#64748b" }}
-                        angle={-45}
-                        textAnchor="end"
-                      />
-                      <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
-                      <Tooltip
-                        contentStyle={{
-                          background: "#0f172a",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          borderRadius: "8px",
-                          color: "white",
-                          fontSize: "0.8rem",
-                        }}
-                      />
-                      <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: "0.8rem", color: "#94a3b8" }} />
-                      <Line type="monotone" name="Media (mm)" dataKey="mean" stroke="#38bdf8" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                      <Line type="monotone" name="Max (mm)" dataKey="max" stroke="#f87171" strokeWidth={1} strokeDasharray="3 3" dot={false} />
-                      <Line type="monotone" name="Min (mm)" dataKey="min" stroke="#34d399" strokeWidth={1} strokeDasharray="3 3" dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+              {(() => {
+                const igStats = activeMethod === "hyp3" && hasHyp3
+                  ? results!.hyp3!.igram_stats
+                  : results?.igram_stats;
+                if (!igStats || igStats.length === 0) return null;
+                const lineColor = activeMethod === "hyp3" ? "#f59e0b" : "#38bdf8";
+                const maxColor = activeMethod === "hyp3" ? "#ef4444" : "#f87171";
+                const minColor = activeMethod === "hyp3" ? "#84cc16" : "#34d399";
+                return (
+                  <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "14px", padding: "20px" }}>
+                    <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", marginBottom: "14px" }}>
+                      📈 Velocidad Media por Par de Fechas — {activeMethod === "hyp3" ? "📦 HyP3 Directo" : "🔬 MintPy SBAS"}
+                    </h3>
+                    <ResponsiveContainer width="100%" height={280}>
+                      <LineChart data={igStats} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                        <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#64748b" }} angle={-45} textAnchor="end" />
+                        <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
+                        <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", color: "white", fontSize: "0.8rem" }} />
+                        <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: "0.8rem", color: "#94a3b8" }} />
+                        <Line type="monotone" name="Media (mm)" dataKey="mean" stroke={lineColor} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                        <Line type="monotone" name="Max (mm)" dataKey="max" stroke={maxColor} strokeWidth={1} strokeDasharray="3 3" dot={false} />
+                        <Line type="monotone" name="Min (mm)" dataKey="min" stroke={minColor} strokeWidth={1} strokeDasharray="3 3" dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                );
+              })()}
 
               {/* Data table */}
               <div
@@ -1472,49 +1567,35 @@ export default function MintPyAnalysis() {
                   }}
                 >
                   <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", margin: 0 }}>
-                    📋 Muestra de Resultados
-                    <span
-                      style={{
-                        marginLeft: "10px",
-                        fontSize: "0.75rem",
-                        color: "#64748b",
-                        fontWeight: "normal",
-                      }}
-                    >
-                      ({results.sample.length} de {results.stats.n_points.toLocaleString()} puntos)
+                    📋 Muestra de Resultados — {activeMethod === "hyp3" ? "📦 HyP3 Directo" : "🔬 MintPy SBAS"}
+                    <span style={{ marginLeft: "10px", fontSize: "0.75rem", color: "#64748b", fontWeight: "normal" }}>
+                      ({activeSample.length} de {(activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats.n_points : results.stats.n_points).toLocaleString()} puntos)
                     </span>
                   </h3>
                   <div style={{ display: "flex", gap: "8px" }}>
-                    <a
-                      href={`${API_URL}/api/mintpy/export_xlsx`}
-                      download
-                      style={{
-                        padding: "6px 14px",
-                        background: "linear-gradient(135deg, #10b981, #059669)",
-                        color: "white",
-                        borderRadius: "8px",
-                        fontSize: "0.78rem",
-                        fontWeight: 600,
-                        textDecoration: "none",
-                      }}
-                    >
-                      📊 Resumen XLSX
-                    </a>
-                    <a
-                      href={`${API_URL}/api/mintpy/export_csv`}
-                      download
-                      style={{
-                        padding: "6px 14px",
-                        background: "linear-gradient(135deg, #6366f1, #4f46e5)",
-                        color: "white",
-                        borderRadius: "8px",
-                        fontSize: "0.78rem",
-                        fontWeight: 600,
-                        textDecoration: "none",
-                      }}
-                    >
-                      ⬇️ Exportar Datos a CSV
-                    </a>
+                    {activeMethod === "hyp3" && hasHyp3 ? (
+                      <>
+                        <a href={`${API_URL}/api/mintpy/export_xlsx_hyp3`} download
+                          style={{ padding: "6px 14px", background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}>
+                          📊 XLSX HyP3
+                        </a>
+                        <a href={`${API_URL}/api/mintpy/export_csv_hyp3`} download
+                          style={{ padding: "6px 14px", background: "linear-gradient(135deg, #ef4444, #dc2626)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}>
+                          ⬇️ CSV HyP3
+                        </a>
+                      </>
+                    ) : (
+                      <>
+                        <a href={`${API_URL}/api/mintpy/export_xlsx`} download
+                          style={{ padding: "6px 14px", background: "linear-gradient(135deg, #10b981, #059669)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}>
+                          📊 Resumen XLSX
+                        </a>
+                        <a href={`${API_URL}/api/mintpy/export_csv`} download
+                          style={{ padding: "6px 14px", background: "linear-gradient(135deg, #6366f1, #4f46e5)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}>
+                          ⬇️ Exportar CSV
+                        </a>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1523,53 +1604,28 @@ export default function MintPyAnalysis() {
                     <thead>
                       <tr style={{ background: "rgba(255,255,255,0.04)", position: "sticky", top: 0 }}>
                         {["#", "Latitud", "Longitud", "Velocidad (mm/año)"].map((h) => (
-                          <th
-                            key={h}
-                            style={{
-                              padding: "10px 12px",
-                              textAlign: "left",
-                              color: "#94a3b8",
-                              fontWeight: 600,
-                              fontSize: "0.78rem",
-                              borderBottom: "1px solid rgba(255,255,255,0.08)",
-                            }}
-                          >
+                          <th key={h} style={{ padding: "10px 12px", textAlign: "left", color: "#94a3b8", fontWeight: 600, fontSize: "0.78rem", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                             {h}
                           </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {results.sample.map((p, idx) => {
-                        const color = velocityColor(p.velocidad_mm_yr, velMin, velMax);
+                      {activeSample.map((p, idx) => {
+                        const displayVal = activeMethod === "hyp3" || results.mode !== "2D"
+                          ? p.velocidad_mm_yr
+                          : viewMode === "EW" ? (p.vel_ew_mm_yr || 0) : (p.vel_up_mm_yr || 0);
+                        const color = velocityColor(displayVal, velMin, velMax);
                         return (
                           <tr
                             key={idx}
                             style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
                           >
                             <td style={{ padding: "8px 12px", color: "#475569" }}>{idx + 1}</td>
-                            <td style={{ padding: "8px 12px", color: "#94a3b8" }}>
-                              {p.lat.toFixed(6)}
-                            </td>
-                            <td style={{ padding: "8px 12px", color: "#94a3b8" }}>
-                              {p.lon.toFixed(6)}
-                            </td>
-                            <td
-                              style={{
-                                padding: "8px 12px",
-                                fontWeight: 700,
-                                color,
-                              }}
-                            >
-                              {results.mode === "2D" ? (
-                                viewMode === "EW" ? (
-                                  (p.vel_ew_mm_yr || 0) > 0 ? "+" : ""
-                                ) + (p.vel_ew_mm_yr || 0).toFixed(2) : (
-                                  (p.vel_up_mm_yr || 0) > 0 ? "+" : ""
-                                ) + (p.vel_up_mm_yr || 0).toFixed(2)
-                              ) : (
-                                (p.velocidad_mm_yr > 0 ? "+" : "") + p.velocidad_mm_yr.toFixed(2)
-                              )}
+                            <td style={{ padding: "8px 12px", color: "#94a3b8" }}>{p.lat.toFixed(6)}</td>
+                            <td style={{ padding: "8px 12px", color: "#94a3b8" }}>{p.lon.toFixed(6)}</td>
+                            <td style={{ padding: "8px 12px", fontWeight: 700, color }}>
+                              {(displayVal > 0 ? "+" : "") + displayVal.toFixed(2)}
                             </td>
                           </tr>
                         );
@@ -1577,21 +1633,13 @@ export default function MintPyAnalysis() {
                     </tbody>
                   </table>
                 </div>
-                {results.sample.length < results.stats.n_points && (
-                  <p
-                    style={{
-                      textAlign: "center",
-                      color: "#475569",
-                      fontSize: "0.75rem",
-                      marginTop: "12px",
-                      fontStyle: "italic",
-                    }}
-                  >
-                    Mostrando muestra de {results.sample.length} puntos. Descarga el CSV para el dataset completo.
+                {activeSample.length < (activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats.n_points : results.stats.n_points) && (
+                  <p style={{ textAlign: "center", color: "#475569", fontSize: "0.75rem", marginTop: "12px", fontStyle: "italic" }}>
+                    Mostrando muestra de {activeSample.length} puntos. Descarga el CSV para el dataset completo.
                   </p>
                 )}
               </div>
-              
+
               {/* Static Vector Map (Quiver) */}
               {results.mode === "2D" && (
                 <div

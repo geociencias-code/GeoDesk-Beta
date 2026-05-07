@@ -110,6 +110,7 @@ class JobOptions(BaseModel):
     nombre_proyecto: str = "prueba_api"
     include_dem: bool = True
     include_look_vectors: bool = True
+    include_displacement_maps: bool = True
     looks: str = "20x4"
 
 class SubmitRequest(BaseModel):
@@ -440,6 +441,7 @@ def api_submit(body: SubmitRequest):
                 granule1=p.g1, granule2=p.g2, name=job_name,
                 include_dem=body.options.include_dem,
                 include_look_vectors=body.options.include_look_vectors,
+                include_displacement_maps=body.options.include_displacement_maps,
                 looks=body.options.looks,
             )
             job_id = getattr(job, "job_id", None) or getattr(job, "id", None)
@@ -475,17 +477,14 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
 
     pairs: List[Tuple[str, str]] = []
     for i in range(len(valid)):
-        for j in range(i + 1, len(valid)):
+        for j in range(i + 1, min(i + 3, len(valid))):
             r1, g1, d1 = valid[i]
             r2, g2, d2 = valid[j]
             if body.same_platform:
                 p1, p2 = get_platform(r1), get_platform(r2)
                 if p1 and p2 and p1 != p2:
                     continue
-            if abs((d2 - d1).days) <= body.day_interval:
-                pairs.append((g1, g2))
-            else:
-                break
+            pairs.append((g1, g2))
 
     try:
         hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
@@ -500,6 +499,7 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
                 granule1=g1, granule2=g2, name=job_name,
                 include_dem=body.options.include_dem,
                 include_look_vectors=body.options.include_look_vectors,
+                include_displacement_maps=body.options.include_displacement_maps,
                 looks=body.options.looks,
             )
             job_id = getattr(job, "job_id", None) or getattr(job, "id", None)

@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 import os
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 from dateutil import parser
 from dotenv import load_dotenv
@@ -205,18 +208,14 @@ def build_pairs(results: Iterable[Any], day_interval: int) -> List[Tuple[str, st
 
     pairs: List[Tuple[str, str]] = []
     for i in range(len(valid)):
-        for j in range(i + 1, len(valid)):
+        for j in range(i + 1, min(i + 3, len(valid))):
             r1, g1, d1 = valid[i]
             r2, g2, d2 = valid[j]
             plat1 = get_platform(r1)
             plat2 = get_platform(r2)
             if plat1 and plat2 and plat1 != plat2:
                 continue
-            delta_days = abs((d2 - d1).days)
-            if delta_days <= day_interval:
-                pairs.append((g1, g2))
-            else:
-                break
+            pairs.append((g1, g2))
 
     return pairs
 
@@ -242,6 +241,7 @@ def submit_jobs(
                 name=job_name,
                 include_dem=INCLUDE_DEM,
                 include_look_vectors=INCLUDE_LOOK_VECTORS,
+                include_displacement_maps=True,
                 looks=LOOKS,
             )
             job = batch[0] if len(batch) > 0 else None
@@ -255,12 +255,14 @@ def submit_jobs(
                 status=str(status) if status else None
             ))
         except Exception as e:
+            logger.error("[submit_jobs] ERROR enviando job %s (g1=%s, g2=%s): %s", job_name, g1, g2, e, exc_info=True)
+            print(f"[submit_jobs] ERROR job {job_name}: {type(e).__name__}: {e}", flush=True)
             summaries.append(JobSummary(
                 job_id=None,
                 name=job_name,
                 granule1=g1,
                 granule2=g2,
-                status=f"ERROR: {e}"
+                status=f"ERROR: {type(e).__name__}: {e}"
             ))
     return summaries
 
@@ -352,6 +354,10 @@ def solicitar_imagenes_automatico(payload: SolicitudAutoIn) -> Dict[str, Any]:
             "found_scenes": len(results),
             "built_pairs": len(pairs),
             "submitted_jobs": len([j for j in jobs if j.job_id]),
+            "failed_jobs": len([j for j in jobs if j.job_id is None]),
+            "job_errors": list({
+                j.status for j in jobs if j.job_id is None and j.status
+            }),
             "output_folder_hint": carpeta_salida,
         },
         "scenes": [asdict(s) for s in escenas],

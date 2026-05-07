@@ -48,6 +48,8 @@ RESULTS_DIR.mkdir(exist_ok=True)
 RESULTS_FILE = RESULTS_DIR / "latest_results.json"
 CSV_FILE     = RESULTS_DIR / "velocidad_deformacion.csv"
 XLSX_FILE    = RESULTS_DIR / "resumen_interferogramas.xlsx"
+CSV_FILE_HYP3  = RESULTS_DIR / "velocidad_deformacion_hyp3.csv"
+XLSX_FILE_HYP3 = RESULTS_DIR / "resumen_interferogramas_hyp3.xlsx"
 
 MIN_INTERFEROGRAMS = 3
 DATE_RE = re.compile(r"(20\d{6})T")
@@ -161,7 +163,14 @@ def generate_quiver_plots(results_list):
                     return f"https://a.tile.opentopomap.org/{z}/{x}/{y}.png"
 
             try:
-                ax.add_image(OpenTopoMap(), zoom)
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(ax.add_image, OpenTopoMap(), zoom)
+                    future.result(timeout=15)
+            except concurrent.futures.TimeoutError:
+                logging.warning("OpenTopoMap tiles timed out (>15s) — using local features as fallback")
+                ax.add_feature(cfeature.LAND, facecolor="#d4cfc9")
+                ax.add_feature(cfeature.OCEAN, facecolor="#a8d8ea")
             except Exception as e:
                 logging.warning(f"OpenTopoMap tiles failed: {e}")
                 ax.add_feature(cfeature.LAND, facecolor="#d4cfc9")
@@ -223,6 +232,355 @@ def generate_quiver_plots(results_list):
 
         plt.savefig(save_path, bbox_inches="tight", dpi=150)
         plt.close(fig)
+
+
+def _has_hyp3_displacement(zip_dir: Path) -> bool:
+    """Returns True if at least one interferogram folder contains a los_disp.tif."""
+    return bool(list(zip_dir.glob("*/*_los_disp.tif")))
+
+
+# Maximum pixels per dimension for HyP3 velocity computation.
+# Full-res HyP3 products can be 3500x2500 = 8.75M px which requires
+# ~11 GB RAM for the weighted-median stack. We cap the reference grid
+# at this many pixels total to keep memory under ~200 MB.
+_HYPP3_MAX_PIXELS = 400 * 600  # ~240K pixels — matches MintPy output resolution
+
+
+def _compute_hyp3_velocity(
+    zip_dir: Path,
+    igram_meta: list,
+    mode: str,
+) -> dict:
+    """Compute deformation velocity maps directly from HyP3 los_disp.tif/vert_disp.tif files.
+
+    For each interferogram, converts cumulative displacement (metres) to velocity (mm/yr)
+    using the date interval. Then computes a weighted median (weight = 1/days) across all
+    interferograms on a common grid. Works for LOS, 2D, LOS ASC, and LOS DESC modes.
+
+    Returns a dict with keys: hyp3_has_data, stats, sample, igram_stats.
+    NOTE: Files are automatically downsampled to _HYPP3_MAX_PIXELS if they are larger,
+    to prevent OOM conditions with full-resolution HyP3 products (3500x2500+).
+    """
+    from rasterio.warp import reproject, Resampling
+    import math
+
+    logging.info("[HyP3] _compute_hyp3_velocity START — mode=%s zip_dir=%s", mode, zip_dir)
+
+    los_files = sorted(zip_dir.glob("*/*_los_disp.tif"))
+    logging.info("[HyP3] Found %d los_disp.tif files", len(los_files))
+    if not los_files:
+        return {"hyp3_has_data": False}
+
+    # ------------------------------------------------------------------
+    # Build reference grid — with automatic downsampling if needed.
+    # Full-resolution HyP3 products (3500×2500 = 8.75 M px) require
+    # ~11 GB RAM in _weighted_median_stack. We clamp to _HYPP3_MAX_PIXELS.
+    # ------------------------------------------------------------------
+    with rasterio.open(str(los_files[0])) as ref_src:
+        orig_w, orig_h = ref_src.width, ref_src.height
+        orig_crs = ref_src.crs
+        orig_transform = ref_src.transform
+        orig_nodata = ref_src.nodata
+
+    native_pixels = orig_h * orig_w
+    logging.info("[HyP3] Reference file native size: %dx%d = %d px (EPSG:%s)",
+                 orig_w, orig_h, native_pixels, orig_crs.to_epsg() if orig_crs else "?")
+
+    if native_pixels > _HYPP3_MAX_PIXELS:
+        scale = math.sqrt(_HYPP3_MAX_PIXELS / native_pixels)
+        ref_height = max(1, int(orig_h * scale))
+        ref_width  = max(1, int(orig_w  * scale))
+        logging.info(
+            "[HyP3] Downsampling reference grid from %dx%d to %dx%d (scale=%.3f) to avoid OOM.",
+            orig_w, orig_h, ref_width, ref_height, scale
+        )
+    else:
+        ref_height, ref_width = orig_h, orig_w
+        logging.info("[HyP3] Reference grid kept at native size %dx%d.", ref_width, ref_height)
+
+    ref_crs = orig_crs
+
+    # Read the first file at the chosen (possibly downsampled) resolution
+    # to get the actual affine transform for that resolution.
+    with rasterio.open(str(los_files[0])) as ref_src:
+        data0 = ref_src.read(1, out_shape=(ref_height, ref_width),
+                             resampling=Resampling.bilinear).astype(np.float32)
+        # Compute the adjusted transform for the downsampled grid
+        x_scale = orig_w / ref_width
+        y_scale = orig_h / ref_height
+        ref_transform = ref_src.transform * ref_src.transform.scale(x_scale, y_scale)
+
+    # Build lat/lon coordinate grids for the (possibly downsampled) reference
+    col_arr = np.arange(ref_width)
+    row_arr = np.arange(ref_height)
+    c_grid, r_grid = np.meshgrid(col_arr, row_arr)
+    # Use pixel center (+ 0.5)
+    lon_raw, lat_raw = ref_transform * (c_grid + 0.5, r_grid + 0.5)
+    if ref_crs and ref_crs.to_epsg() != 4326:
+        transformer_to_wgs = pyproj.Transformer.from_crs(
+            ref_crs.to_epsg(), 4326, always_xy=True
+        )
+        lon_grid_h, lat_grid_h = transformer_to_wgs.transform(lon_raw, lat_raw)
+    else:
+        lon_grid_h, lat_grid_h = lon_raw, lat_raw
+
+    logging.info("[HyP3] Coordinate grid built: lat=[%.4f,%.4f] lon=[%.4f,%.4f]",
+                 float(lat_grid_h.min()), float(lat_grid_h.max()),
+                 float(lon_grid_h.min()), float(lon_grid_h.max()))
+
+    def _read_on_ref(tif_path: Path) -> np.ndarray:
+        """Read a displacement GeoTIFF resampled/downsampled onto the reference grid."""
+        with rasterio.open(str(tif_path)) as src:
+            nd = src.nodata
+            if (src.width == ref_width and src.height == ref_height
+                    and src.crs == ref_crs and src.transform == ref_transform):
+                # Same grid — read directly
+                data = src.read(1).astype(np.float32)
+            else:
+                # Different grid or resolution — reproject + downsample in one step
+                data = np.zeros((ref_height, ref_width), dtype=np.float32)
+                reproject(
+                    source=rasterio.band(src, 1),
+                    destination=data,
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=ref_transform,
+                    dst_crs=ref_crs,
+                    resampling=Resampling.bilinear,
+                    dst_nodata=np.nan,
+                )
+                nd = np.nan
+        # Mask nodata
+        if nd is not None and not (isinstance(nd, float) and np.isnan(nd)):
+            data[data == nd] = np.nan
+        data[data == 0.0] = np.nan  # HyP3 ocean/nodata mask
+        return data
+
+    # ------------------------------------------------------------------
+    # Collect per-interferogram velocity arrays (mm/yr) and weights
+    # ------------------------------------------------------------------
+    # Map igram folder prefix -> days (from igram_meta)
+    # Used as a fallback only if dates cannot be parsed from the folder name.
+    days_map: dict[str, int] = {}
+    for m in igram_meta:
+        folder = m.get("extracted_folder") or m.get("filename", "").replace(".zip", "")
+        days_map[folder] = m.get("days", 0)
+
+    vel_stacks_los: list[np.ndarray] = []
+    vel_stacks_vert: list[np.ndarray] = []
+    weights: list[float] = []
+    igram_stats_hyp3: list[dict] = []
+
+    logging.info("[HyP3] Reading %d interferograms into velocity stacks...", len(los_files))
+    for ifg_idx, los_f in enumerate(los_files):
+        folder_name = los_f.parent.name
+        logging.info("[HyP3] Processing interferogram %d/%d: %s", ifg_idx + 1, len(los_files), folder_name)
+
+        # Derive days from the two dates embedded in the folder name (primary method).
+        date_matches = DATE_RE.findall(folder_name)
+        d1_str = date_matches[0] if len(date_matches) >= 1 else "?"
+        d2_str = date_matches[1] if len(date_matches) >= 2 else "?"
+
+        days = 0
+        if len(date_matches) >= 2:
+            try:
+                from datetime import datetime as _dt
+                _d1 = _dt.strptime(date_matches[0], "%Y%m%d").date()
+                _d2 = _dt.strptime(date_matches[1], "%Y%m%d").date()
+                days = abs((_d2 - _d1).days)
+            except ValueError:
+                pass
+
+        # Fallback to igram_meta if date parsing failed
+        if days <= 0:
+            for key, d in days_map.items():
+                if key in folder_name or folder_name in key:
+                    days = d
+                    break
+
+        # Last resort: use 1 to avoid division by zero but log a warning
+        if days <= 0:
+            logging.warning(
+                "[HyP3] No temporal interval found for %s — using 1 day as fallback.", folder_name
+            )
+            days = 1
+
+        logging.info("[HyP3]   dates=%s→%s days=%d — reading los_disp...", d1_str, d2_str, days)
+        try:
+            los_disp = _read_on_ref(los_f)
+            logging.info("[HyP3]   los_disp read OK, shape=%s valid=%.1f%%",
+                         los_disp.shape, 100 * np.isfinite(los_disp).mean())
+        except Exception as exc:
+            logging.warning("[HyP3]   FAILED reading %s: %s", los_f, exc)
+            continue
+
+        # Convert m → mm/yr
+        vel_los = los_disp * 1000.0 / days * 365.25
+        vel_stacks_los.append(vel_los)
+        weights.append(1.0 / days)
+
+        # Per-interferogram stats
+        valid_vals = vel_los[np.isfinite(vel_los)].flatten()
+        if len(valid_vals) > 0:
+            igram_stats_hyp3.append({
+                "date1": d1_str,
+                "date2": d2_str,
+                "label": f"{d1_str} -> {d2_str} (HyP3)",
+                "mean": round(float(np.mean(valid_vals)), 2),
+                "std": round(float(np.std(valid_vals)), 2),
+                "max": round(float(np.max(valid_vals)), 2),
+                "min": round(float(np.min(valid_vals)), 2),
+            })
+
+        # Vertical displacement (only available in 2D and some LOS products)
+        if mode in ("2D", "LOS ASC", "LOS DESC", "LOS"):
+            vert_f = los_f.parent / los_f.name.replace("_los_disp.tif", "_vert_disp.tif")
+            if vert_f.exists():
+                logging.info("[HyP3]   reading vert_disp...")
+                try:
+                    vert_disp = _read_on_ref(vert_f)
+                    vel_vert = vert_disp * 1000.0 / days * 365.25
+                    vel_stacks_vert.append(vel_vert)
+                    logging.info("[HyP3]   vert_disp read OK")
+                except Exception as exc:
+                    logging.warning("[HyP3]   FAILED reading %s: %s", vert_f, exc)
+
+    logging.info("[HyP3] All interferograms processed: %d LOS stacks, %d VERT stacks",
+                 len(vel_stacks_los), len(vel_stacks_vert))
+    if not vel_stacks_los:
+        return {"hyp3_has_data": False}
+
+    # ------------------------------------------------------------------
+    # Weighted median across interferograms per pixel
+    # ------------------------------------------------------------------
+    import time as _time
+    w_arr = np.array(weights, dtype=np.float32)  # (N,)
+    logging.info("[HyP3] Computing weighted median on %d stacks of shape %s...",
+                 len(vel_stacks_los), vel_stacks_los[0].shape)
+    _t0 = _time.time()
+
+    def _weighted_median_stack(stack: list[np.ndarray], w: np.ndarray) -> np.ndarray:
+        """Compute a weighted median across a stack of 2D arrays."""
+        H, W = stack[0].shape
+        stacked = np.stack(stack, axis=0)  # (N, H, W)
+        # Sort along the N axis by value
+        sort_idx = np.argsort(stacked, axis=0)  # (N, H, W)
+        sorted_vals = np.take_along_axis(stacked, sort_idx, axis=0)
+        # Broadcast 1D weights to (N, 1, 1) then tile to (N, H, W) using index order
+        w_3d = w[:, np.newaxis, np.newaxis] * np.ones((1, H, W), dtype=np.float32)
+        sorted_w = np.take_along_axis(w_3d, sort_idx, axis=0)
+        cumw = np.cumsum(sorted_w, axis=0)
+        total_w = cumw[-1:, :, :]  # (1, H, W)
+        half_w = total_w / 2.0
+        # Find the first index where cumulative weight >= half_w
+        above = cumw >= half_w  # (N, H, W)
+        idx_med = np.argmax(above, axis=0)  # (H, W)
+        # Gather
+        result = sorted_vals[idx_med, np.arange(H)[:, None], np.arange(W)[None, :]]
+        # Pixels where all values were NaN stay NaN
+        all_nan = np.all(~np.isfinite(stacked), axis=0)
+        result[all_nan] = np.nan
+        return result
+
+    vel_med_los = _weighted_median_stack(vel_stacks_los, w_arr)
+    logging.info("[HyP3] LOS weighted median done in %.1fs", _time.time() - _t0)
+
+    # For the scalar map shown in UI: LOS is the main variable
+    vel_primary = vel_med_los
+
+    vel_med_vert = None
+    if vel_stacks_vert and len(vel_stacks_vert) == len(vel_stacks_los):
+        logging.info("[HyP3] Computing VERT weighted median...")
+        vel_med_vert = _weighted_median_stack(vel_stacks_vert, w_arr)
+        logging.info("[HyP3] VERT weighted median done")
+
+    # ------------------------------------------------------------------
+    # Build output points
+    # ------------------------------------------------------------------
+    valid_mask = np.isfinite(vel_primary)
+    lats_v = lat_grid_h[valid_mask].flatten()
+    lons_v = lon_grid_h[valid_mask].flatten()
+    los_v = vel_primary[valid_mask].flatten()
+    vert_v = vel_med_vert[valid_mask].flatten() if vel_med_vert is not None else None
+    logging.info("[HyP3] Valid pixels: %d (%.1f%%)", len(los_v),
+                 100 * len(los_v) / max(1, vel_primary.size))
+
+    if len(los_v) == 0:
+        logging.warning("[HyP3] No valid pixels found — returning hyp3_has_data=False")
+        return {"hyp3_has_data": False}
+
+    # Build results using vectorized numpy operations (avoids slow Python loop over 100K+ pixels)
+    results_hyp3_dict: dict = {
+        "lat": np.round(lats_v, 6).tolist(),
+        "lon": np.round(lons_v, 6).tolist(),
+        "velocidad_mm_yr": np.round(los_v, 2).tolist(),
+    }
+    if vert_v is not None:
+        results_hyp3_dict["vel_up_mm_yr"] = np.round(vert_v, 2).tolist()
+
+    # Build list of dicts only for the sample (the full list is too large for JSON serialization)
+    # The sample is constructed directly from arrays below.
+    n_pts = len(los_v)
+
+    stats_hyp3 = {
+        "min": round(float(np.nanmin(los_v)), 2),
+        "max": round(float(np.nanmax(los_v)), 2),
+        "mean": round(float(np.nanmean(los_v)), 2),
+        "std": round(float(np.nanstd(los_v)), 2),
+        "n_points": n_pts,
+        "n_interferograms": len(vel_stacks_los),
+    }
+
+    if vert_v is not None:
+        stats_hyp3["min_up"]  = round(float(np.nanmin(vert_v)), 2)
+        stats_hyp3["max_up"]  = round(float(np.nanmax(vert_v)), 2)
+        stats_hyp3["mean_up"] = round(float(np.nanmean(vert_v)), 2)
+        stats_hyp3["std_up"]  = round(float(np.nanstd(vert_v)), 2)
+
+    # Save CSV HyP3 — build DataFrame from arrays directly (much faster than list-of-dicts)
+    df_hyp3_data: dict = {
+        "Latitud": np.round(lats_v, 6),
+        "Longitud": np.round(lons_v, 6),
+        "Velocidad_LOS_mm_ano": np.round(los_v, 2),
+    }
+    if vert_v is not None:
+        df_hyp3_data["Velocidad_UP_mm_ano"] = np.round(vert_v, 2)
+    df_hyp3 = pd.DataFrame(df_hyp3_data)
+    df_hyp3.to_csv(CSV_FILE_HYP3, index=False)
+
+    if igram_stats_hyp3:
+        df_stats_h = pd.DataFrame(igram_stats_hyp3)
+        df_stats_h = df_stats_h[["label", "date1", "date2", "mean", "min", "max"]]
+        df_stats_h.columns = ["Interferograma", "Fecha Inicio", "Fecha Fin",
+                               "Vel. Media LOS (mm/a)", "Vel. Min LOS (mm/a)", "Vel. Max LOS (mm/a)"]
+        df_stats_h.to_excel(XLSX_FILE_HYP3, index=False)
+    else:
+        if XLSX_FILE_HYP3.exists():
+            XLSX_FILE_HYP3.unlink()
+
+    # Build sample as list of dicts (max 1000 points) using vectorized slicing
+    step_h = max(1, n_pts // 1000)
+    idx_sample = np.arange(0, n_pts, step_h)[:1000]
+    if vert_v is not None:
+        sample_hyp3 = [
+            {"lat": results_hyp3_dict["lat"][i], "lon": results_hyp3_dict["lon"][i],
+             "velocidad_mm_yr": results_hyp3_dict["velocidad_mm_yr"][i],
+             "vel_up_mm_yr": results_hyp3_dict["vel_up_mm_yr"][i]}
+            for i in idx_sample
+        ]
+    else:
+        sample_hyp3 = [
+            {"lat": results_hyp3_dict["lat"][i], "lon": results_hyp3_dict["lon"][i],
+             "velocidad_mm_yr": results_hyp3_dict["velocidad_mm_yr"][i]}
+            for i in idx_sample
+        ]
+
+    return {
+        "hyp3_has_data": True,
+        "stats": stats_hyp3,
+        "sample": sample_hyp3,
+        "igram_stats": igram_stats_hyp3,
+    }
 
 
 
@@ -349,6 +707,7 @@ mintpy.interferogram.filter.wavelength = 400
 mintpy.networkInversion.minTempCoh = 0.5
 mintpy.compute.cluster = local
 mintpy.compute.numWorker = 12
+mintpy.plot = no
 """
 
 
@@ -400,6 +759,16 @@ def _run_mintpy_pipeline(
     """
     warnings.filterwarnings("ignore")
     skipped_phase_closure = False
+
+    # Force non-interactive matplotlib backend BEFORE MintPy imports view.py.
+    # Without this, MintPy's auto-plot (plot_result) tries to open a GUI display
+    # inside the Docker container, which blocks indefinitely.
+    os.environ["MPLBACKEND"] = "Agg"
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+    except Exception:
+        pass
 
     log_path = work_dir / "mintpy_run.log"
     mintpy_logger = logging.getLogger("mintpy")
@@ -973,6 +1342,36 @@ async def process_interferograms(
             sample = results[::step_s][:1000]
             
             output = {"stats": stats, "interferograms": igram_meta, "igram_stats": igram_stats_2d, "sample": sample, "mode": "2D"}
+
+            # HyP3 direct velocity comparison (if los_disp.tif files are present)
+            # In 2D mode, scan both ASC and DESC directories
+            # Wrapped in a thread with timeout to prevent indefinite hangs
+            hyp3_result = None
+            try:
+                if _has_hyp3_displacement(zip_dir_asc) or _has_hyp3_displacement(zip_dir_desc):
+                    _hyp3_dir = zip_dir_asc if _has_hyp3_displacement(zip_dir_asc) else zip_dir_desc
+                    logging.info("[2D] HyP3 displacement files found. Computing with 120s timeout...")
+                    import concurrent.futures as _cf
+                    with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+                        _fut = _ex.submit(_compute_hyp3_velocity, _hyp3_dir, igram_meta, "2D")
+                        try:
+                            hyp3_result = _fut.result(timeout=120)
+                        except _cf.TimeoutError:
+                            logging.warning("[2D] HyP3 velocity timed out (>120s) — skipping.")
+                else:
+                    logging.info("[2D] No HyP3 displacement files found. Skipping.")
+            except Exception as hyp3_exc:
+                logging.warning(f"HyP3 velocity computation failed (non-fatal): {hyp3_exc}")
+
+            if hyp3_result and hyp3_result.get("hyp3_has_data"):
+                output["hyp3"] = {
+                    "stats": hyp3_result["stats"],
+                    "sample": hyp3_result["sample"],
+                    "igram_stats": hyp3_result["igram_stats"],
+                }
+            else:
+                output["hyp3"] = None
+
             RESULTS_DIR.mkdir(parents=True, exist_ok=True)
             RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
             return output
@@ -983,6 +1382,7 @@ async def process_interferograms(
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
 
+            logging.info("[LOS] _run_mintpy_pipeline complete. Reading velocity.h5...")
             velocity_h5 = work_dir / "velocity.h5"
             if not velocity_h5.exists():
                 raise HTTPException(status_code=500, detail="MintPy no generó velocity.h5 en modo LOS.")
@@ -993,8 +1393,7 @@ async def process_interferograms(
                 vel_mm    = vel_data * 1000.0
                 vel_attrs = dict(vf.attrs)
 
-
-
+            logging.info("[LOS] velocity.h5 read. Building lat/lon grid...")
             use_grid = False
             if geometry_geo.exists():
                 with h5py.File(geometry_geo, "r") as gf:
@@ -1006,8 +1405,6 @@ async def process_interferograms(
             if not use_grid:
                 dlat, dlon = float(vel_attrs.get("Y_STEP", -0.001)), float(vel_attrs.get("X_STEP", 0.001))
                 lat0, lon0 = float(vel_attrs.get("Y_FIRST", 0)), float(vel_attrs.get("X_FIRST", 0))
-                # MintPy convention: Y_FIRST / X_FIRST is the CENTER of pixel (0,0).
-                # No +0.5 offset needed.
                 lat_arr_desc  = lat0 + np.arange(vel_mm.shape[0]) * dlat
                 lon_arr_desc  = lon0 + np.arange(vel_mm.shape[1]) * dlon
                 lon_grid, lat_grid = np.meshgrid(lon_arr_desc, lat_arr_desc)
@@ -1016,11 +1413,13 @@ async def process_interferograms(
                     transformer = pyproj.Transformer.from_crs(epsg, 4326, always_xy=True)
                     lon_grid, lat_grid = transformer.transform(lon_grid, lat_grid)
 
+            logging.info("[LOS] Grid built. Filtering valid pixels...")
             valid = np.isfinite(vel_mm)
             lats_v, lons_v, vels_v = lat_grid[valid].flatten(), lon_grid[valid].flatten(), vel_mm[valid].flatten()
             if len(vels_v) == 0:
                 raise HTTPException(status_code=422, detail="No coherentes.")
 
+            logging.info("[LOS] %d valid pixels. Building results list...", len(vels_v))
             results = [{"lat": round(float(lats_v[i]), 6), "lon": round(float(lons_v[i]), 6), "velocidad_mm_yr": round(float(vels_v[i]), 2)} for i in range(len(vels_v))]
             
             all_dates = [m["date1"] for m in igram_meta] + [m["date2"] for m in igram_meta]
@@ -1040,27 +1439,65 @@ async def process_interferograms(
 
             step_s = max(1, len(results) // 1000)
             sample = results[::step_s][:1000]
-            
-            # Simple dataframe
-            cols = ["lat", "lon"]
-            df_csv = pd.DataFrame([{k: r[k] for k in cols} for r in results])
-            df_csv.rename(columns={"lat": "Latitud", "lon": "Longitud"}, inplace=True)
-            df_csv["Velocidad_mm_año"] = [results[i]["velocidad_mm_yr"] for i in range(len(results))]
+
+            logging.info("[LOS] Building CSV DataFrame...")
+            # Build DataFrame efficiently using numpy arrays directly (avoids slow list-of-dicts)
+            df_csv = pd.DataFrame({
+                "Latitud": np.round(lats_v, 6),
+                "Longitud": np.round(lons_v, 6),
+                "Velocidad_mm_año": np.round(vels_v, 2),
+            })
+
+            logging.info("[LOS] DataFrame built (%d rows). Appending interferograms...", len(df_csv))
             df_csv = append_interferograms(df_csv, work_dir, valid)
+
+            logging.info("[LOS] Interferograms appended. Writing CSV...")
             df_csv.to_csv(CSV_FILE, index=False)
-            
+
+            logging.info("[LOS] CSV written. Computing igram stats...")
             igram_stats = get_igram_stats(work_dir, valid)
             if igram_stats:
                 df_stats = pd.DataFrame(igram_stats)
                 df_stats = df_stats[["label", "date1", "date2", "mean", "min", "max"]]
                 df_stats.columns = ["Interferograma", "Fecha Inicio", "Fecha Fin", "Velocidad Media (mm/a)", "Velocidad Min (mm/a)", "Velocidad Max (mm/a)"]
+                logging.info("[LOS] Writing Excel stats...")
                 df_stats.to_excel(XLSX_FILE, index=False)
             else:
                 if XLSX_FILE.exists(): XLSX_FILE.unlink()
 
             output = {"stats": stats, "interferograms": igram_meta, "igram_stats": igram_stats, "sample": sample, "mode": "LOS"}
+
+            # HyP3 direct velocity comparison — run in a thread with timeout to avoid hanging
+            logging.info("[LOS] Checking for HyP3 displacement files...")
+            hyp3_result = None
+            try:
+                if _has_hyp3_displacement(zip_dir):
+                    logging.info("[LOS] HyP3 displacement files found. Computing with 120s timeout...")
+                    import concurrent.futures as _cf
+                    with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+                        _fut = _ex.submit(_compute_hyp3_velocity, zip_dir, igram_meta, selected_mode or "LOS")
+                        try:
+                            hyp3_result = _fut.result(timeout=120)
+                        except _cf.TimeoutError:
+                            logging.warning("[LOS] HyP3 velocity timed out (>120s) — skipping.")
+                else:
+                    logging.info("[LOS] No HyP3 displacement files found. Skipping.")
+            except Exception as hyp3_exc:
+                logging.warning(f"HyP3 velocity computation failed (non-fatal): {hyp3_exc}")
+
+            if hyp3_result and hyp3_result.get("hyp3_has_data"):
+                output["hyp3"] = {
+                    "stats": hyp3_result["stats"],
+                    "sample": hyp3_result["sample"],
+                    "igram_stats": hyp3_result["igram_stats"],
+                }
+            else:
+                output["hyp3"] = None
+
+            logging.info("[LOS] Writing results JSON and returning response...")
             RESULTS_DIR.mkdir(parents=True, exist_ok=True)
             RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
+            logging.info("[LOS] Done. Returning output.")
             return output
 
     finally:
@@ -1351,6 +1788,34 @@ def export_quiver_up():
     if not p.exists():
         raise HTTPException(status_code=404, detail="No hay mapa quiver UP.")
     return FileResponse(p, media_type="image/png", filename="deformacion_up_mintpy.png")
+
+
+@router.get("/export_csv_hyp3")
+def export_csv_hyp3():
+    if not CSV_FILE_HYP3.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No hay datos HyP3 en CSV. Procesa interferogramas con archivos los_disp.tif primero.",
+        )
+    return FileResponse(
+        CSV_FILE_HYP3,
+        media_type="text/csv",
+        filename="velocidad_deformacion_hyp3.csv",
+    )
+
+
+@router.get("/export_xlsx_hyp3")
+def export_xlsx_hyp3():
+    if not XLSX_FILE_HYP3.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No hay datos HyP3 en XLSX. Procesa interferogramas con archivos los_disp.tif primero.",
+        )
+    return FileResponse(
+        XLSX_FILE_HYP3,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="resumen_interferogramas_hyp3.xlsx",
+    )
 
 
 

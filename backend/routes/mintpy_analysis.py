@@ -254,6 +254,7 @@ def _compute_hyp3_velocity(
     crop_lat_max: float = None,
     crop_lon_min: float = None,
     crop_lon_max: float = None,
+    ref_work_dir: Path = None,
 ) -> dict:
     """Compute deformation velocity maps directly from HyP3 los_disp.tif/vert_disp.tif files.
 
@@ -276,57 +277,100 @@ def _compute_hyp3_velocity(
         return {"hyp3_has_data": False}
 
     # ------------------------------------------------------------------
-    # Build reference grid — with automatic downsampling if needed.
-    # Full-resolution HyP3 products (3500×2500 = 8.75 M px) require
-    # ~11 GB RAM in _weighted_median_stack. We clamp to _HYPP3_MAX_PIXELS.
+    # Build reference grid.
+    # Priority: (1) MintPy output grid (regular WGS84 — identical visual pattern),
+    #           (2) downsampled native UTM grid from los_disp.tif (fallback).
+    # Using MintPy's grid ensures HyP3 points are sampled at the exact same
+    # lat/lon positions as the SBAS result, making side-by-side comparison valid.
     # ------------------------------------------------------------------
-    with rasterio.open(str(los_files[0])) as ref_src:
-        orig_w, orig_h = ref_src.width, ref_src.height
-        orig_crs = ref_src.crs
-        orig_transform = ref_src.transform
-        orig_nodata = ref_src.nodata
+    import rasterio.crs as _rcrs
+    from rasterio.transform import from_bounds as _from_bounds
 
-    native_pixels = orig_h * orig_w
-    logging.info("[HyP3] Reference file native size: %dx%d = %d px (EPSG:%s)",
-                 orig_w, orig_h, native_pixels, orig_crs.to_epsg() if orig_crs else "?")
+    _built_from_mintpy = False
+    if ref_work_dir is not None:
+        geo_h5  = ref_work_dir / "inputs" / "geometryGeo.h5"
+        vel_h5_ = ref_work_dir / "velocity.h5"
+        try:
+            if geo_h5.exists():
+                with h5py.File(str(geo_h5), "r") as gf:
+                    _attrs = dict(gf.attrs)
+                    if "latitude" in gf and "longitude" in gf:
+                        lat_grid_h = gf["latitude"][:].astype(np.float64)
+                        lon_grid_h = gf["longitude"][:].astype(np.float64)
+                        ref_height, ref_width = lat_grid_h.shape
+                        _built_from_mintpy = True
+            if not _built_from_mintpy and vel_h5_.exists():
+                with h5py.File(str(vel_h5_), "r") as vf:
+                    _va = dict(vf.attrs)
+                    _vel_shape = vf["velocity"].shape
+                dlat = float(_va.get("Y_STEP", -0.001))
+                dlon = float(_va.get("X_STEP",  0.001))
+                lat0 = float(_va.get("Y_FIRST", 0))
+                lon0 = float(_va.get("X_FIRST", 0))
+                ref_height, ref_width = _vel_shape[-2], _vel_shape[-1]
+                lat_arr = lat0 + np.arange(ref_height) * dlat
+                lon_arr = lon0 + np.arange(ref_width)  * dlon
+                lon_grid_h, lat_grid_h = np.meshgrid(lon_arr, lat_arr)
+                if abs(lat0) > 90 or abs(lon0) > 180:
+                    _epsg = int(_va.get("EPSG", 32616))
+                    _tf = pyproj.Transformer.from_crs(_epsg, 4326, always_xy=True)
+                    lon_grid_h, lat_grid_h = _tf.transform(lon_grid_h, lat_grid_h)
+                _built_from_mintpy = True
+        except Exception as _mint_err:
+            logging.warning("[HyP3] Could not read MintPy grid from %s: %s — falling back to native grid.",
+                            ref_work_dir, _mint_err)
 
-    if native_pixels > _HYPP3_MAX_PIXELS:
-        scale = math.sqrt(_HYPP3_MAX_PIXELS / native_pixels)
-        ref_height = max(1, int(orig_h * scale))
-        ref_width  = max(1, int(orig_w  * scale))
+    if _built_from_mintpy:
+        # Reconstruct a regular WGS84 affine transform from the lat/lon arrays.
+        # MintPy geocoded grids are regular in lat/lon (constant Y_STEP / X_STEP).
+        _dlon = float(lon_grid_h[0, 1] - lon_grid_h[0, 0]) if ref_width  > 1 else 0.001
+        _dlat = float(lat_grid_h[1, 0] - lat_grid_h[0, 0]) if ref_height > 1 else -0.001
+        # rasterio Affine: top-left corner = center of pixel (0,0) - half pixel
+        from affine import Affine
+        ref_transform = Affine(
+            _dlon, 0.0, lon_grid_h[0, 0] - _dlon / 2,
+            0.0, _dlat, lat_grid_h[0, 0] - _dlat / 2,
+        )
+        ref_crs = _rcrs.CRS.from_epsg(4326)
         logging.info(
-            "[HyP3] Downsampling reference grid from %dx%d to %dx%d (scale=%.3f) to avoid OOM.",
-            orig_w, orig_h, ref_width, ref_height, scale
+            "[HyP3] Using MintPy WGS84 grid as reference: %dx%d, dlat=%.5f dlon=%.5f",
+            ref_width, ref_height, _dlat, _dlon
         )
     else:
-        ref_height, ref_width = orig_h, orig_w
-        logging.info("[HyP3] Reference grid kept at native size %dx%d.", ref_width, ref_height)
+        # Fallback: build grid from the los_disp.tif native projection (UTM) downsampled.
+        with rasterio.open(str(los_files[0])) as ref_src:
+            orig_w, orig_h = ref_src.width, ref_src.height
+            orig_crs = ref_src.crs
+            orig_nodata = ref_src.nodata
 
-    ref_crs = orig_crs
+        native_pixels = orig_h * orig_w
+        logging.info("[HyP3] Fallback — native size: %dx%d = %d px (EPSG:%s)",
+                     orig_w, orig_h, native_pixels, orig_crs.to_epsg() if orig_crs else "?")
 
-    # Read the first file at the chosen (possibly downsampled) resolution
-    # to get the actual affine transform for that resolution.
-    with rasterio.open(str(los_files[0])) as ref_src:
-        data0 = ref_src.read(1, out_shape=(ref_height, ref_width),
-                             resampling=Resampling.bilinear).astype(np.float32)
-        # Compute the adjusted transform for the downsampled grid
-        x_scale = orig_w / ref_width
-        y_scale = orig_h / ref_height
-        ref_transform = ref_src.transform * ref_src.transform.scale(x_scale, y_scale)
+        if native_pixels > _HYPP3_MAX_PIXELS:
+            _scale = math.sqrt(_HYPP3_MAX_PIXELS / native_pixels)
+            ref_height = max(1, int(orig_h * _scale))
+            ref_width  = max(1, int(orig_w  * _scale))
+            logging.info("[HyP3] Downsampling to %dx%d (scale=%.3f).", ref_width, ref_height, _scale)
+        else:
+            ref_height, ref_width = orig_h, orig_w
 
-    # Build lat/lon coordinate grids for the (possibly downsampled) reference
-    col_arr = np.arange(ref_width)
-    row_arr = np.arange(ref_height)
-    c_grid, r_grid = np.meshgrid(col_arr, row_arr)
-    # Use pixel center (+ 0.5)
-    lon_raw, lat_raw = ref_transform * (c_grid + 0.5, r_grid + 0.5)
-    if ref_crs and ref_crs.to_epsg() != 4326:
-        transformer_to_wgs = pyproj.Transformer.from_crs(
-            ref_crs.to_epsg(), 4326, always_xy=True
-        )
-        lon_grid_h, lat_grid_h = transformer_to_wgs.transform(lon_raw, lat_raw)
-    else:
-        lon_grid_h, lat_grid_h = lon_raw, lat_raw
+        ref_crs = orig_crs
+        with rasterio.open(str(los_files[0])) as ref_src:
+            _x_scale = orig_w / ref_width
+            _y_scale = orig_h / ref_height
+            ref_transform = ref_src.transform * ref_src.transform.scale(_x_scale, _y_scale)
+
+        # Build WGS84 coordinate arrays from the (possibly projected) transform
+        col_arr = np.arange(ref_width)
+        row_arr = np.arange(ref_height)
+        c_grid, r_grid = np.meshgrid(col_arr, row_arr)
+        lon_raw, lat_raw = ref_transform * (c_grid + 0.5, r_grid + 0.5)
+        if ref_crs and ref_crs.to_epsg() != 4326:
+            _tf2 = pyproj.Transformer.from_crs(ref_crs.to_epsg(), 4326, always_xy=True)
+            lon_grid_h, lat_grid_h = _tf2.transform(lon_raw, lat_raw)
+        else:
+            lon_grid_h, lat_grid_h = lon_raw, lat_raw
 
     logging.info("[HyP3] Coordinate grid built: lat=[%.4f,%.4f] lon=[%.4f,%.4f]",
                  float(lat_grid_h.min()), float(lat_grid_h.max()),
@@ -525,11 +569,39 @@ def _compute_hyp3_velocity(
         )
     else:
         logging.info("[HyP3] No crop bounds provided — using full image extent.")
+
+    # Apply MintPy's coherence/valid-pixel mask so HyP3 shows the exact same pixels
+    # as MintPy SBAS (same diagonal-stripe SAR swath pattern, same coherent locations).
+    # Without this, HyP3 fills the full rectangular crop while MintPy shows only
+    # coherent pixels, making the visual patterns differ.
+    if _built_from_mintpy and ref_work_dir is not None:
+        _vel_h5_ref = ref_work_dir / "velocity.h5"
+        if _vel_h5_ref.exists():
+            try:
+                with h5py.File(str(_vel_h5_ref), "r") as _vf:
+                    _mintpy_vel = _vf["velocity"][:].astype(np.float32)
+                # MintPy marks no-data as NaN or 0; pixels set to exactly 0 in
+                # areas where InSAR had no coherent data should be excluded too.
+                _mintpy_valid = np.isfinite(_mintpy_vel) & (_mintpy_vel != 0.0)
+                if _mintpy_valid.shape == valid_mask.shape:
+                    valid_mask = valid_mask & _mintpy_valid
+                    logging.info(
+                        "[HyP3] MintPy coherence mask applied: %d pixels remain (%.1f%% of grid)",
+                        int(valid_mask.sum()), 100 * valid_mask.sum() / max(1, valid_mask.size)
+                    )
+                else:
+                    logging.warning(
+                        "[HyP3] MintPy velocity shape %s != HyP3 grid shape %s — skipping coherence mask.",
+                        _mintpy_valid.shape, valid_mask.shape
+                    )
+            except Exception as _vmask_err:
+                logging.warning("[HyP3] Could not read MintPy velocity for coherence mask: %s", _vmask_err)
+
     lats_v = lat_grid_h[valid_mask].flatten()
     lons_v = lon_grid_h[valid_mask].flatten()
     los_v = vel_primary[valid_mask].flatten()
     vert_v = vel_med_vert[valid_mask].flatten() if vel_med_vert is not None else None
-    logging.info("[HyP3] Valid pixels: %d (%.1f%%)", len(los_v),
+    logging.info("[HyP3] Valid pixels after all masks: %d (%.1f%%)", len(los_v),
                  100 * len(los_v) / max(1, vel_primary.size))
 
     if len(los_v) == 0:
@@ -1384,6 +1456,7 @@ async def process_interferograms(
                             _compute_hyp3_velocity,
                             _hyp3_dir, igram_meta, "2D",
                             crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max,
+                            work_dir_desc,  # use DESC MintPy grid as spatial reference
                         )
                         try:
                             hyp3_result = _fut.result(timeout=120)
@@ -1510,6 +1583,7 @@ async def process_interferograms(
                             _compute_hyp3_velocity,
                             zip_dir, igram_meta, selected_mode or "LOS",
                             crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max,
+                            work_dir,  # use MintPy grid as spatial reference
                         )
                         try:
                             hyp3_result = _fut.result(timeout=120)

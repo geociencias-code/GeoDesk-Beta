@@ -250,6 +250,10 @@ def _compute_hyp3_velocity(
     zip_dir: Path,
     igram_meta: list,
     mode: str,
+    crop_lat_min: float = None,
+    crop_lat_max: float = None,
+    crop_lon_min: float = None,
+    crop_lon_max: float = None,
 ) -> dict:
     """Compute deformation velocity maps directly from HyP3 los_disp.tif/vert_disp.tif files.
 
@@ -495,9 +499,32 @@ def _compute_hyp3_velocity(
         logging.info("[HyP3] VERT weighted median done")
 
     # ------------------------------------------------------------------
-    # Build output points
+    # Build output points — apply crop mask if provided
     # ------------------------------------------------------------------
     valid_mask = np.isfinite(vel_primary)
+
+    # If the user selected an AOI crop, restrict HyP3 output to the same region.
+    # MintPy already does this via mintpy.subset.lalo; here we replicate it for
+    # the direct HyP3 velocity so both modes cover the same geographic extent.
+    if any(v is not None for v in (crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max)):
+        lat_lo = float(crop_lat_min if crop_lat_min is not None else -90)
+        lat_hi = float(crop_lat_max if crop_lat_max is not None else  90)
+        lon_lo = float(crop_lon_min if crop_lon_min is not None else -180)
+        lon_hi = float(crop_lon_max if crop_lon_max is not None else  180)
+        # Normalise: user may pass min>max if they drew the box right-to-left / bottom-to-top
+        lat_lo, lat_hi = min(lat_lo, lat_hi), max(lat_lo, lat_hi)
+        lon_lo, lon_hi = min(lon_lo, lon_hi), max(lon_lo, lon_hi)
+        crop_mask = (
+            (lat_grid_h >= lat_lo) & (lat_grid_h <= lat_hi) &
+            (lon_grid_h >= lon_lo) & (lon_grid_h <= lon_hi)
+        )
+        valid_mask = valid_mask & crop_mask
+        logging.info(
+            "[HyP3] Crop applied: lat=[%.4f,%.4f] lon=[%.4f,%.4f] — %d pixels inside AOI",
+            lat_lo, lat_hi, lon_lo, lon_hi, int(valid_mask.sum())
+        )
+    else:
+        logging.info("[HyP3] No crop bounds provided — using full image extent.")
     lats_v = lat_grid_h[valid_mask].flatten()
     lons_v = lon_grid_h[valid_mask].flatten()
     los_v = vel_primary[valid_mask].flatten()
@@ -1353,7 +1380,11 @@ async def process_interferograms(
                     logging.info("[2D] HyP3 displacement files found. Computing with 120s timeout...")
                     import concurrent.futures as _cf
                     with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
-                        _fut = _ex.submit(_compute_hyp3_velocity, _hyp3_dir, igram_meta, "2D")
+                        _fut = _ex.submit(
+                            _compute_hyp3_velocity,
+                            _hyp3_dir, igram_meta, "2D",
+                            crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max,
+                        )
                         try:
                             hyp3_result = _fut.result(timeout=120)
                         except _cf.TimeoutError:
@@ -1475,7 +1506,11 @@ async def process_interferograms(
                     logging.info("[LOS] HyP3 displacement files found. Computing with 120s timeout...")
                     import concurrent.futures as _cf
                     with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
-                        _fut = _ex.submit(_compute_hyp3_velocity, zip_dir, igram_meta, selected_mode or "LOS")
+                        _fut = _ex.submit(
+                            _compute_hyp3_velocity,
+                            zip_dir, igram_meta, selected_mode or "LOS",
+                            crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max,
+                        )
                         try:
                             hyp3_result = _fut.result(timeout=120)
                         except _cf.TimeoutError:

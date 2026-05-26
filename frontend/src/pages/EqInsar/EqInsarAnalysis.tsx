@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from "react";
 import axios from "axios";
 import { API_URL } from "../../services/api";
 
-const SATELLITES = ["sentinel1","alos2","terrasar","cosmo","radarsat2","nisar","saocom","envisat","iceye"];
 
 const card: React.CSSProperties = {
   background:"rgba(255,255,255,0.04)",
@@ -15,7 +14,6 @@ const card: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width:"100%", boxSizing:"border-box", padding:"8px 10px",
   borderRadius:8, border:"1px solid rgba(255,255,255,0.15)",
-  background:"rgba(255,255,255,0.06)", color:"#e2e8f0", fontSize:"0.87rem",
 };
 
 const label: React.CSSProperties = {
@@ -149,7 +147,8 @@ function InSARImage({b64, title, stats}:{b64:string,title:string,stats?:Record<s
   );
 }
 
-function FaultForm({p, set, showNoiseControls=true}:{p:any, set:(x:any)=>void, showNoiseControls?:boolean}) {
+function FaultForm({p, set, showNoiseControls=true, satellites=[]}:{p:any, set:(x:any)=>void, showNoiseControls?:boolean, satellites?:string[]}) {
+  const safeSatellites = Array.isArray(satellites) ? satellites : [];
   return (
     <>
       <p style={sectionTitle}>Parámetros del Sismo</p>
@@ -171,7 +170,7 @@ function FaultForm({p, set, showNoiseControls=true}:{p:any, set:(x:any)=>void, s
       <span style={label}>Satélite</span>
       <select style={inputStyle} value={p.satellite} onChange={e=>set({...p,satellite:e.target.value})}>
         <option value="">— Manual —</option>
-        {SATELLITES.map(s=><option key={s} value={s}>{s}</option>)}
+        {safeSatellites.map(s=><option key={s} value={s}>{s}</option>)}
       </select>
       <span style={label}>Órbita</span>
       <select style={inputStyle} value={p.orbit} onChange={e=>set({...p,orbit:e.target.value})}>
@@ -214,7 +213,7 @@ const defaultSingle = {
   wrap:true, nu:0.25,
 };
 
-function TabSingle() {
+function TabSingle({satellites=[]}:{satellites?:string[]}) {
   const [p, setP] = useState<any>(defaultSingle);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -235,7 +234,7 @@ function TabSingle() {
   return (
     <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:20,alignItems:"start"}}>
       <div style={card}>
-        <FaultForm p={p} set={setP}/>
+        <FaultForm p={p} set={setP} satellites={satellites}/>
         <button style={btn()} onClick={run} disabled={busy}>
           {busy ? "⏳ Generando..." : "🌍 Generar Interferograma"}
         </button>
@@ -296,7 +295,7 @@ const defaultTS = {
   ...defaultSingle, n_pre:5, n_event:1, n_post:5, output_type:"phase",
 };
 
-function TabTimeseries() {
+function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
   const [p, setP] = useState<any>(defaultTS);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -318,7 +317,7 @@ function TabTimeseries() {
   return (
     <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:20,alignItems:"start"}}>
       <div style={card}>
-        <FaultForm p={p} set={setP} showNoiseControls={false}/>
+        <FaultForm p={p} set={setP} showNoiseControls={false} satellites={satellites}/>
         <p style={{...sectionTitle,marginTop:16}}>Configuración de Frames</p>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
           <NumField label="Pre-sismo" value={p.n_pre} onChange={v=>setP({...p,n_pre:Math.round(v??p.n_pre)})}/>
@@ -377,11 +376,12 @@ function TabTimeseries() {
 }
 
 // TAB 3 Generación por Lotes
-function TabBatch() {
+function TabBatch({satellites=[]}:{satellites?:string[]}) {
   const [p, setP] = useState({n_samples:50, mw_range:[5.0,7.0], satellite:"sentinel1", orbit:"ascending", seed:42});
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState("");
+  const safeSatellites = Array.isArray(satellites) ? satellites : [];
 
   const run = async () => {
     setBusy(true); setError(""); setResult(null);
@@ -405,7 +405,7 @@ function TabBatch() {
         </div>
         <span style={label}>Satélite</span>
         <select style={inputStyle} value={p.satellite} onChange={e=>setP({...p,satellite:e.target.value})}>
-          {SATELLITES.map(s=><option key={s} value={s}>{s}</option>)}
+          {safeSatellites.map(s=><option key={s} value={s}>{s}</option>)}
         </select>
         <span style={label}>Órbita</span>
         <select style={inputStyle} value={p.orbit} onChange={e=>setP({...p,orbit:e.target.value})}>
@@ -471,6 +471,20 @@ const TABS = [
 
 export default function EqInsarAnalysis() {
   const [tab, setTab] = useState("single");
+  const [satellites, setSatellites] = useState<string[]>([]);
+
+  useEffect(() => {
+    const fetchSatellites = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/api/eq_insar/satellites`);
+        setSatellites(res.data.satellites || []);
+      } catch (err) {
+        console.error("Error cargando satélites:", err);
+        setSatellites([]);
+      }
+    };
+    fetchSatellites();
+  }, []);
 
   return (
     <div style={{
@@ -506,9 +520,9 @@ export default function EqInsarAnalysis() {
         ))}
       </div>
 
-      {tab==="single" && <TabSingle/>}
-      {tab==="timeseries" && <TabTimeseries/>}
-      {tab==="batch" && <TabBatch/>}
+      {tab==="single" && <TabSingle satellites={satellites}/>}
+      {tab==="timeseries" && <TabTimeseries satellites={satellites}/>}
+      {tab==="batch" && <TabBatch satellites={satellites}/>}
     </div>
   );
 }

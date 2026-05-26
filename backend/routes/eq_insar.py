@@ -24,10 +24,6 @@ from eq_insar import (
 
 router = APIRouter(prefix="/api/eq_insar", tags=["EQ-INSAR"])
 
-SATELLITES = [
-    "sentinel1", "alos2", "terrasar", "cosmo",
-    "radarsat2", "nisar", "saocom", "envisat", "iceye",
-]
 
 
 
@@ -207,14 +203,16 @@ class SingleParams(BaseModel):
             self: La instancia validada.
         
         Raises:
-            ValueError: Si falta Mw y M0, o si el satélite no está en SATELLITES.
+            ValueError: Si falta Mw y M0, o si el satélite no es válido.
         """
         if self.Mw is None and self.M0 is None:
             raise ValueError("Se debe proveer Mw o M0")
-        if self.satellite and self.satellite not in SATELLITES:
+        satellites_dict = list_satellites()
+        available_satellites = list(satellites_dict.keys())
+        if self.satellite and self.satellite not in available_satellites:
             raise ValueError(
                 f"Satélite '{self.satellite}' no soportado. "
-                f"Opciones: {', '.join(SATELLITES)}"
+                f"Opciones: {', '.join(available_satellites)}"
             )
         return self
 
@@ -292,7 +290,9 @@ class BatchParams(BaseModel):
             raise ValueError("mw_range debe tener exactamente 2 elementos [min, max]")
         if self.mw_range[0] >= self.mw_range[1]:
             raise ValueError("mw_range[0] debe ser menor que mw_range[1]")
-        if self.satellite not in SATELLITES:
+        satellites_dict = list_satellites()
+        available_satellites = list(satellites_dict.keys())
+        if self.satellite not in available_satellites:
             raise ValueError(f"Satélite '{self.satellite}' no soportado.")
         return self
 
@@ -309,10 +309,9 @@ def get_satellites() -> dict:
         dict: Diccionario con clave 'satellites' que contiene una lista
               de nombres de satélites soportados.
     """
-
-    print(f"original: {list_satellites()}")
-    print(f"harcodeada: {SATELLITES}")
-    return {"satellites": SATELLITES}
+    satellites_dict = list_satellites()
+    satellite_names = list(satellites_dict.keys())
+    return {"satellites": satellite_names}
 
 
 @router.post("/generate")

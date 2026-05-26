@@ -220,7 +220,13 @@ def generate_ts(params: TimeseriesParams):
     _check_available()
 
     try:
-        kwargs = params.model_dump(exclude_none=True)
+        all_kwargs = params.model_dump(exclude_none=True)
+
+        # generate_timeseries no acepta: add_noise, add_orbital_ramp
+        # (el ruido se controla internamente via noise_amplitude_m)
+        TIMESERIES_EXCLUDED = {"add_noise", "add_orbital_ramp"}
+        kwargs = {k: v for k, v in all_kwargs.items() if k not in TIMESERIES_EXCLUDED}
+
         result = generate_timeseries(**kwargs)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

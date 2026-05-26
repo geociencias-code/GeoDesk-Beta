@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import axios from "axios";
 import { API_URL } from "../../services/api";
 
@@ -35,13 +35,86 @@ const sectionTitle: React.CSSProperties = {
 };
 
 // ── Generic field helpers ──────────────────────────────────────────────────
-function NumField({label:lbl, value, onChange, min, max, step=0.1}:
-  {label:string,value:number,onChange:(v:number)=>void,min?:number,max?:number,step?:number}) {
+/**
+ * NumField usa un string interno (raw) para que el usuario pueda:
+ *   - Borrar todos los dígitos (campo vacío)
+ *   - Escribir el signo negativo antes del número ("-85")
+ *   - Escribir decimales ("-0.05")
+ * Solo llama a onChange cuando el texto es un número válido.
+ */
+function NumField({
+  label: lbl,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+}) {
+  const [raw, setRaw] = useState<string>(
+    value !== undefined ? String(value) : ""
+  );
+  const prevVal = useRef(value);
+
+  // Si el padre actualiza el valor desde afuera (p.e. reset), sincronizar el raw
+  useEffect(() => {
+    if (prevVal.current !== value) {
+      prevVal.current = value;
+      // No sobreescribir si el usuario está en mitad de escribir
+      const isIntermediate =
+        raw === "" || raw === "-" || raw === "." || raw === "-."
+        || raw.endsWith(".");
+      if (!isIntermediate) {
+        setRaw(value !== undefined ? String(value) : "");
+      }
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const str = e.target.value;
+    setRaw(str);
+    // Estados intermedios: vacío, "-", ".", "-.", terminan en "."
+    if (
+      str === "" ||
+      str === "-" ||
+      str === "." ||
+      str === "-." ||
+      str.endsWith(".")
+    ) {
+      onChange(undefined);
+      return;
+    }
+    const n = parseFloat(str);
+    if (!isNaN(n)) {
+      onChange(n);
+    }
+    // Si no es parseable, dejamos el raw visible pero no actualizamos al padre
+  };
+
+  const isInvalid =
+    raw !== "" &&
+    raw !== "-" &&
+    raw !== "." &&
+    raw !== "-." &&
+    !raw.endsWith(".") &&
+    isNaN(parseFloat(raw));
+
   return (
     <div>
       <span style={label}>{lbl}</span>
-      <input type="number" style={inputStyle} value={value} step={step}
-        min={min} max={max} onChange={e=>onChange(parseFloat(e.target.value)||0)} />
+      <input
+        type="text"
+        inputMode="decimal"
+        value={raw}
+        placeholder="0"
+        onChange={handleChange}
+        style={{
+          ...inputStyle,
+          border: `1px solid ${
+            isInvalid ? "rgba(239,68,68,0.7)" : "rgba(255,255,255,0.15)"
+          }`,
+        }}
+      />
     </div>
   );
 }
@@ -76,23 +149,23 @@ function InSARImage({b64, title, stats}:{b64:string,title:string,stats?:Record<s
   );
 }
 
-function FaultForm({p, set}:{p:any,set:(x:any)=>void}) {
+function FaultForm({p, set, showNoiseControls=true}:{p:any, set:(x:any)=>void, showNoiseControls?:boolean}) {
   return (
     <>
       <p style={sectionTitle}>Parámetros del Sismo</p>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <NumField label="Magnitud Mw" value={p.Mw} onChange={v=>set({...p,Mw:v})} min={4} max={9.5} step={0.1}/>
-        <NumField label="Profundidad (km)" value={p.depth_km} onChange={v=>set({...p,depth_km:v})} min={1} max={700}/>
-        <NumField label="Rumbo Strike (°)" value={p.strike_deg} onChange={v=>set({...p,strike_deg:v})} min={0} max={360}/>
-        <NumField label="Buzamiento Dip (°)" value={p.dip_deg} onChange={v=>set({...p,dip_deg:v})} min={0} max={90}/>
-        <NumField label="Deslizamiento Rake (°)" value={p.rake_deg} onChange={v=>set({...p,rake_deg:v})} min={-180} max={180}/>
-        <NumField label="Epicentro X (km)" value={p.xcen_km} onChange={v=>set({...p,xcen_km:v})} min={-200} max={200}/>
-        <NumField label="Epicentro Y (km)" value={p.ycen_km} onChange={v=>set({...p,ycen_km:v})} min={-200} max={200}/>
+        <NumField label="Magnitud Mw" value={p.Mw} onChange={v=>set({...p,Mw:v??p.Mw})}/>
+        <NumField label="Profundidad (km)" value={p.depth_km} onChange={v=>set({...p,depth_km:v??p.depth_km})}/>
+        <NumField label="Rumbo Strike (°)" value={p.strike_deg} onChange={v=>set({...p,strike_deg:v??p.strike_deg})}/>
+        <NumField label="Buzamiento Dip (°)" value={p.dip_deg} onChange={v=>set({...p,dip_deg:v??p.dip_deg})}/>
+        <NumField label="Deslizamiento Rake (°)" value={p.rake_deg} onChange={v=>set({...p,rake_deg:v??p.rake_deg})}/>
+        <NumField label="Epicentro X (km)" value={p.xcen_km} onChange={v=>set({...p,xcen_km:v??p.xcen_km})}/>
+        <NumField label="Epicentro Y (km)" value={p.ycen_km} onChange={v=>set({...p,ycen_km:v??p.ycen_km})}/>
       </div>
       <p style={sectionTitle}>Grilla</p>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <NumField label="Tamaño grilla (px)" value={p.grid_size} onChange={v=>set({...p,grid_size:Math.round(v)})} min={32} max={512} step={16}/>
-        <NumField label="Extensión (km)" value={p.grid_extent_km} onChange={v=>set({...p,grid_extent_km:v})} min={5} max={500}/>
+        <NumField label="Tamaño grilla (px)" value={p.grid_size} onChange={v=>set({...p,grid_size:Math.round(v??p.grid_size)})}/>
+        <NumField label="Extensión (km)" value={p.grid_extent_km} onChange={v=>set({...p,grid_extent_km:v??p.grid_extent_km})}/>
       </div>
       <p style={sectionTitle}>Satélite InSAR</p>
       <span style={label}>Satélite</span>
@@ -107,21 +180,25 @@ function FaultForm({p, set}:{p:any,set:(x:any)=>void}) {
       </select>
       {!p.satellite && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-          <NumField label="Incidencia (°)" value={p.incidence_deg??33} onChange={v=>set({...p,incidence_deg:v})} min={0} max={90}/>
-          <NumField label="Heading (°)" value={p.heading_deg??-13} onChange={v=>set({...p,heading_deg:v})} min={-360} max={360}/>
-          <NumField label="Longitud de onda (m)" value={p.wavelength_m??0.05546} onChange={v=>set({...p,wavelength_m:v})} min={0.01} max={0.5} step={0.001}/>
+          <NumField label="Incidencia (°)" value={p.incidence_deg??33} onChange={v=>set({...p,incidence_deg:v??p.incidence_deg})}/>
+          <NumField label="Heading (°)" value={p.heading_deg??-13} onChange={v=>set({...p,heading_deg:v??p.heading_deg})}/>
+          <NumField label="Longitud de onda (m)" value={p.wavelength_m??0.05546} onChange={v=>set({...p,wavelength_m:v??p.wavelength_m})}/>
         </div>
       )}
       <p style={sectionTitle}>Opciones Avanzadas</p>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <ToggleField label="Agregar ruido" value={p.add_noise} onChange={v=>set({...p,add_noise:v})}/>
-        <ToggleField label="Rampa orbital" value={p.add_orbital_ramp} onChange={v=>set({...p,add_orbital_ramp:v})}/>
+        {showNoiseControls && (
+          <>
+            <ToggleField label="Agregar ruido" value={p.add_noise} onChange={v=>set({...p,add_noise:v})}/>
+            <ToggleField label="Rampa orbital" value={p.add_orbital_ramp} onChange={v=>set({...p,add_orbital_ramp:v})}/>
+          </>
+        )}
         <ToggleField label="Fase envuelta" value={p.wrap} onChange={v=>set({...p,wrap:v})}/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:4}}>
-        <NumField label="Amplitud ruido (m)" value={p.noise_amplitude_m} onChange={v=>set({...p,noise_amplitude_m:v})} min={0} max={0.5} step={0.001}/>
-        <NumField label="Razón de Poisson ν" value={p.nu} onChange={v=>set({...p,nu:v})} min={0} max={0.499} step={0.01}/>
-        <NumField label="Semilla (seed)" value={p.seed??0} onChange={v=>set({...p,seed:v||undefined})} min={0} step={1}/>
+        <NumField label="Amplitud ruido (m)" value={p.noise_amplitude_m} onChange={v=>set({...p,noise_amplitude_m:v??p.noise_amplitude_m})}/>
+        <NumField label="Razón de Poisson ν" value={p.nu} onChange={v=>set({...p,nu:v??p.nu})}/>
+        <NumField label="Semilla (seed)" value={p.seed??0} onChange={v=>set({...p,seed:v})}/>
       </div>
     </>
   );
@@ -241,12 +318,12 @@ function TabTimeseries() {
   return (
     <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:20,alignItems:"start"}}>
       <div style={card}>
-        <FaultForm p={p} set={setP}/>
+        <FaultForm p={p} set={setP} showNoiseControls={false}/>
         <p style={{...sectionTitle,marginTop:16}}>Configuración de Frames</p>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-          <NumField label="Pre-sismo" value={p.n_pre} onChange={v=>setP({...p,n_pre:Math.round(v)})} min={0} max={20} step={1}/>
-          <NumField label="Evento" value={p.n_event} onChange={v=>setP({...p,n_event:Math.round(v)})} min={1} max={5} step={1}/>
-          <NumField label="Post-sismo" value={p.n_post} onChange={v=>setP({...p,n_post:Math.round(v)})} min={0} max={20} step={1}/>
+          <NumField label="Pre-sismo" value={p.n_pre} onChange={v=>setP({...p,n_pre:Math.round(v??p.n_pre)})}/>
+          <NumField label="Evento" value={p.n_event} onChange={v=>setP({...p,n_event:Math.round(v??p.n_event)})}/>
+          <NumField label="Post-sismo" value={p.n_post} onChange={v=>setP({...p,n_post:Math.round(v??p.n_post)})}/>
         </div>
         <span style={label}>Tipo de salida</span>
         <select style={inputStyle} value={p.output_type} onChange={e=>setP({...p,output_type:e.target.value})}>
@@ -320,11 +397,11 @@ function TabBatch() {
     <div style={{display:"grid",gridTemplateColumns:"300px 1fr",gap:20,alignItems:"start"}}>
       <div style={card}>
         <p style={sectionTitle}>Configuración del Lote</p>
-        <NumField label="Número de muestras" value={p.n_samples} onChange={v=>setP({...p,n_samples:Math.round(v)})} min={1} max={5000} step={10}/>
+        <NumField label="Número de muestras" value={p.n_samples} onChange={v=>setP({...p,n_samples:Math.round(v??p.n_samples)})}/>
         <span style={label}>Rango de Magnitud Mw</span>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <NumField label="Mw mínimo" value={p.mw_range[0]} onChange={v=>setP({...p,mw_range:[v,p.mw_range[1]]})} min={4} max={9} step={0.1}/>
-          <NumField label="Mw máximo" value={p.mw_range[1]} onChange={v=>setP({...p,mw_range:[p.mw_range[0],v]})} min={4} max={9.5} step={0.1}/>
+          <NumField label="Mw mínimo" value={p.mw_range[0]} onChange={v=>setP({...p,mw_range:[v??p.mw_range[0],p.mw_range[1]]})}/>
+          <NumField label="Mw máximo" value={p.mw_range[1]} onChange={v=>setP({...p,mw_range:[p.mw_range[0],v??p.mw_range[1]]})}/>
         </div>
         <span style={label}>Satélite</span>
         <select style={inputStyle} value={p.satellite} onChange={e=>setP({...p,satellite:e.target.value})}>
@@ -335,7 +412,7 @@ function TabBatch() {
           <option value="ascending">Ascendente</option>
           <option value="descending">Descendente</option>
         </select>
-        <NumField label="Semilla (seed)" value={p.seed} onChange={v=>setP({...p,seed:Math.round(v)})} min={0} step={1}/>
+        <NumField label="Semilla (seed)" value={p.seed} onChange={v=>setP({...p,seed:Math.round(v??p.seed)})}/>
         <button style={btn()} onClick={run} disabled={busy}>
           {busy ? `⏳ Generando ${p.n_samples} muestras...` : "🔬 Generar Lote ML"}
         </button>

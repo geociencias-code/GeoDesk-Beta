@@ -12,20 +12,14 @@ from pydantic import BaseModel, Field, model_validator
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
+from eq_insar import (
+    generate_synthetic_insar,
+    generate_timeseries,
+    generate_training_batch,
+    batch_to_arrays,
+    list_satellites,
+)
 
-# EQ-INSAR
-try:
-    from eq_insar import (
-        generate_synthetic_insar,
-        generate_timeseries,
-        generate_training_batch,
-        batch_to_arrays,
-        list_satellites,
-    )
-    EQ_INSAR_AVAILABLE = True
-except ImportError:
-    EQ_INSAR_AVAILABLE = False
 
 
 router = APIRouter(prefix="/api/eq_insar", tags=["EQ-INSAR"])
@@ -36,16 +30,36 @@ SATELLITES = [
 ]
 
 
-def _check_available() -> None:
-    if not EQ_INSAR_AVAILABLE:
-        raise HTTPException(
-            status_code=503,
-            detail="La librería eq-insar no está instalada. "
-                   "Ejecuta: pip install eq-insar",
-        )
 
+def _array_to_png_b64(
+        arr: np.ndarray, 
+        cmap: str = "RdBu_r", 
+        vmin=None, 
+        vmax=None
+) -> str:
+    """
+    Convierte un arreglo NumPy a una imagen PNG codificada en base64.
+    
+    Genera una visualización de un arreglo 2D usando matplotlib con barra
+    de colores y guarda el resultado como una imagen PNG comprimida,
+    codificada en base64 para transmisión HTTP.
+    
+    Args:
+        arr: Arreglo NumPy 2D a visualizar.
+        cmap: Nombre del mapa de colores de matplotlib. Por defecto es "RdBu_r"
+              (rojo-azul invertido).
+        vmin: Valor mínimo para normalización del mapa de colores. Si es None,
+              se usa el mínimo del arreglo.
+        vmax: Valor máximo para normalización del mapa de colores. Si es None,
+              se usa el máximo del arreglo.
+    
+    Returns:
+        str: Cadena codificada en base64 de la imagen PNG.
+    
+    Raises:
+        ValueError: Si el arreglo está vacío o contiene solo valores NaN.
 
-def _array_to_png_b64(arr: np.ndarray, cmap: str = "RdBu_r", vmin=None, vmax=None) -> str:
+    """
     fig, ax = plt.subplots(figsize=(5, 5), dpi=100)
     im = ax.imshow(arr, cmap=cmap, vmin=vmin, vmax=vmax, origin="upper")
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -60,10 +74,44 @@ def _array_to_png_b64(arr: np.ndarray, cmap: str = "RdBu_r", vmin=None, vmax=Non
 
 
 def _wrapped_phase_png(phase: np.ndarray) -> str:
+    """
+    Convierte un arreglo de fase envuelta a imagen PNG en base64.
+    
+    Utiliza mapa de colores HSV para visualizar fase en rango [-π, π],
+    apropiado para interferogramas con fase envuelta.
+    
+    Args:
+        phase: Arreglo NumPy 2D de valores de fase en radianes.
+    
+    Returns:
+        str: Cadena codificada en base64 de la imagen PNG.
+
+    """
+    
     return _array_to_png_b64(phase, cmap="hsv", vmin=-math.pi, vmax=math.pi)
 
 
 def _stats(arr: np.ndarray) -> dict:
+    """
+    Calcula estadísticas descriptivas de un arreglo.
+    
+    Calcula el mínimo, máximo, media y desviación estándar ignorando
+    valores NaN.
+    
+    Args:
+        arr: Arreglo NumPy de cualquier dimensión.
+    
+    Returns:
+        dict: Diccionario con las siguientes claves:
+            - 'min' (float): Valor mínimo del arreglo.
+            - 'max' (float): Valor máximo del arreglo.
+            - 'mean' (float): Media del arreglo.
+            - 'std' (float): Desviación estándar del arreglo.
+    
+    Raises:
+        ValueError: Si el arreglo contiene solo valores NaN.
+
+    """
     return {
         "min": float(np.nanmin(arr)),
         "max": float(np.nanmax(arr)),
@@ -73,6 +121,44 @@ def _stats(arr: np.ndarray) -> dict:
 
 
 class SingleParams(BaseModel):
+    """
+    Parámetros para generar un interferograma sintético individual.
+    
+    Modelo Pydantic que valida y encapsula todos los parámetros necesarios
+    para generar un interferograma sintético basado en el modelo de punto
+    fuente de Davis (1986).
+    
+    Atributos:
+        Mw: Magnitud momento del evento sísmico [4.0, 9.5]. Se requiere
+            Mw o M0.
+        M0: Momento sísmico escalar en N·m (> 0). Alternativa a Mw.
+        strike_deg: Rumbo de la falla en grados [0, 360].
+        dip_deg: Buzamiento de la falla en grados [0, 90].
+        rake_deg: Ángulo de deslizamiento en grados [-180, 180].
+        xcen_km: Coordenada X del epicentro en km.
+        ycen_km: Coordenada Y del epicentro en km.
+        depth_km: Profundidad del evento en km (0, 700].
+        grid_size: Tamaño de la grilla (32-512). Si es None, se calcula
+                   desde grid_extent_km y grid_spacing_km.
+        grid_extent_km: Semiancho de la grilla en km (> 0).
+        grid_spacing_km: Espaciado de la grilla en km (> 0).
+        nu: Razón de Poisson [0, 0.5]. Por defecto 0.25.
+        mu: Módulo de corte en Pa (> 0). Por defecto 3e10 Pa.
+        satellite: Nombre del satélite. Debe estar en SATELLITES.
+        orbit: Órbita del satélite: 'ascending' o 'descending'.
+        incidence_deg: Ángulo de incidencia en grados [0, 90].
+        heading_deg: Rumbo del satélite en grados [-360, 360].
+        wavelength_m: Longitud de onda de radiación en metros (> 0).
+        add_noise: Si True, agrega ruido gaussiano al interferograma.
+        noise_amplitude_m: Amplitud del ruido en metros (≥ 0).
+        add_orbital_ramp: Si True, agrega rampa orbital polinómica.
+        wrap: Si True, envuelve la fase a [-π, π].
+        seed: Semilla para reproducibilidad (≥ 0). Si es None, es aleatoria.
+    
+    Raises:
+        ValueError: Si no se proporciona Mw ni M0, o si el satélite
+                    no es válido.
+    """
     # Fuente sísmica — se necesita Mw o M0
     Mw: Optional[float] = Field(None, ge=4.0, le=9.5, description="Magnitud momento")
     M0: Optional[float] = Field(None, gt=0, description="Momento sísmico escalar en N·m")
@@ -114,6 +200,15 @@ class SingleParams(BaseModel):
 
     @model_validator(mode="after")
     def check_source(self):
+        """
+        Valida que se proporcione al menos Mw o M0 y que el satélite sea válido.
+        
+        Returns:
+            self: La instancia validada.
+        
+        Raises:
+            ValueError: Si falta Mw y M0, o si el satélite no está en SATELLITES.
+        """
         if self.Mw is None and self.M0 is None:
             raise ValueError("Se debe proveer Mw o M0")
         if self.satellite and self.satellite not in SATELLITES:
@@ -125,6 +220,27 @@ class SingleParams(BaseModel):
 
 
 class TimeseriesParams(SingleParams):
+    """
+    Parámetros para generar una serie temporal de interferogramas sintéticos.
+    
+    Extiende SingleParams con parámetros específicos para series temporales
+    que incluyen frames pre-sísmicos, co-sísmicos y post-sísmicos.
+    
+    Atributos:
+        n_pre: Número de frames pre-sismo [0, 20]. Por defecto 5.
+        n_event: Número de frames del evento sísmico [1, 5]. Por defecto 1.
+        n_post: Número de frames post-sismo [0, 20]. Por defecto 5.
+        output_type: Tipo de salida: 'phase' (fase envuelta) o 'displacement'
+                     (desplazamiento LOS). Por defecto 'phase'.
+        deformation_threshold_m: Umbral de deformación en metros (≥ 0).
+                                 Por defecto 0.005 m.
+    
+    Nota:
+        Los parámetros add_noise y add_orbital_ramp de SingleParams son
+        ignorados por la función generate_timeseries, que controla internamente
+        el ruido mediante noise_amplitude_m.
+
+    """
     n_pre: int = Field(5, ge=0, le=20, description="Frames pre-sismo")
     n_event: int = Field(1, ge=1, le=5, description="Frames del evento")
     n_post: int = Field(5, ge=0, le=20, description="Frames post-sismo")
@@ -133,6 +249,27 @@ class TimeseriesParams(SingleParams):
 
 
 class BatchParams(BaseModel):
+    """
+    Parámetros para generar un lote de interferogramas sintéticos.
+    
+    Modelo Pydantic para especificar parámetros de generación de lotes
+    de interferogramas sintéticos para entrenamiento de modelos.
+    
+    Atributos:
+        n_samples: Número de muestras en el lote [1, 5000]. Por defecto 100.
+        mw_range: Rango de magnitud [min, max] en escala de magnitud momento.
+                  Por defecto [5.0, 7.0].
+        satellite: Nombre del satélite. Debe estar en SATELLITES.
+                   Por defecto "sentinel1".
+        orbit: Órbita del satélite: 'ascending' o 'descending'.
+               Por defecto "ascending".
+        seed: Semilla para reproducibilidad (≥ 0). Si es None, es aleatoria.
+    
+    Raises:
+        ValueError: Si mw_range no tiene exactamente 2 elementos, si
+                    mw_range[0] >= mw_range[1], o si el satélite es inválido.
+
+    """
     n_samples: int = Field(100, ge=1, le=5000, description="Número de muestras")
     mw_range: List[float] = Field([5.0, 7.0], description="Rango de magnitud [min, max]")
     satellite: str = Field("sentinel1")
@@ -141,6 +278,16 @@ class BatchParams(BaseModel):
 
     @model_validator(mode="after")
     def check_mw_range(self):
+        """
+        Valida que mw_range sea válido y que el satélite sea soportado.
+        
+        Returns:
+            self: La instancia validada.
+        
+        Raises:
+            ValueError: Si mw_range no tiene 2 elementos, es inválido,
+                        o si el satélite no está soportado.
+        """
         if len(self.mw_range) != 2:
             raise ValueError("mw_range debe tener exactamente 2 elementos [min, max]")
         if self.mw_range[0] >= self.mw_range[1]:
@@ -151,20 +298,63 @@ class BatchParams(BaseModel):
 
 
 @router.get("/satellites")
-def get_satellites():
+def get_satellites() -> dict:
+    """
+    Obtiene la lista de satélites soportados.
+    
+    Endpoint GET que retorna todos los satélites disponibles para
+    simulaciones de InSAR.
+    
+    Returns:
+        dict: Diccionario con clave 'satellites' que contiene una lista
+              de nombres de satélites soportados.
+    """
+
+    print(f"original: {list_satellites()}")
+    print(f"harcodeada: {SATELLITES}")
     return {"satellites": SATELLITES}
 
 
 @router.post("/generate")
-def generate_single(params: SingleParams):
+def generate_single(params: SingleParams) -> JSONResponse:
     """
-    Genera un interferograma sintético individual basado en el modelo
-    de punto fuente de Davis (1986).
+    Genera un interferograma sintético individual.
+    
+    Endpoint POST que genera un interferograma sintético basado en el
+    modelo de punto fuente de Davis (1986). Retorna imágenes PNG
+    codificadas en base64 para fase envuelta, fase desenvuelta,
+    desplazamiento LOS y componentes de desplazamiento 3D.
+    
+    Args:
+        params: Instancia de SingleParams con parámetros de simulación.
+    
+    Returns:
+        JSONResponse: Respuesta JSON con estructura:
+            {
+                "success": True,
+                "images": {
+                    "phase_wrapped": str (PNG base64),
+                    "phase_unwrapped": str (PNG base64),
+                    "los_displacement": str (PNG base64),
+                    "displacement_east": str (PNG base64),
+                    "displacement_north": str (PNG base64),
+                    "displacement_up": str (PNG base64)
+                },
+                "statistics": {
+                    "los_displacement": {min, max, mean, std},
+                    "phase_unwrapped": {min, max, mean, std},
+                    "displacement_east": {min, max, mean, std},
+                    "displacement_north": {min, max, mean, std},
+                    "displacement_up": {min, max, mean, std}
+                },
+                "metadata": dict,
+                "grid_shape": [height, width]
+            }
+    
+    Raises:
+        HTTPException: Si ocurre un error en la simulación (status 400).
 
-    Retorna imágenes PNG en base64: fase envuelta, fase desenvuelta,
-    desplazamiento LOS, y los tres componentes de desplazamiento.
     """
-    _check_available()
 
     try:
         kwargs = params.model_dump(exclude_none=True)
@@ -172,7 +362,7 @@ def generate_single(params: SingleParams):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # --- Imágenes ---
+    # Imágenes
     phase_noisy = result["phase_noisy"]
     phase_unwrapped = result["phase_unwrapped"]
     los_disp = result["los_displacement"]
@@ -192,7 +382,7 @@ def generate_single(params: SingleParams):
         "displacement_up": _array_to_png_b64(Uz, "seismic"),
     }
 
-    # --- Estadísticas ---
+    # Estadísticas
     statistics = {
         "los_displacement": _stats(los_disp),
         "phase_unwrapped": _stats(phase_unwrapped),
@@ -211,19 +401,39 @@ def generate_single(params: SingleParams):
 
 
 @router.post("/timeseries")
-def generate_ts(params: TimeseriesParams):
+def generate_ts(params: TimeseriesParams) -> JSONResponse:
     """
-    Genera una serie de tiempo de interferogramas sintéticos.
-    Incluye frames pre-sismo (solo ruido), co-sísmicos (señal + ruido)
-    y post-sísmicos (solo ruido).
+    Genera una serie temporal de interferogramas sintéticos.
+    
+    Endpoint POST que genera una serie de interferogramas sintéticos
+    que simula la evolución temporal de la deformación sísmica, incluyendo
+    frames pre-sísmicos (solo ruido), co-sísmicos (señal + ruido) y
+    post-sísmicos (solo ruido).
+    
+    Args:
+        params: Instancia de TimeseriesParams con parámetros de la serie.
+    
+    Returns:
+        JSONResponse: Respuesta JSON con estructura:
+            {
+                "success": True,
+                "n_frames": int,
+                "n_pre": int,
+                "n_event": int,
+                "n_post": int,
+                "frames": [str, ...] (PNG base64),
+                "labels": [str, ...] (PNG base64 de máscaras),
+                "frame_labels": [str, ...] (etiquetas de frames),
+                "metadata": dict
+            }
+    
+    Raises:
+        HTTPException: Si ocurre un error en la simulación (status 400).
     """
-    _check_available()
 
     try:
         all_kwargs = params.model_dump(exclude_none=True)
 
-        # generate_timeseries no acepta: add_noise, add_orbital_ramp
-        # (el ruido se controla internamente via noise_amplitude_m)
         TIMESERIES_EXCLUDED = {"add_noise", "add_orbital_ramp"}
         kwargs = {k: v for k, v in all_kwargs.items() if k not in TIMESERIES_EXCLUDED}
 
@@ -268,15 +478,43 @@ def generate_ts(params: TimeseriesParams):
 
 
 @router.post("/batch")
-def generate_batch(params: BatchParams):
+def generate_batch(params: BatchParams) -> JSONResponse:
     """
-    Genera un lote de interferogramas sintéticos aleatorios para
-    entrenamiento de modelos de ML/DL.
-
-    Retorna estadísticas descriptivas del lote. No devuelve imágenes
-    individuales (lotes grandes), sino ejemplos representativos.
+    Genera un lote de interferogramas sintéticos para entrenamiento.
+    
+    Endpoint POST que genera un conjunto de interferogramas sintéticos
+    aleatorios para entrenamiento de modelos de aprendizaje automático.
+    Retorna estadísticas del lote y ejemplos visuales representativos
+    en lugar de todas las imágenes (para lotes grandes).
+    
+    Args:
+        params: Instancia de BatchParams con parámetros del lote.
+    
+    Returns:
+        JSONResponse: Respuesta JSON con estructura:
+            {
+                "success": True,
+                "n_samples": int,
+                "n_frames_per_sample": int,
+                "array_shape_X": [N, T, H, W],
+                "array_shape_y": [N, T, H, W],
+                "mw_statistics": {
+                    "min": float,
+                    "max": float,
+                    "mean": float,
+                    "std": float
+                },
+                "preview_images": [str, ...] (hasta 4 PNG base64),
+                "params": {
+                    "satellite": str,
+                    "mw_range": [float, float],
+                    "seed": int or None
+                }
+            }
+    
+    Raises:
+        HTTPException: Si ocurre un error en la generación (status 400).
     """
-    _check_available()
 
     try:
         batch = generate_training_batch(
@@ -293,7 +531,6 @@ def generate_batch(params: BatchParams):
     n_samples = X.shape[0]
     n_frames = X.shape[1]
 
-    # Algunos ejemplos visuales (primeros 4)
     n_preview = min(4, n_samples)
     previews: List[str] = []
     for i in range(n_preview):

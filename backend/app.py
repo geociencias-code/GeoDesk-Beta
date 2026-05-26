@@ -9,6 +9,7 @@ from routes.alaska import router as alaska_router
 
 from routes.solicitar_imagenes_automatico import router as solicitar_imagenes_router
 from routes.mintpy_analysis import router as mintpy_router
+from routes.eq_insar import router as eq_insar_router
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 app = FastAPI(title="MyApp API", version="0.1.0")
@@ -38,6 +39,7 @@ app.include_router(alaska_router)
 
 app.include_router(solicitar_imagenes_router)
 app.include_router(mintpy_router)
+app.include_router(eq_insar_router)
 
 @app.get("/api/health")
 def health_root():

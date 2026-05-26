@@ -5,7 +5,8 @@ import {
   Map, 
   ChevronDown, 
   Layers,
-  Activity
+  Activity,
+  Zap
 } from "lucide-react";
 
 const cx = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
@@ -34,6 +35,7 @@ type ItemProps = {
 
 export default function Navbar({ activeSection, onChangeSection }: NavbarProps) {
   const [isAlaskaOpen, setIsAlaskaOpen] = useState(false);
+  const [isHerramientasOpen, setIsHerramientasOpen] = useState(false);
 
   const handleKey = (section: string, toggleSubmenu?: () => void) => (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -153,6 +155,15 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
             id="mintpy-analysis"
             label="Análisis InSAR (MintPy)"
             icon={<Activity size={18} />}
+            hasSubmenu={false}
+            onChangeSection={onChangeSection}
+            activeSection={activeSection}
+          />
+
+          <Item
+            id="eq-insar"
+            label="EQ-INSAR Sintético"
+            icon={<Zap size={18} />}
             hasSubmenu={false}
             onChangeSection={onChangeSection}
             activeSection={activeSection}

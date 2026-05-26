@@ -415,8 +415,10 @@ def _compute_hyp3_velocity(
         days_map[folder] = m.get("days", 0)
 
     vel_stacks_los: list[np.ndarray] = []
+    los_disp_mm_stacks: list[np.ndarray] = []   # cumulative displacement per ifgram (mm)
     vel_stacks_vert: list[np.ndarray] = []
     weights: list[float] = []
+    date_pairs: list[tuple[str, str]] = []  # (d1_str, d2_str) for each accepted ifgram
     igram_stats_hyp3: list[dict] = []
 
     logging.info("[HyP3] Reading %d interferograms into velocity stacks...", len(los_files))
@@ -462,9 +464,12 @@ def _compute_hyp3_velocity(
             logging.warning("[HyP3]   FAILED reading %s: %s", los_f, exc)
             continue
 
-        # Convert m → mm/yr
-        vel_los = los_disp * 1000.0 / days * 365.25
+        # Convert m → mm (cumulative displacement) and mm/yr (annualised velocity)
+        los_disp_mm = los_disp * 1000.0                    # mm — cumulative over the pair
+        vel_los = los_disp_mm / days * 365.25              # mm/yr — annualised
         vel_stacks_los.append(vel_los)
+        los_disp_mm_stacks.append(los_disp_mm)
+        date_pairs.append((d1_str, d2_str))
         weights.append(1.0 / days)
 
         # Per-interferogram stats
@@ -480,11 +485,14 @@ def _compute_hyp3_velocity(
                 "min": round(float(np.min(valid_vals)), 2),
             })
 
-        # Vertical displacement (only available in 2D and some LOS products)
-        if mode in ("2D", "LOS ASC", "LOS DESC", "LOS"):
+        # Vertical displacement — ONLY for true 2D dual-track decomposition.
+        # HyP3 provides vert_disp.tif as a single-track approximation
+        # (vert ≈ los / cos(incidence)) which is NOT valid in LOS-only mode
+        # because it ignores horizontal deformation entirely.
+        if mode == "2D":
             vert_f = los_f.parent / los_f.name.replace("_los_disp.tif", "_vert_disp.tif")
             if vert_f.exists():
-                logging.info("[HyP3]   reading vert_disp...")
+                logging.info("[HyP3]   reading vert_disp (2D mode)...")
                 try:
                     vert_disp = _read_on_ref(vert_f)
                     vel_vert = vert_disp * 1000.0 / days * 365.25
@@ -492,6 +500,8 @@ def _compute_hyp3_velocity(
                     logging.info("[HyP3]   vert_disp read OK")
                 except Exception as exc:
                     logging.warning("[HyP3]   FAILED reading %s: %s", vert_f, exc)
+        else:
+            logging.debug("[HyP3]   mode=%s — skipping vert_disp (single-track LOS only)", mode)
 
     logging.info("[HyP3] All interferograms processed: %d LOS stacks, %d VERT stacks",
                  len(vel_stacks_los), len(vel_stacks_vert))
@@ -637,6 +647,7 @@ def _compute_hyp3_velocity(
         stats_hyp3["std_up"]  = round(float(np.nanstd(vert_v)), 2)
 
     # Save CSV HyP3 — build DataFrame from arrays directly (much faster than list-of-dicts)
+    # Include per-interferogram deformation and velocity columns to match MintPy CSV format.
     df_hyp3_data: dict = {
         "Latitud": np.round(lats_v, 6),
         "Longitud": np.round(lons_v, 6),
@@ -644,6 +655,15 @@ def _compute_hyp3_velocity(
     }
     if vert_v is not None:
         df_hyp3_data["Velocidad_UP_mm_ano"] = np.round(vert_v, 2)
+
+    # Per-interferogram columns: cumulative deformation (mm) and annualised velocity (mm/yr)
+    for _i, (_d1, _d2) in enumerate(date_pairs):
+        _suffix = f"{_d1}_{_d2}"
+        _ifg_arr = los_disp_mm_stacks[_i][valid_mask].flatten()
+        _vel_arr  = vel_stacks_los[_i][valid_mask].flatten()
+        df_hyp3_data[f"Deform_HyP3_{_suffix}_mm"]     = np.round(_ifg_arr, 2)
+        df_hyp3_data[f"Vel_HyP3_{_suffix}_mm_ano"]    = np.round(_vel_arr,  2)
+
     df_hyp3 = pd.DataFrame(df_hyp3_data)
     df_hyp3.to_csv(CSV_FILE_HYP3, index=False)
 

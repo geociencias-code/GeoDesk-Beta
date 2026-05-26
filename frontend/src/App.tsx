@@ -10,6 +10,7 @@ import DownloadFiles from "./pages/Alaska/DownloadFiles";
 import SolicitarImagenesAutomatico from "./pages/SolicitarImagenesAutomatico/SolicitarImagenesAutomatico";
 
 import MintPyAnalysis from "./pages/MintPy/MintPyAnalysis";
+import EqInsarAnalysis from "./pages/EqInsar/EqInsarAnalysis";
 
 import Inicio from "./pages/Home/Home";
 import api, { API_URL } from "./services/api";
@@ -261,6 +262,13 @@ const App: React.FC = () => {
         return (
           <div style={{ height: "100%", overflowY: "auto" }}>
             <MintPyAnalysis />
+          </div>
+        );
+
+      case "eq-insar":
+        return (
+          <div style={{ height: "100%", overflowY: "auto" }}>
+            <EqInsarAnalysis />
           </div>
         );
 

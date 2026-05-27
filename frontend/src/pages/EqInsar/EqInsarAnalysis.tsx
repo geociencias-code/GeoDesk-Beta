@@ -267,6 +267,82 @@ function FaultForm({
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// Botón de exportación a Excel
+// ══════════════════════════════════════════════════════════════════════════
+function ExportXlsxButton({ params }: { params: any }) {
+  const [downloading, setDownloading] = useState(false);
+  const [dlError, setDlError] = useState("");
+
+  const handleExport = async () => {
+    setDownloading(true);
+    setDlError("");
+    try {
+      const body = { ...params };
+      if (!body.satellite) delete body.satellite;
+
+      const res = await fetch(`${API_URL}/api/eq_insar/export_xlsx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail ?? res.statusText);
+      }
+
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      // Nombre sugerido desde el header Content-Disposition, o genérico
+      const cd   = res.headers.get("Content-Disposition") ?? "";
+      const match = cd.match(/filename="?([^"]+)"?/);
+      a.download = match ? match[1] : "eq_insar_data.xlsx";
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setDlError(e.message);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        onClick={handleExport}
+        disabled={downloading}
+        style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 18px", borderRadius: 8, border: "none",
+          cursor: downloading ? "wait" : "pointer",
+          background: downloading
+            ? "rgba(34,197,94,0.3)"
+            : "linear-gradient(135deg,#059669,#047857)",
+          color: "white", fontWeight: 600, fontSize: "0.85rem",
+          opacity: downloading ? 0.75 : 1,
+          transition: "opacity 0.2s",
+        }}
+      >
+        {downloading ? (
+          <>⏳ Exportando...</>
+        ) : (
+          <>📥 Exportar a Excel (.xlsx)</>
+        )}
+      </button>
+      {dlError && (
+        <p style={{ color: "#f87171", fontSize: "0.78rem", marginTop: 4, maxWidth: 280 }}>
+          ❌ {dlError}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // TAB 1 Interferograma Individual
 
 const defaultSingle = {
@@ -354,8 +430,11 @@ function TabSingle({satellites=[]}:{satellites?:string[]}) {
         {result && (
           <>
             <div style={{...card,marginBottom:16}}>
-              <p style={sectionTitle}>Metadatos del Modelo</p>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                <p style={{...sectionTitle,margin:0}}>Metadatos del Modelo</p>
+                <ExportXlsxButton params={p}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:10}}>
                 {[
                   ["Mw", result.metadata.Mw?.toFixed(2)],
                   ["Strike", `${result.metadata.strike_deg}°`],

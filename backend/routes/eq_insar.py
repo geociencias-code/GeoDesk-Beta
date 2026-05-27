@@ -7,7 +7,7 @@ from typing import List, Optional
 
 import numpy as np
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 import matplotlib
 matplotlib.use("Agg")
@@ -573,3 +573,140 @@ def generate_batch(params: BatchParams) -> JSONResponse:
             "seed": params.seed,
         },
     })
+
+
+@router.post("/export_xlsx")
+def export_xlsx(params: SingleParams) -> StreamingResponse:
+    """
+    Genera un interferograma sintético y exporta los datos de las 6 matrices
+    a un archivo Excel (.xlsx), con una hoja por cada variable:
+
+      Hoja 1  — Metadatos          : pares clave-valor del modelo
+      Hoja 2  — Coordenadas_X_km   : grilla X en kilómetros
+      Hoja 3  — Coordenadas_Y_km   : grilla Y en kilómetros
+      Hoja 4  — Fase_Envuelta      : phase_noisy  (rad)  [con ruido]
+      Hoja 5  — Fase_Desenvuelta   : phase_unwrapped (rad)
+      Hoja 6  — LOS_Displacement   : los_displacement (m)
+      Hoja 7  — Displacement_Este  : Ue  (m)
+      Hoja 8  — Displacement_Norte : Un  (m)
+      Hoja 9  — Displacement_Vertical : Uz (m)
+
+    Returns:
+        StreamingResponse: archivo .xlsx para descarga directa.
+    """
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+
+        kwargs = params.model_dump(exclude_none=True)
+        result = generate_synthetic_insar(**kwargs)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    meta   = result["metadata"]
+    X_km   = result["X_km"]
+    Y_km   = result["Y_km"]
+    arrays = [
+        ("Fase_Envuelta",         result["phase_noisy"],       "Fase envuelta con ruido (rad)"),
+        ("Fase_Desenvuelta",      result["phase_unwrapped"],   "Fase desenvuelta (rad)"),
+        ("LOS_Displacement",      result["los_displacement"],  "Desplazamiento línea de visión (m)"),
+        ("Displacement_Este",     result["Ue"],                "Desplazamiento Este (m)"),
+        ("Displacement_Norte",    result["Un"],                "Desplazamiento Norte (m)"),
+        ("Displacement_Vertical", result["Uz"],                "Desplazamiento Vertical (m)"),
+    ]
+
+    wb = openpyxl.Workbook()
+
+    # ── Estilos ────────────────────────────────────────────────────────────
+    header_font  = Font(bold=True, color="FFFFFF")
+    header_fill  = PatternFill("solid", fgColor="4F46E5")
+    header_align = Alignment(horizontal="center")
+    title_font   = Font(bold=True, size=13)
+
+    def _style_header(cell):
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = header_align
+
+    # ── Hoja 1: Metadatos ──────────────────────────────────────────────────
+    ws_meta = wb.active
+    ws_meta.title = "Metadatos"
+    ws_meta.append(["Parámetro", "Valor"])
+    _style_header(ws_meta["A1"])
+    _style_header(ws_meta["B1"])
+    ws_meta.column_dimensions["A"].width = 28
+    ws_meta.column_dimensions["B"].width = 22
+
+    meta_labels = {
+        "Mw":              "Magnitud momento (Mw)",
+        "M0_Nm":           "Momento sísmico M0 (N·m)",
+        "strike_deg":      "Rumbo Strike (°)",
+        "dip_deg":         "Buzamiento Dip (°)",
+        "rake_deg":        "Deslizamiento Rake (°)",
+        "xcen_km":         "Epicentro X (km)",
+        "ycen_km":         "Epicentro Y (km)",
+        "depth_km":        "Profundidad (km)",
+        "source_type":     "Tipo de fuente",
+        "grid_extent_km":  "Extensión de grilla (km)",
+        "grid_spacing_km": "Espaciado de grilla (km)",
+        "nu":              "Razón de Poisson (ν)",
+        "mu_Pa":           "Módulo de corte (Pa)",
+        "satellite":       "Satélite",
+        "orbit":           "Órbita",
+        "incidence_deg":   "Ángulo de incidencia (°)",
+        "heading_deg":     "Heading (°)",
+        "wavelength_m":    "Longitud de onda (m)",
+        "noise_amplitude_m": "Amplitud de ruido (m)",
+    }
+    for key, label in meta_labels.items():
+        if key in meta:
+            ws_meta.append([label, meta[key]])
+
+    # ── Hoja 2: Coordenadas X ──────────────────────────────────────────────
+    ws_x = wb.create_sheet("Coordenadas_X_km")
+    ws_x.cell(1, 1, "Coordenadas X de la grilla (km)").font = title_font
+    nrows, ncols = X_km.shape
+    for r in range(nrows):
+        for c in range(ncols):
+            ws_x.cell(r + 2, c + 1, round(float(X_km[r, c]), 6))
+
+    # ── Hoja 3: Coordenadas Y ──────────────────────────────────────────────
+    ws_y = wb.create_sheet("Coordenadas_Y_km")
+    ws_y.cell(1, 1, "Coordenadas Y de la grilla (km)").font = title_font
+    for r in range(nrows):
+        for c in range(ncols):
+            ws_y.cell(r + 2, c + 1, round(float(Y_km[r, c]), 6))
+
+    # ── Hojas 4-9: datos de cada gráfica ──────────────────────────────────
+    for sheet_name, arr, description in arrays:
+        ws = wb.create_sheet(sheet_name)
+        # Título descriptivo en fila 1
+        title_cell = ws.cell(1, 1, description)
+        title_cell.font = title_font
+        ws.merge_cells(
+            start_row=1, start_column=1,
+            end_row=1, end_column=min(ncols, 10)
+        )
+        # Encabezados de columna en fila 2 (col_0, col_1, ...)
+        for c in range(ncols):
+            hdr = ws.cell(2, c + 1, f"col_{c}")
+            _style_header(hdr)
+        # Datos desde fila 3
+        for r in range(nrows):
+            for c in range(ncols):
+                v = float(arr[r, c])
+                ws.cell(r + 3, c + 1, round(v, 8) if abs(v) > 1e-15 else 0.0)
+
+    # ── Serializar en memoria y devolver ──────────────────────────────────
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    mw_str = f"Mw{meta.get('Mw', 'X'):.1f}"
+    filename = f"eq_insar_{mw_str}_strike{int(meta.get('strike_deg',0))}_dip{int(meta.get('dip_deg',0))}.xlsx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

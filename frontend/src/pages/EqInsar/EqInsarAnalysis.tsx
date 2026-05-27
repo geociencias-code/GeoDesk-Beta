@@ -321,26 +321,34 @@ function TabSingle({satellites=[]}:{satellites?:string[]}) {
           {busy ? "⏳ Generando..." : "🌍 Generar Interferograma"}
         </button>
         {error && <p style={{color:"#f87171",fontSize:"0.82rem",marginTop:8}}>❌ {error}</p>}
+      </div>
 
-        {/* Map shown below the form when user clicks 'Ver en mapa' */}
+      {/* Panel de resultados */}
+      <div>
+        {/* Mapa siempre visible en el panel derecho cuando hay coordenadas */}
         {mapEpic && (
-          <div style={{marginTop:16}}>
+          <div style={{marginBottom:16}}>
             <EpicenterMap
               lat={mapEpic.lat}
               lon={mapEpic.lon}
               gridExtentKm={p.grid_extent_km ?? 50}
               xcenKm={p.xcen_km ?? 0}
               ycenKm={p.ycen_km ?? 0}
-              height="280px"
+              height="400px"
             />
           </div>
         )}
-      </div>
-      <div>
-        {!result && !busy && (
+
+        {!result && !busy && !mapEpic && (
           <div style={{...card,textAlign:"center",padding:60,color:"#475569"}}>
             <div style={{fontSize:48,marginBottom:12}}>🌋</div>
             <p>Configura los parámetros del sismo y haz clic en "Generar".</p>
+            <p style={{fontSize:"0.8rem",marginTop:8}}>Ingresa la latitud y longitud del epicentro para previsualizar la grilla en el mapa.</p>
+          </div>
+        )}
+        {!result && !busy && mapEpic && (
+          <div style={{...card,textAlign:"center",padding:20,color:"#475569",marginTop:0}}>
+            <p style={{margin:0,fontSize:"0.85rem"}}>Haz clic en <b style={{color:"#a78bfa"}}>Generar Interferograma</b> para calcular los resultados.</p>
           </div>
         )}
         {result && (
@@ -446,21 +454,24 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
           {busy ? "⏳ Generando..." : "📽️ Generar Serie de Tiempo"}
         </button>
         {error && <p style={{color:"#f87171",fontSize:"0.82rem",marginTop:8}}>❌ {error}</p>}
+      </div>
 
+      {/* Panel de resultados */}
+      <div>
+        {/* Mapa al tope del panel derecho */}
         {mapEpic && (
-          <div style={{marginTop:16}}>
+          <div style={{marginBottom:16}}>
             <EpicenterMap
               lat={mapEpic.lat}
               lon={mapEpic.lon}
               gridExtentKm={p.grid_extent_km ?? 50}
               xcenKm={p.xcen_km ?? 0}
               ycenKm={p.ycen_km ?? 0}
-              height="280px"
+              height="380px"
             />
           </div>
         )}
-      </div>
-      <div>
+
         {result ? (
           <div style={card}>
             <p style={sectionTitle}>
@@ -491,10 +502,12 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
             </div>
           </div>
         ) : (
-          <div style={{...card,textAlign:"center",padding:60,color:"#475569"}}>
-            <div style={{fontSize:48,marginBottom:12}}>📡</div>
-            <p>Genera una serie de tiempo para visualizar la secuencia pre/co/post-sismo.</p>
-          </div>
+          !mapEpic && (
+            <div style={{...card,textAlign:"center",padding:60,color:"#475569"}}>
+              <div style={{fontSize:48,marginBottom:12}}>📡</div>
+              <p>Genera una serie de tiempo para visualizar la secuencia pre/co/post-sismo.</p>
+            </div>
+          )
         )}
       </div>
     </div>

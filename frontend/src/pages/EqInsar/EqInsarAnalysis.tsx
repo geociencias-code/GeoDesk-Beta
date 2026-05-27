@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import axios from "axios";
 import { API_URL } from "../../services/api";
+import EpicenterMap from "./EpicenterMap";
 
 
 const card: React.CSSProperties = {
@@ -147,11 +148,69 @@ function InSARImage({b64, title, stats}:{b64:string,title:string,stats?:Record<s
   );
 }
 
-function FaultForm({p, set, showNoiseControls=true, satellites=[]}:{p:any, set:(x:any)=>void, showNoiseControls?:boolean, satellites?:string[]}) {
+// ── Epicenter map state passed down from parent tab ──────────────────────────
+interface FaultFormProps {
+  p: any;
+  set: (x: any) => void;
+  showNoiseControls?: boolean;
+  satellites?: string[];
+  // geo location
+  epicLat: number | undefined;
+  epicLon: number | undefined;
+  onEpicLatChange: (v: number | undefined) => void;
+  onEpicLonChange: (v: number | undefined) => void;
+  onShowMap: () => void;
+}
+
+function FaultForm({
+  p, set, showNoiseControls=true, satellites=[],
+  epicLat, epicLon, onEpicLatChange, onEpicLonChange, onShowMap,
+}: FaultFormProps) {
   const safeSatellites = Array.isArray(satellites) ? satellites : [];
+  const canShowMap = epicLat !== undefined && epicLon !== undefined
+    && !isNaN(epicLat) && !isNaN(epicLon);
+
   return (
     <>
-      <p style={sectionTitle}>Parámetros del Sismo</p>
+      {/* ── Ubicación geográfica ─────────────────────────────── */}
+      <p style={sectionTitle}>📍 Ubicación del Epicentro</p>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <NumField
+          label="Latitud (°)"
+          value={epicLat}
+          onChange={onEpicLatChange}
+        />
+        <NumField
+          label="Longitud (°)"
+          value={epicLon}
+          onChange={onEpicLonChange}
+        />
+      </div>
+      <button
+        style={{
+          ...btn(),
+          marginTop: 10,
+          width: "100%",
+          background: canShowMap
+            ? "linear-gradient(135deg,#dc2626,#ea580c)"
+            : "rgba(255,255,255,0.07)",
+          color: canShowMap ? "white" : "#64748b",
+          cursor: canShowMap ? "pointer" : "not-allowed",
+          fontSize: "0.85rem",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+        }}
+        onClick={canShowMap ? onShowMap : undefined}
+        disabled={!canShowMap}
+        title={canShowMap ? "Actualizar mapa" : "Ingresa latitud y longitud válidas"}
+      >
+        🗺️ Ver en mapa
+      </button>
+
+      {/* ── Parámetros físicos ───────────────────────────────── */}
+      <p style={{...sectionTitle, marginTop:16}}>Parámetros del Sismo</p>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <NumField label="Magnitud Mw" value={p.Mw} onChange={v=>set({...p,Mw:v??p.Mw})}/>
         <NumField label="Profundidad (km)" value={p.depth_km} onChange={v=>set({...p,depth_km:v??p.depth_km})}/>
@@ -219,6 +278,18 @@ function TabSingle({satellites=[]}:{satellites?:string[]}) {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState("");
 
+  // Geo epicenter state
+  const [epicLat, setEpicLat] = useState<number | undefined>(undefined);
+  const [epicLon, setEpicLon] = useState<number | undefined>(undefined);
+  // Committed values shown on map (only update on button click)
+  const [mapEpic, setMapEpic] = useState<{lat:number,lon:number} | null>(null);
+
+  const handleShowMap = () => {
+    if (epicLat !== undefined && epicLon !== undefined) {
+      setMapEpic({ lat: epicLat, lon: epicLon });
+    }
+  };
+
   const run = async () => {
     setBusy(true); setError(""); setResult(null);
     try {
@@ -234,11 +305,29 @@ function TabSingle({satellites=[]}:{satellites?:string[]}) {
   return (
     <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:20,alignItems:"start"}}>
       <div style={card}>
-        <FaultForm p={p} set={setP} satellites={satellites}/>
+        <FaultForm
+          p={p} set={setP} satellites={satellites}
+          epicLat={epicLat} epicLon={epicLon}
+          onEpicLatChange={setEpicLat}
+          onEpicLonChange={setEpicLon}
+          onShowMap={handleShowMap}
+        />
         <button style={btn()} onClick={run} disabled={busy}>
           {busy ? "⏳ Generando..." : "🌍 Generar Interferograma"}
         </button>
         {error && <p style={{color:"#f87171",fontSize:"0.82rem",marginTop:8}}>❌ {error}</p>}
+
+        {/* Map shown below the form when user clicks 'Ver en mapa' */}
+        {mapEpic && (
+          <div style={{marginTop:16}}>
+            <EpicenterMap
+              lat={mapEpic.lat}
+              lon={mapEpic.lon}
+              gridExtentKm={p.grid_extent_km ?? 50}
+              height="280px"
+            />
+          </div>
+        )}
       </div>
       <div>
         {!result && !busy && (
@@ -302,6 +391,17 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
   const [error, setError] = useState("");
   const [frameIdx, setFrameIdx] = useState(0);
 
+  // Geo epicenter state
+  const [epicLat, setEpicLat] = useState<number | undefined>(undefined);
+  const [epicLon, setEpicLon] = useState<number | undefined>(undefined);
+  const [mapEpic, setMapEpic] = useState<{lat:number,lon:number} | null>(null);
+
+  const handleShowMap = () => {
+    if (epicLat !== undefined && epicLon !== undefined) {
+      setMapEpic({ lat: epicLat, lon: epicLon });
+    }
+  };
+
   const run = async () => {
     setBusy(true); setError(""); setResult(null); setFrameIdx(0);
     try {
@@ -317,7 +417,13 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
   return (
     <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:20,alignItems:"start"}}>
       <div style={card}>
-        <FaultForm p={p} set={setP} showNoiseControls={false} satellites={satellites}/>
+        <FaultForm
+          p={p} set={setP} showNoiseControls={false} satellites={satellites}
+          epicLat={epicLat} epicLon={epicLon}
+          onEpicLatChange={setEpicLat}
+          onEpicLonChange={setEpicLon}
+          onShowMap={handleShowMap}
+        />
         <p style={{...sectionTitle,marginTop:16}}>Configuración de Frames</p>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
           <NumField label="Pre-sismo" value={p.n_pre} onChange={v=>setP({...p,n_pre:Math.round(v??p.n_pre)})}/>
@@ -333,6 +439,17 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
           {busy ? "⏳ Generando..." : "📽️ Generar Serie de Tiempo"}
         </button>
         {error && <p style={{color:"#f87171",fontSize:"0.82rem",marginTop:8}}>❌ {error}</p>}
+
+        {mapEpic && (
+          <div style={{marginTop:16}}>
+            <EpicenterMap
+              lat={mapEpic.lat}
+              lon={mapEpic.lon}
+              gridExtentKm={p.grid_extent_km ?? 50}
+              height="280px"
+            />
+          </div>
+        )}
       </div>
       <div>
         {result ? (

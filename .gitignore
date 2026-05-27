@@ -5,7 +5,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 
-# Variables de entorno (NUNCA subir credenciales)
+# Variables de entorno
 .env
 .env.local
 .env.*.local
@@ -13,3 +13,6 @@ __pycache__/
 # El archivo de ejemplo SÍ se puede subir
 !.env.example
 .venv
+
+*.png
+*.csv

@@ -55,18 +55,23 @@ function NumField({
   );
   const prevVal = useRef(value);
 
-  // Si el padre actualiza el valor desde afuera (p.e. reset), sincronizar el raw
+  // Sincronizar raw ← padre SOLO cuando:
+  //   1. El padre cambia a un número concreto (no undefined/mid-edit)
+  //   2. El raw actual no representa ya ese mismo número
+  //      (evita machacar "14.0" → "14" o "14.06" mientras el usuario escribe)
   useEffect(() => {
-    if (prevVal.current !== value) {
-      prevVal.current = value;
-      // No sobreescribir si el usuario está en mitad de escribir
-      const isIntermediate =
-        raw === "" || raw === "-" || raw === "." || raw === "-."
-        || raw.endsWith(".");
-      if (!isIntermediate) {
-        setRaw(value !== undefined ? String(value) : "");
-      }
-    }
+    if (prevVal.current === value) return;
+    prevVal.current = value;
+
+    // Si el padre manda undefined (estado intermedio propio), no tocar raw
+    if (value === undefined) return;
+
+    // Si el raw ya parsea al mismo valor, no tocar (preserva ceros intermedios)
+    const parsedRaw = parseFloat(raw);
+    if (!isNaN(parsedRaw) && parsedRaw === value) return;
+
+    // Sincronizar
+    setRaw(String(value));
   }, [value]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -324,6 +329,8 @@ function TabSingle({satellites=[]}:{satellites?:string[]}) {
               lat={mapEpic.lat}
               lon={mapEpic.lon}
               gridExtentKm={p.grid_extent_km ?? 50}
+              xcenKm={p.xcen_km ?? 0}
+              ycenKm={p.ycen_km ?? 0}
               height="280px"
             />
           </div>
@@ -446,6 +453,8 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
               lat={mapEpic.lat}
               lon={mapEpic.lon}
               gridExtentKm={p.grid_extent_km ?? 50}
+              xcenKm={p.xcen_km ?? 0}
+              ycenKm={p.ycen_km ?? 0}
               height="280px"
             />
           </div>

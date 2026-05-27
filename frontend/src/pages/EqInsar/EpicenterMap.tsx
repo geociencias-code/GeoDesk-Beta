@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -10,7 +10,7 @@ import {
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
-// ── Fix default Leaflet icon (webpack/vite bundler issue) ──────────────────
+// ── Fix default Leaflet icon ──────────────────────────────────────────────
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
@@ -18,7 +18,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
 });
 
-// Custom red/orange epicenter icon
+// Custom red epicenter icon
 const epicenterIcon = new L.DivIcon({
   html: `
     <div style="
@@ -40,17 +40,32 @@ const epicenterIcon = new L.DivIcon({
   popupAnchor: [0, -14],
 });
 
-// Helper: degrees-per-km at a given latitude
+// Grid center icon (orange square)
+const gridCenterIcon = new L.DivIcon({
+  html: `
+    <div style="
+      width:14px; height:14px;
+      background: rgba(251,146,60,0.85);
+      border: 2px solid #fff;
+      border-radius: 3px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.5);
+    "></div>`,
+  className: "",
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+  popupAnchor: [0, -10],
+});
+
+/**
+ * Convierte km a grados de latitud/longitud en una latitud dada.
+ */
 function kmToDeg(km: number, lat: number) {
   const latDeg = km / 111.32;
   const lonDeg = km / (111.32 * Math.cos((lat * Math.PI) / 180));
   return { latDeg, lonDeg };
 }
 
-interface FlyToProps {
-  lat: number;
-  lon: number;
-}
+interface FlyToProps { lat: number; lon: number; }
 function FlyTo({ lat, lon }: FlyToProps) {
   const map = useMap();
   useEffect(() => {
@@ -60,10 +75,20 @@ function FlyTo({ lat, lon }: FlyToProps) {
 }
 
 export interface EpicenterMapProps {
+  /** Coordenadas del epicentro del sismo */
   lat: number;
   lon: number;
+  /** Semiancho de la grilla en km (grid_extent_km) */
   gridExtentKm: number;
-  /** Height of the map div */
+  /**
+   * Offset del epicentro respecto al centro de la grilla (xcen_km, ycen_km).
+   * El centro de la grilla queda en:
+   *   grid_center = epicentro - (xcen_km, ycen_km)
+   * Es decir, xcen_km=+20 desplaza la fuente 20 km al este del centro de grilla,
+   * lo que mueve la grilla 20 km al OESTE del epicentro.
+   */
+  xcenKm?: number;
+  ycenKm?: number;
   height?: string;
 }
 
@@ -71,36 +96,52 @@ const EpicenterMap: React.FC<EpicenterMapProps> = ({
   lat,
   lon,
   gridExtentKm,
+  xcenKm = 0,
+  ycenKm = 0,
   height = "340px",
 }) => {
-  const { latDeg, lonDeg } = kmToDeg(gridExtentKm / 2, lat);
+  // Centro de la grilla en coordenadas geográficas
+  // xcen_km es el offset del epicentro desde el centro de grilla en X (este)
+  // ycen_km es el offset del epicentro desde el centro de grilla en Y (norte)
+  // → centro_grilla = epicentro − offset
+  const { latDeg: xcenLatOff, lonDeg: xcenLonOff } = kmToDeg(Math.abs(xcenKm), lat);
+  const { latDeg: ycenLatOff }                      = kmToDeg(Math.abs(ycenKm), lat);
+
+  const gridCenterLat = lat - (ycenKm >= 0 ? ycenLatOff : -ycenLatOff);
+  const gridCenterLon = lon - (xcenKm >= 0 ? xcenLonOff : -xcenLonOff);
+
+  // Extensión de la grilla en grados desde el centro
+  const { latDeg: extLatDeg, lonDeg: extLonDeg } = kmToDeg(gridExtentKm, gridCenterLat);
 
   const bounds: [[number, number], [number, number]] = [
-    [lat - latDeg, lon - lonDeg],
-    [lat + latDeg, lon + lonDeg],
+    [gridCenterLat - extLatDeg, gridCenterLon - extLonDeg],
+    [gridCenterLat + extLatDeg, gridCenterLon + extLonDeg],
   ];
 
-  // Zoom level heuristic based on grid size
+  // Vuelo centrado en la grilla (no en el epicentro)
+  const viewLat = gridCenterLat;
+  const viewLon = gridCenterLon;
+
   const zoomLevel = gridExtentKm > 200 ? 6 : gridExtentKm > 80 ? 7 : gridExtentKm > 30 ? 8 : 9;
+
+  const hasOffset = xcenKm !== 0 || ycenKm !== 0;
 
   return (
     <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid rgba(248,113,113,0.3)" }}>
       <MapContainer
-        center={[lat, lon]}
+        center={[viewLat, viewLon]}
         zoom={zoomLevel}
         style={{ height, width: "100%" }}
         scrollWheelZoom
       >
-        {/* Dark / satellite tile */}
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         />
 
-        {/* Fly to new epicenter when props change */}
-        <FlyTo lat={lat} lon={lon} />
+        <FlyTo lat={viewLat} lon={viewLon} />
 
-        {/* Grid bounding box */}
+        {/* Rectángulo de la grilla — centrado en grid_center */}
         <Rectangle
           bounds={bounds}
           pathOptions={{
@@ -112,21 +153,39 @@ const EpicenterMap: React.FC<EpicenterMapProps> = ({
           }}
         />
 
-        {/* Epicenter marker */}
+        {/* Marcador del epicentro del sismo */}
         <Marker position={[lat, lon]} icon={epicenterIcon}>
           <Popup>
             <div style={{ fontFamily: "Inter, sans-serif", minWidth: 160 }}>
               <div style={{ fontWeight: 700, marginBottom: 4, color: "#dc2626" }}>
-                🔴 Epicentro
+                🔴 Epicentro del Sismo
               </div>
               <div style={{ fontSize: "0.82rem", lineHeight: 1.6 }}>
-                <b>Lat:</b> {lat.toFixed(4)}°<br />
-                <b>Lon:</b> {lon.toFixed(4)}°<br />
-                <b>Grilla:</b> ±{(gridExtentKm / 2).toFixed(0)} km
+                <b>Lat:</b> {lat.toFixed(5)}°<br />
+                <b>Lon:</b> {lon.toFixed(5)}°
               </div>
             </div>
           </Popup>
         </Marker>
+
+        {/* Marcador del centro de la grilla (solo si hay offset) */}
+        {hasOffset && (
+          <Marker position={[gridCenterLat, gridCenterLon]} icon={gridCenterIcon}>
+            <Popup>
+              <div style={{ fontFamily: "Inter, sans-serif", minWidth: 180 }}>
+                <div style={{ fontWeight: 700, marginBottom: 4, color: "#ea580c" }}>
+                  🟧 Centro de la Grilla
+                </div>
+                <div style={{ fontSize: "0.82rem", lineHeight: 1.6 }}>
+                  <b>Lat:</b> {gridCenterLat.toFixed(5)}°<br />
+                  <b>Lon:</b> {gridCenterLon.toFixed(5)}°<br />
+                  <b>Offset X:</b> {xcenKm > 0 ? "+" : ""}{xcenKm} km<br />
+                  <b>Offset Y:</b> {ycenKm > 0 ? "+" : ""}{ycenKm} km
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        )}
       </MapContainer>
 
       {/* Legend */}
@@ -138,14 +197,21 @@ const EpicenterMap: React.FC<EpicenterMapProps> = ({
         display: "flex",
         gap: 16,
         alignItems: "center",
+        flexWrap: "wrap",
       }}>
         <span>
           <span style={{ color: "#f87171", marginRight: 4 }}>●</span>
           Epicentro ({lat.toFixed(4)}°, {lon.toFixed(4)}°)
         </span>
+        {hasOffset && (
+          <span>
+            <span style={{ color: "#fb923c", marginRight: 4 }}>■</span>
+            Centro grilla ({xcenKm > 0 ? "+" : ""}{xcenKm} km E, {ycenKm > 0 ? "+" : ""}{ycenKm} km N)
+          </span>
+        )}
         <span>
           <span style={{ color: "#fb923c", marginRight: 4 }}>◻</span>
-          Grilla {gridExtentKm} × {gridExtentKm} km
+          Grilla {gridExtentKm * 2} × {gridExtentKm * 2} km
         </span>
       </div>
     </div>

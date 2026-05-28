@@ -603,16 +603,20 @@ def export_xlsx(params: SingleParams) -> StreamingResponse:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    meta   = result["metadata"]
-    X_km   = result["X_km"]
-    Y_km   = result["Y_km"]
+    meta = result["metadata"]
+    X_km = result["X_km"]
+    Y_km = result["Y_km"]
+
+    # Escala para imágenes de desplazamiento
+    max_abs_los = float(np.abs(result["los_displacement"]).max()) or 1.0
+
     arrays = [
-        ("Fase_Envuelta",         result["phase_noisy"],       "Fase envuelta con ruido (rad)"),
-        ("Fase_Desenvuelta",      result["phase_unwrapped"],   "Fase desenvuelta (rad)"),
-        ("LOS_Displacement",      result["los_displacement"],  "Desplazamiento línea de visión (m)"),
-        ("Displacement_Este",     result["Ue"],                "Desplazamiento Este (m)"),
-        ("Displacement_Norte",    result["Un"],                "Desplazamiento Norte (m)"),
-        ("Displacement_Vertical", result["Uz"],                "Desplazamiento Vertical (m)"),
+        ("Fase_Envuelta",         result["phase_noisy"],       "Fase envuelta con ruido (rad)",      "hsv",       -math.pi,     math.pi),
+        ("Fase_Desenvuelta",      result["phase_unwrapped"],   "Fase desenvuelta (rad)",             "RdBu_r",    None,         None),
+        ("LOS_Displacement",      result["los_displacement"],  "Desplazamiento línea de visión (m)", "RdBu_r",    -max_abs_los, max_abs_los),
+        ("Displacement_Este",     result["Ue"],                "Desplazamiento Este (m)",            "seismic",   None,         None),
+        ("Displacement_Norte",    result["Un"],                "Desplazamiento Norte (m)",           "seismic",   None,         None),
+        ("Displacement_Vertical", result["Uz"],                "Desplazamiento Vertical (m)",        "seismic",   None,         None),
     ]
 
     wb = openpyxl.Workbook()
@@ -621,7 +625,7 @@ def export_xlsx(params: SingleParams) -> StreamingResponse:
     header_font  = Font(bold=True, color="FFFFFF")
     header_fill  = PatternFill("solid", fgColor="4F46E5")
     header_align = Alignment(horizontal="center")
-    title_font   = Font(bold=True, size=13)
+    title_font   = Font(bold=True, size=14, color="1E1B4B")
 
     def _style_header(cell):
         cell.font      = header_font
@@ -677,25 +681,41 @@ def export_xlsx(params: SingleParams) -> StreamingResponse:
         for c in range(ncols):
             ws_y.cell(r + 2, c + 1, round(float(Y_km[r, c]), 6))
 
-    # ── Hojas 4-9: datos de cada gráfica ──────────────────────────────────
-    for sheet_name, arr, description in arrays:
+    # ── Hojas 4-9: Datos con Gráficos Integrados ──────────────────────────
+    for sheet_name, arr, description, cmap_name, vmin_val, vmax_val in arrays:
         ws = wb.create_sheet(sheet_name)
-        # Título descriptivo en fila 1
-        title_cell = ws.cell(1, 1, description)
+        
+        # 1. Título descriptivo en fila 1
+        title_cell = ws.cell(1, 2, description) # Centrado sutilmente en columna B
         title_cell.font = title_font
-        ws.merge_cells(
-            start_row=1, start_column=1,
-            end_row=1, end_column=min(ncols, 10)
-        )
-        # Encabezados de columna en fila 2 (col_0, col_1, ...)
+
+        # 2. Generar imagen temporal de alta calidad usando matplotlib
+        fig, ax = plt.subplots(figsize=(4.8, 4.2), dpi=100)
+        im = ax.imshow(arr, cmap=cmap_name, vmin=vmin_val, vmax=vmax_val, origin="upper")
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        ax.set_axis_off()
+        fig.tight_layout(pad=0.5)
+
+        img_buf = io.BytesIO()
+        fig.savefig(img_buf, format="png", bbox_inches="tight", dpi=100)
+        plt.close(fig)
+        img_buf.seek(0)
+
+        # 3. Insertar imagen en celda B3 (ocupa aprox. de fila 3 a 22)
+        xlsx_img = openpyxl.drawing.image.Image(img_buf)
+        ws.add_image(xlsx_img, "B3")
+
+        # 4. Encabezados de tabla de datos en fila 24
+        ws.cell(24, 1, "Grilla de Datos Puros:").font = Font(bold=True, italic=True, size=11, color="4F46E5")
         for c in range(ncols):
-            hdr = ws.cell(2, c + 1, f"col_{c}")
+            hdr = ws.cell(24, c + 1, f"col_{c}")
             _style_header(hdr)
-        # Datos desde fila 3
+
+        # 5. Datos numéricos de la grilla desde fila 25 en adelante
         for r in range(nrows):
             for c in range(ncols):
                 v = float(arr[r, c])
-                ws.cell(r + 3, c + 1, round(v, 8) if abs(v) > 1e-15 else 0.0)
+                ws.cell(r + 25, c + 1, round(v, 8) if abs(v) > 1e-15 else 0.0)
 
     # ── Serializar en memoria y devolver ──────────────────────────────────
     buf = io.BytesIO()

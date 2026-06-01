@@ -3,6 +3,66 @@ import axios from "axios";
 import { API_URL } from "../../services/api";
 import EpicenterMap from "./EpicenterMap";
 
+// ── Type Definitions ──────────────────────────────────────────────────────
+interface EqInsarParams {
+  Mw: number;
+  depth_km: number;
+  strike_deg: number;
+  dip_deg: number;
+  rake_deg: number;
+  xcen_km: number;
+  ycen_km: number;
+  grid_size: number;
+  grid_extent_km: number;
+  satellite: string;
+  orbit: string;
+  incidence_deg?: number;
+  heading_deg?: number;
+  wavelength_m?: number;
+  add_noise: boolean;
+  noise_amplitude_m: number;
+  add_orbital_ramp: boolean;
+  wrap: boolean;
+  nu: number;
+  seed?: number;
+}
+
+interface TimeseriesParams extends EqInsarParams {
+  n_pre: number;
+  n_event: number;
+  n_post: number;
+  output_type: string;
+}
+
+interface EqInsarResult {
+  metadata: Record<string, unknown>;
+  images: Record<string, string>;
+  statistics: Record<string, Record<string, number>>;
+}
+
+interface TimeseriesResult {
+  n_frames: number;
+  frames: string[];
+  labels: string[];
+  frame_labels: string[];
+  n_pre: number;
+  n_event: number;
+}
+
+interface BatchResult {
+  n_samples: number;
+  n_frames_per_sample: number;
+  array_shape_X: number[];
+  array_shape_y: number[];
+  mw_statistics?: {
+    min: number;
+    max: number;
+    mean: number;
+    std: number;
+  };
+  preview_images: string[];
+}
+
 
 const card: React.CSSProperties = {
   background:"rgba(255,255,255,0.04)",
@@ -21,7 +81,7 @@ const label: React.CSSProperties = {
   display:"block", fontSize:"0.78rem", color:"#94a3b8", marginBottom:4, marginTop:10,
 };
 
-const btn = (color="from-violet-600 to-indigo-600"): React.CSSProperties => ({
+const btn = (): React.CSSProperties => ({
   padding:"10px 22px", borderRadius:10, border:"none", cursor:"pointer",
   background:"linear-gradient(135deg,#7c3aed,#4f46e5)",
   color:"white", fontWeight:600, fontSize:"0.9rem", marginTop:12,
@@ -72,7 +132,7 @@ function NumField({
 
     // Sincronizar
     setRaw(String(value));
-  }, [value]);
+  }, [value, raw]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const str = e.target.value;
@@ -145,7 +205,7 @@ function InSARImage({b64, title, stats}:{b64:string,title:string,stats?:Record<s
       {stats && (
         <div style={{marginTop:6,fontSize:"0.72rem",color:"#64748b",textAlign:"left"}}>
           {Object.entries(stats).map(([k,v])=>(
-            <span key={k} style={{marginRight:10}}>{k}: <b style={{color:"#94a3b8"}}>{typeof v==="number"?v.toFixed(4):v}</b></span>
+            <span key={k} style={{marginRight:10}}>{k}: <b style={{color:"#94a3b8"}}>{v.toFixed(4)}</b></span>
           ))}
         </div>
       )}
@@ -155,8 +215,8 @@ function InSARImage({b64, title, stats}:{b64:string,title:string,stats?:Record<s
 
 // ── Epicenter map state passed down from parent tab ──────────────────────────
 interface FaultFormProps {
-  p: any;
-  set: (x: any) => void;
+  p: Partial<EqInsarParams>;
+  set: (x: Partial<EqInsarParams>) => void;
   showNoiseControls?: boolean;
   satellites?: string[];
   // geo location
@@ -227,8 +287,8 @@ function FaultForm({
       </div>
       <p style={sectionTitle}>Grilla</p>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <NumField label="Tamaño grilla (px)" value={p.grid_size} onChange={v=>set({...p,grid_size:Math.round(v??p.grid_size)})}/>
-        <NumField label="Extensión (km)" value={p.grid_extent_km} onChange={v=>set({...p,grid_extent_km:v??p.grid_extent_km})}/>
+        <NumField label="Tamaño grilla (px)" value={p.grid_size} onChange={v=>set({...p,grid_size:Math.round(v??(p.grid_size??128))})}/>
+        <NumField label="Extensión (km)" value={p.grid_extent_km} onChange={v=>set({...p,grid_extent_km:v??(p.grid_extent_km??50)})}/>
       </div>
       <p style={sectionTitle}>Satélite InSAR</p>
       <span style={label}>Satélite</span>
@@ -243,24 +303,24 @@ function FaultForm({
       </select>
       {!p.satellite && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-          <NumField label="Incidencia (°)" value={p.incidence_deg??33} onChange={v=>set({...p,incidence_deg:v??p.incidence_deg})}/>
-          <NumField label="Heading (°)" value={p.heading_deg??-13} onChange={v=>set({...p,heading_deg:v??p.heading_deg})}/>
-          <NumField label="Longitud de onda (m)" value={p.wavelength_m??0.05546} onChange={v=>set({...p,wavelength_m:v??p.wavelength_m})}/>
+          <NumField label="Incidencia (°)" value={p.incidence_deg??33} onChange={v=>set({...p,incidence_deg:v??(p.incidence_deg??33)})}/>
+          <NumField label="Heading (°)" value={p.heading_deg??-13} onChange={v=>set({...p,heading_deg:v??(p.heading_deg??-13)})}/>
+          <NumField label="Longitud de onda (m)" value={p.wavelength_m??0.05546} onChange={v=>set({...p,wavelength_m:v??(p.wavelength_m??0.05546)})}/>
         </div>
       )}
       <p style={sectionTitle}>Opciones Avanzadas</p>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         {showNoiseControls && (
           <>
-            <ToggleField label="Agregar ruido" value={p.add_noise} onChange={v=>set({...p,add_noise:v})}/>
-            <ToggleField label="Rampa orbital" value={p.add_orbital_ramp} onChange={v=>set({...p,add_orbital_ramp:v})}/>
+            <ToggleField label="Agregar ruido" value={p.add_noise??true} onChange={v=>set({...p,add_noise:v})}/>
+            <ToggleField label="Rampa orbital" value={p.add_orbital_ramp??false} onChange={v=>set({...p,add_orbital_ramp:v})}/>
           </>
         )}
-        <ToggleField label="Fase envuelta" value={p.wrap} onChange={v=>set({...p,wrap:v})}/>
+        <ToggleField label="Fase envuelta" value={p.wrap??true} onChange={v=>set({...p,wrap:v})}/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:4}}>
-        <NumField label="Amplitud ruido (m)" value={p.noise_amplitude_m} onChange={v=>set({...p,noise_amplitude_m:v??p.noise_amplitude_m})}/>
-        <NumField label="Razón de Poisson ν" value={p.nu} onChange={v=>set({...p,nu:v??p.nu})}/>
+        <NumField label="Amplitud ruido (m)" value={p.noise_amplitude_m} onChange={v=>set({...p,noise_amplitude_m:v??(p.noise_amplitude_m??0.005)})}/>
+        <NumField label="Razón de Poisson ν" value={p.nu} onChange={v=>set({...p,nu:v??(p.nu??0.25)})}/>
         <NumField label="Semilla (seed)" value={p.seed??0} onChange={v=>set({...p,seed:v})}/>
       </div>
     </>
@@ -270,7 +330,7 @@ function FaultForm({
 // ══════════════════════════════════════════════════════════════════════════
 // Botón de exportación a Excel
 // ══════════════════════════════════════════════════════════════════════════
-function ExportXlsxButton({ params }: { params: any }) {
+function ExportXlsxButton({ params }: { params: Partial<EqInsarParams> }) {
   const [downloading, setDownloading] = useState(false);
   const [dlError, setDlError] = useState("");
 
@@ -279,7 +339,9 @@ function ExportXlsxButton({ params }: { params: any }) {
     setDlError("");
     try {
       const body = { ...params };
-      if (!body.satellite) delete body.satellite;
+      if (body.satellite === undefined || body.satellite === "") {
+        delete (body as Partial<Record<string, unknown>>).satellite;
+      }
 
       const res = await fetch(`${API_URL}/api/eq_insar/export_xlsx`, {
         method: "POST",
@@ -289,7 +351,8 @@ function ExportXlsxButton({ params }: { params: any }) {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail ?? res.statusText);
+        setDlError(err.detail ?? res.statusText);
+        return;
       }
 
       const blob = await res.blob();
@@ -304,8 +367,9 @@ function ExportXlsxButton({ params }: { params: any }) {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setDlError(e.message);
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : "Error desconocido";
+      setDlError(errorMessage);
     } finally {
       setDownloading(false);
     }
@@ -354,9 +418,9 @@ const defaultSingle = {
 };
 
 function TabSingle({satellites=[]}:{satellites?:string[]}) {
-  const [p, setP] = useState<any>(defaultSingle);
+  const [p, setP] = useState<Partial<EqInsarParams>>(defaultSingle);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<EqInsarResult | null>(null);
   const [error, setError] = useState("");
 
   // Geo epicenter state
@@ -374,12 +438,13 @@ function TabSingle({satellites=[]}:{satellites?:string[]}) {
   const run = async () => {
     setBusy(true); setError(""); setResult(null);
     try {
-      const body = {...p};
-      if (!body.satellite) { delete body.satellite; }
+      const body = { ...p } as Record<string, unknown>;
+      if (!body.satellite) delete body.satellite;
       const res = await axios.post(`${API_URL}/api/eq_insar/generate`, body);
       setResult(res.data);
-    } catch(e:any) {
-      setError(e.response?.data?.detail ?? e.message);
+    } catch(e) {
+      const error = e instanceof Error ? e.message : "Error desconocido";
+      setError(error);
     } finally { setBusy(false); }
   };
 
@@ -435,36 +500,38 @@ function TabSingle({satellites=[]}:{satellites?:string[]}) {
                 <ExportXlsxButton params={p}/>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:10}}>
-                {[
-                  ["Mw", result.metadata.Mw?.toFixed(2)],
-                  ["Strike", `${result.metadata.strike_deg}°`],
-                  ["Dip", `${result.metadata.dip_deg}°`],
-                  ["Rake", `${result.metadata.rake_deg}°`],
-                  ["Profundidad", `${result.metadata.depth_km} km`],
-                  ["Satélite", result.metadata.satellite],
-                  ["Incidencia", `${result.metadata.incidence_deg?.toFixed(1)}°`],
-                  ["λ (cm)", `${((result.metadata.wavelength_m??0)*100).toFixed(2)}`],
-                ].map(([k,v])=>(
-                  <div key={k} style={{background:"rgba(0,0,0,0.3)",borderRadius:8,padding:"8px 12px"}}>
-                    <div style={{fontSize:"0.7rem",color:"#64748b"}}>{k}</div>
-                    <div style={{fontWeight:700,fontSize:"0.9rem",color:"#e2e8f0"}}>{v}</div>
+                {(
+                  [
+                    ["Mw", (result.metadata.Mw as number)?.toFixed(2)],
+                    ["Strike", `${result.metadata.strike_deg}°`],
+                    ["Dip", `${result.metadata.dip_deg}°`],
+                    ["Rake", `${result.metadata.rake_deg}°`],
+                    ["Profundidad", `${result.metadata.depth_km} km`],
+                    ["Satélite", result.metadata.satellite],
+                    ["Incidencia", `${(result.metadata.incidence_deg as number)?.toFixed(1)}°`],
+                    ["λ (cm)", `${(((result.metadata.wavelength_m as number)??0)*100).toFixed(2)}`],
+                  ] as [unknown, unknown][]
+                ).map(([k,v])=>(
+                  <div key={String(k)} style={{background:"rgba(0,0,0,0.3)",borderRadius:8,padding:"8px 12px"}}>
+                    <div style={{fontSize:"0.7rem",color:"#64748b"}}>{String(k)}</div>
+                    <div style={{fontWeight:700,fontSize:"0.9rem",color:"#e2e8f0"}}>{String(v)}</div>
                   </div>
                 ))}
               </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
-              <InSARImage b64={result.images.phase_wrapped} title="Fase Envuelta (con ruido)"
-                stats={result.statistics.phase_unwrapped}/>
-              <InSARImage b64={result.images.phase_unwrapped} title="Fase Desenvuelta (rad)"
-                stats={result.statistics.phase_unwrapped}/>
-              <InSARImage b64={result.images.los_displacement} title="Desplazamiento LOS (m)"
-                stats={result.statistics.los_displacement}/>
-              <InSARImage b64={result.images.displacement_east} title="Desplazamiento Este (m)"
-                stats={result.statistics.displacement_east}/>
-              <InSARImage b64={result.images.displacement_north} title="Desplazamiento Norte (m)"
-                stats={result.statistics.displacement_north}/>
-              <InSARImage b64={result.images.displacement_up} title="Desplazamiento Vertical (m)"
-                stats={result.statistics.displacement_up}/>
+              <InSARImage b64={(result.images as Record<string, string>).phase_wrapped} title="Fase Envuelta (con ruido)"
+                stats={(result.statistics as Record<string, Record<string, number>>).phase_unwrapped}/>
+              <InSARImage b64={(result.images as Record<string, string>).phase_unwrapped} title="Fase Desenvuelta (rad)"
+                stats={(result.statistics as Record<string, Record<string, number>>).phase_unwrapped}/>
+              <InSARImage b64={(result.images as Record<string, string>).los_displacement} title="Desplazamiento LOS (m)"
+                stats={(result.statistics as Record<string, Record<string, number>>).los_displacement}/>
+              <InSARImage b64={(result.images as Record<string, string>).displacement_east} title="Desplazamiento Este (m)"
+                stats={(result.statistics as Record<string, Record<string, number>>).displacement_east}/>
+              <InSARImage b64={(result.images as Record<string, string>).displacement_north} title="Desplazamiento Norte (m)"
+                stats={(result.statistics as Record<string, Record<string, number>>).displacement_north}/>
+              <InSARImage b64={(result.images as Record<string, string>).displacement_up} title="Desplazamiento Vertical (m)"
+                stats={(result.statistics as Record<string, Record<string, number>>).displacement_up}/>
             </div>
           </>
         )}
@@ -479,9 +546,9 @@ const defaultTS = {
 };
 
 function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
-  const [p, setP] = useState<any>(defaultTS);
+  const [p, setP] = useState<Partial<TimeseriesParams>>(defaultTS);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<TimeseriesResult | null>(null);
   const [error, setError] = useState("");
   const [frameIdx, setFrameIdx] = useState(0);
 
@@ -499,12 +566,13 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
   const run = async () => {
     setBusy(true); setError(""); setResult(null); setFrameIdx(0);
     try {
-      const body = {...p};
+      const body = {...p} as Record<string, unknown>;
       if (!body.satellite) delete body.satellite;
       const res = await axios.post(`${API_URL}/api/eq_insar/timeseries`, body);
       setResult(res.data);
-    } catch(e:any) {
-      setError(e.response?.data?.detail ?? e.message);
+    } catch(e) {
+      const errorMsg = e instanceof Error ? e.message : "Error desconocido";
+      setError(errorMsg);
     } finally { setBusy(false); }
   };
 
@@ -520,9 +588,9 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
         />
         <p style={{...sectionTitle,marginTop:16}}>Configuración de Frames</p>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-          <NumField label="Pre-sismo" value={p.n_pre} onChange={v=>setP({...p,n_pre:Math.round(v??p.n_pre)})}/>
-          <NumField label="Evento" value={p.n_event} onChange={v=>setP({...p,n_event:Math.round(v??p.n_event)})}/>
-          <NumField label="Post-sismo" value={p.n_post} onChange={v=>setP({...p,n_post:Math.round(v??p.n_post)})}/>
+          <NumField label="Pre-sismo" value={p.n_pre} onChange={v=>setP({...p,n_pre:Math.round(v??(p.n_pre??5))})}/>
+          <NumField label="Evento" value={p.n_event} onChange={v=>setP({...p,n_event:Math.round(v??(p.n_event??1))})}/>
+          <NumField label="Post-sismo" value={p.n_post} onChange={v=>setP({...p,n_post:Math.round(v??(p.n_post??5))})}/>
         </div>
         <span style={label}>Tipo de salida</span>
         <select style={inputStyle} value={p.output_type} onChange={e=>setP({...p,output_type:e.target.value})}>
@@ -554,27 +622,27 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
         {result ? (
           <div style={card}>
             <p style={sectionTitle}>
-              Frame {frameIdx+1} / {result.n_frames} — {result.frame_labels?.[frameIdx]}
+              Frame {frameIdx+1} / {(result.n_frames as number)} — {(result.frame_labels as string[])?.[frameIdx]}
             </p>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-              <InSARImage b64={result.frames[frameIdx]} title="Interferograma"/>
-              <InSARImage b64={result.labels[frameIdx]} title="Máscara de Deformación"/>
+              <InSARImage b64={(result.frames as string[])[frameIdx]} title="Interferograma"/>
+              <InSARImage b64={(result.labels as string[])[frameIdx]} title="Máscara de Deformación"/>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
               <button disabled={frameIdx===0} onClick={()=>setFrameIdx(f=>f-1)}
                 style={{...btn(),opacity:frameIdx===0?0.4:1,padding:"6px 16px",marginTop:0}}>◀ Anterior</button>
-              <input type="range" min={0} max={result.n_frames-1} value={frameIdx}
+              <input type="range" min={0} max={(result.n_frames as number)-1} value={frameIdx}
                 onChange={e=>setFrameIdx(parseInt(e.target.value))} style={{flex:1}}/>
-              <button disabled={frameIdx===result.n_frames-1} onClick={()=>setFrameIdx(f=>f+1)}
-                style={{...btn(),opacity:frameIdx===result.n_frames-1?0.4:1,padding:"6px 16px",marginTop:0}}>Siguiente ▶</button>
+              <button disabled={frameIdx===(result.n_frames as number)-1} onClick={()=>setFrameIdx(f=>f+1)}
+                style={{...btn(),opacity:frameIdx===(result.n_frames as number)-1?0.4:1,padding:"6px 16px",marginTop:0}}>Siguiente ▶</button>
             </div>
             <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
-              {result.frame_labels?.map((lbl:string, i:number)=>(
+              {(result.frame_labels as string[])?.map((lbl:string, i:number)=>(
                 <button key={i} onClick={()=>setFrameIdx(i)} style={{
                   padding:"3px 10px", borderRadius:20, border:"none", cursor:"pointer", fontSize:"0.72rem",
                   background: i===frameIdx ? "#7c3aed" :
-                    i < result.n_pre ? "rgba(239,68,68,0.2)" :
-                    i < result.n_pre+result.n_event ? "rgba(234,179,8,0.3)" : "rgba(34,197,94,0.2)",
+                    i < (result.n_pre as number) ? "rgba(239,68,68,0.2)" :
+                    i < (result.n_pre as number)+(result.n_event as number) ? "rgba(234,179,8,0.3)" : "rgba(34,197,94,0.2)",
                   color: i===frameIdx ? "white" : "#94a3b8",
                 }}>{lbl}</button>
               ))}
@@ -597,7 +665,7 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
 function TabBatch({satellites=[]}:{satellites?:string[]}) {
   const [p, setP] = useState({n_samples:50, mw_range:[5.0,7.0], satellite:"sentinel1", orbit:"ascending", seed:42});
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<BatchResult | null>(null);
   const [error, setError] = useState("");
   const safeSatellites = Array.isArray(satellites) ? satellites : [];
 
@@ -606,8 +674,9 @@ function TabBatch({satellites=[]}:{satellites?:string[]}) {
     try {
       const res = await axios.post(`${API_URL}/api/eq_insar/batch`, p);
       setResult(res.data);
-    } catch(e:any) {
-      setError(e.response?.data?.detail ?? e.message);
+    } catch(e) {
+      const errorMessage = e instanceof Error ? e.message : "Error desconocido";
+      setError(errorMessage);
     } finally { setBusy(false); }
   };
 
@@ -640,29 +709,31 @@ function TabBatch({satellites=[]}:{satellites?:string[]}) {
         {result ? (
           <>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
-              {[
-                ["Muestras", result.n_samples],
-                ["Frames/muestra", result.n_frames_per_sample],
-                ["Shape X", result.array_shape_X?.join("×")],
-                ["Shape y", result.array_shape_y?.join("×")],
-                ...(result.mw_statistics ? [
-                  ["Mw mín", result.mw_statistics.min?.toFixed(2)],
-                  ["Mw máx", result.mw_statistics.max?.toFixed(2)],
-                  ["Mw media", result.mw_statistics.mean?.toFixed(2)],
-                  ["Mw σ", result.mw_statistics.std?.toFixed(2)],
-                ] : []),
-              ].map(([k,v])=>(
+              {(
+                [
+                  ["Muestras", result.n_samples],
+                  ["Frames/muestra", result.n_frames_per_sample],
+                  ["Shape X", (result.array_shape_X as number[])?.join("×")],
+                  ["Shape y", (result.array_shape_y as number[])?.join("×")],
+                  ...(result.mw_statistics ? [
+                    ["Mw mín", (result.mw_statistics as Record<string, number>).min?.toFixed(2)],
+                    ["Mw máx", (result.mw_statistics as Record<string, number>).max?.toFixed(2)],
+                    ["Mw media", (result.mw_statistics as Record<string, number>).mean?.toFixed(2)],
+                    ["Mw σ", (result.mw_statistics as Record<string, number>).std?.toFixed(2)],
+                  ] : []),
+                ] as [unknown, unknown][]
+              ).map(([k,v])=>(
                 <div key={String(k)} style={{background:"rgba(0,0,0,0.3)",borderRadius:10,padding:"10px 14px"}}>
-                  <div style={{fontSize:"0.7rem",color:"#64748b"}}>{k}</div>
-                  <div style={{fontWeight:700,fontSize:"0.95rem",color:"#e2e8f0"}}>{v}</div>
+                  <div style={{fontSize:"0.7rem",color:"#64748b"}}>{String(k)}</div>
+                  <div style={{fontWeight:700,fontSize:"0.95rem",color:"#e2e8f0"}}>{String(v)}</div>
                 </div>
               ))}
             </div>
-            {result.preview_images?.length > 0 && (
+            {(result.preview_images as string[])?.length > 0 && (
               <div style={card}>
-                <p style={sectionTitle}>Vista previa — Primeras {result.preview_images.length} muestras</p>
+                <p style={sectionTitle}>Vista previa — Primeras {(result.preview_images as string[]).length} muestras</p>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
-                  {result.preview_images.map((b64:string, i:number)=>(
+                  {(result.preview_images as string[]).map((b64:string, i:number)=>(
                     <InSARImage key={i} b64={b64} title={`Muestra ${i+1}`}/>
                   ))}
                 </div>

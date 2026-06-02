@@ -1453,14 +1453,14 @@ export default function MintPyAnalysis() {
 
               {/* Stats cards — muestra el método activo */}
               {(() => {
-                const s = activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats : results.stats;
-                const isEW = viewMode === "EW" && results.mode === "2D" && activeMethod === "mintpy";
-                const statRows = [
-                  { label: "Vel. Mínima", value: `${(isEW && (s as VelocityStats).min_ew !== undefined ? (s as VelocityStats).min_ew! : s.min).toFixed(2)} mm/a`, color: "#60a5fa" },
-                  { label: "Vel. Máxima", value: `${(isEW && (s as VelocityStats).max_ew !== undefined ? (s as VelocityStats).max_ew! : s.max).toFixed(2)} mm/a`, color: "#f87171" },
-                  { label: "Vel. Media", value: `${(isEW && (s as VelocityStats).mean_ew !== undefined ? (s as VelocityStats).mean_ew! : s.mean).toFixed(2)} mm/a`, color: "#34d399" },
-                  { label: "Desv. Est.", value: `${(isEW && (s as VelocityStats).std_ew !== undefined ? (s as VelocityStats).std_ew! : s.std).toFixed(2)} mm/a`, color: "#a78bfa" },
-                ];
+                const s = activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats : results?.stats;
+                const isEW = viewMode === "EW" && results?.mode === "2D" && activeMethod === "mintpy";
+                const statRows = s ? [
+                  { label: "Vel. Mínima", value: `${(isEW && (s as VelocityStats).min_ew !== undefined ? (s as VelocityStats).min_ew! : (s as VelocityStats).min).toFixed(2)} mm/a`, color: "#60a5fa" },
+                  { label: "Vel. Máxima", value: `${(isEW && (s as VelocityStats).max_ew !== undefined ? (s as VelocityStats).max_ew! : (s as VelocityStats).max).toFixed(2)} mm/a`, color: "#f87171" },
+                  { label: "Vel. Media", value: `${(isEW && (s as VelocityStats).mean_ew !== undefined ? (s as VelocityStats).mean_ew! : (s as VelocityStats).mean).toFixed(2)} mm/a`, color: "#34d399" },
+                  { label: "Desv. Est.", value: `${(isEW && (s as VelocityStats).std_ew !== undefined ? (s as VelocityStats).std_ew! : (s as VelocityStats).std).toFixed(2)} mm/a`, color: "#a78bfa" },
+                ] : [];
                 const methodLabel = activeMethod === "hyp3" ? "📦 HyP3" : "🔬 MintPy";
                 const methodColor = activeMethod === "hyp3" ? "rgba(245,158,11,0.2)" : "rgba(56,189,248,0.08)";
                 const methodBorder = activeMethod === "hyp3" ? "rgba(245,158,11,0.3)" : "rgba(56,189,248,0.2)";
@@ -1605,8 +1605,8 @@ export default function MintPyAnalysis() {
                       gap: "10px"
                     }}
                   >
-                    <span>Periodo: {results.stats.date_start} → {results.stats.date_end} | {results.stats.n_interferograms} interferogramas</span>
-                    {results.stats.era5_successful !== undefined && (
+                    <span>Periodo: {results?.stats.date_start} → {results?.stats.date_end} | {results?.stats.n_interferograms} interferogramas</span>
+                    {results?.stats.era5_successful !== undefined && (
                       <span style={{
                         padding: "2px 6px",
                         borderRadius: "4px",
@@ -1614,9 +1614,9 @@ export default function MintPyAnalysis() {
                         color: "#10b981",
                         fontWeight: 600
                       }}>
-                        {results.stats.tropo_method === "ERA5"
+                        {results?.stats.tropo_method === "ERA5"
                           ? "☁️ ERA5 OK"
-                          : `🌄 Troposf: ${results.stats.tropo_method ?? "height_corr"}`}
+                          : `🌄 Troposf: ${results?.stats.tropo_method ?? "height_corr"}`}
                       </span>
                     )}
                   </div>
@@ -1651,7 +1651,7 @@ export default function MintPyAnalysis() {
                         <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
                         <Tooltip
                           contentStyle={{ background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", color: "white", fontSize: "0.8rem" }}
-                          formatter={(v: number, name: string) => [`${v} px`, name === "mintpy" ? "🔬 MintPy" : "📦 HyP3"]}
+                          formatter={(v: unknown, name: unknown) => [`${v} px`, name === "mintpy" ? "🔬 MintPy" : "📦 HyP3"]}
                         />
                         <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: "0.8rem", color: "#94a3b8" }}
                           formatter={(v) => v === "mintpy" ? "🔬 MintPy SBAS" : "📦 HyP3 Directo"} />
@@ -1668,7 +1668,7 @@ export default function MintPyAnalysis() {
                         <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
                         <Tooltip
                           contentStyle={{ background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", color: "white", fontSize: "0.8rem" }}
-                          formatter={(v: number) => [`${v} píxeles`, "Frecuencia"]}
+                          formatter={(v: number | string | React.ReactNode) => [`${v} píxeles`, "Frecuencia"]}
                         />
                         <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} />
                       </BarChart>
@@ -1727,7 +1727,7 @@ export default function MintPyAnalysis() {
                   <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", margin: 0 }}>
                     📋 Muestra de Resultados — {activeMethod === "hyp3" ? "📦 HyP3 Directo" : "🔬 MintPy SBAS"}
                     <span style={{ marginLeft: "10px", fontSize: "0.75rem", color: "#64748b", fontWeight: "normal" }}>
-                      ({activeSample.length} de {(activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats.n_points : results.stats.n_points).toLocaleString()} puntos)
+                      ({activeSample.length} de {((activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats.n_points : results?.stats?.n_points) || 0).toLocaleString()} puntos)
                     </span>
                   </h3>
                   <div style={{ display: "flex", gap: "8px" }}>
@@ -1770,7 +1770,7 @@ export default function MintPyAnalysis() {
                     </thead>
                     <tbody>
                       {activeSample.map((p, idx) => {
-                        const displayVal = activeMethod === "hyp3" || results.mode !== "2D"
+                        const displayVal = activeMethod === "hyp3" || results?.mode !== "2D"
                           ? p.velocidad_mm_yr
                           : viewMode === "EW" ? (p.vel_ew_mm_yr || 0) : (p.vel_up_mm_yr || 0);
                         const color = velocityColor(displayVal, velMin, velMax);
@@ -1791,7 +1791,7 @@ export default function MintPyAnalysis() {
                     </tbody>
                   </table>
                 </div>
-                {activeSample.length < (activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats.n_points : results.stats.n_points) && (
+                {activeSample.length < (activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats.n_points : results?.stats?.n_points || 0) && (
                   <p style={{ textAlign: "center", color: "#475569", fontSize: "0.75rem", marginTop: "12px", fontStyle: "italic" }}>
                     Mostrando muestra de {activeSample.length} puntos. Descarga el CSV para el dataset completo.
                   </p>
@@ -1799,7 +1799,7 @@ export default function MintPyAnalysis() {
               </div>
 
               {/* Static Vector Map (Quiver) */}
-              {results.mode === "2D" && (
+              {results?.mode === "2D" && (
                 <div
                   style={{
                     background: "rgba(255,255,255,0.03)",
@@ -1837,7 +1837,7 @@ export default function MintPyAnalysis() {
                   </div>
                   <div style={{ textAlign: "center", background: "rgba(0,0,0,0.2)", borderRadius: "10px", padding: "10px", border: "1px solid rgba(255,255,255,0.05)" }}>
                     <img 
-                      src={`${API_URL}/api/mintpy/export_quiver_${viewMode.toLowerCase()}?t=${results.stats.date_end}`} 
+                      src={`${API_URL}/api/mintpy/export_quiver_${viewMode.toLowerCase()}?t=${results?.stats?.date_end || ''}`} 
                       alt={`Mapa Vectorial ${viewMode}`} 
                       style={{ maxWidth: "100%", maxHeight: "600px", borderRadius: "6px", objectFit: "contain" }}
                     />

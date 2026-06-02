@@ -88,6 +88,30 @@ async def clear_session(session_id: str = Form(...)):
             shutil.rmtree(session_dir, ignore_errors=True)
     return {"success": True}
 
+@router.get("/system_status")
+async def system_status():
+    import psutil
+    try:
+        svmem = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        return {
+            "success": True,
+            "ram": {
+                "total_gb": round(svmem.total / (1024**3), 2),
+                "available_gb": round(svmem.available / (1024**3), 2),
+                "used_gb": round(svmem.used / (1024**3), 2),
+                "percent": svmem.percent
+            },
+            "disk": {
+                "total_gb": round(disk.total / (1024**3), 2),
+                "free_gb": round(disk.free / (1024**3), 2),
+                "used_gb": round(disk.used / (1024**3), 2),
+                "percent": disk.percent
+            }
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def generate_quiver_plots(results_list):
     if not results_list:
         return

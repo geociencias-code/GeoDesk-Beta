@@ -486,6 +486,12 @@ export default function MintPyAnalysis() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const MIN_IGRAMS = 3;
 
+  const [systemStatus, setSystemStatus] = useState<{
+    ram: { total_gb: number; available_gb: number; used_gb: number; percent: number };
+    disk: { total_gb: number; free_gb: number; used_gb: number; percent: number };
+  } | null>(null);
+  const [uploadWarning, setUploadWarning] = useState<string | null>(null);
+
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [selectedMode, setSelectedMode] = useState<string | null>(null);
   const [activeMethod, setActiveMethod] = useState<"mintpy" | "hyp3">("mintpy");
@@ -504,6 +510,26 @@ export default function MintPyAnalysis() {
       setSelectedSeed(null);
     }
   }, [drawnBox]);
+
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/api/mintpy/system_status`);
+        if (res.data.success) {
+          setSystemStatus({
+            ram: res.data.ram,
+            disk: res.data.disk,
+          });
+        }
+      } catch (err) {
+        console.error("Error al consultar el estado del sistema:", err);
+      }
+    };
+
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const fetchPlan = useCallback(async () => {
     try {
@@ -574,7 +600,34 @@ export default function MintPyAnalysis() {
             const formData = new FormData();
             formData.append("session_id", sessionId);
             formData.append("file", f, f.name);
-            await axios.post(`${API_URL}/api/mintpy/upload_file`, formData);
+
+            let lastLoadedBytes = 0;
+            let lastActivityTime = Date.now();
+
+            const activityInterval = setInterval(() => {
+              // 3 minutes (180000 ms) of no upload activity / progress change
+              if (Date.now() - lastActivityTime > 180000) {
+                setUploadWarning(
+                  `⚠️ Alerta: No se ha detectado progreso en la subida del archivo "${f.name}" durante los últimos 3 minutos. Es posible que el servidor en Windows esté saturado escribiendo en disco o que el antivirus esté analizando el archivo.`
+                );
+              }
+            }, 5000);
+
+            try {
+              await axios.post(`${API_URL}/api/mintpy/upload_file`, formData, {
+                onUploadProgress: (progressEvent) => {
+                  if (progressEvent.loaded !== lastLoadedBytes) {
+                    lastLoadedBytes = progressEvent.loaded;
+                    lastActivityTime = Date.now();
+                    setUploadWarning(null); // Clear the warning if progress moves
+                  }
+                },
+              });
+            } finally {
+              clearInterval(activityInterval);
+              setUploadWarning(null);
+            }
+
             setUploadedCount((prev) => prev + 1);
           }
         } catch (e) {
@@ -724,6 +777,7 @@ export default function MintPyAnalysis() {
     setMessage("");
     setProgress(0);
     setUploadedCount(0);
+    setUploadWarning(null);
     setSessionId(crypto.randomUUID());
     const fd = new FormData();
     fd.append("session_id", oldSession);
@@ -799,6 +853,92 @@ export default function MintPyAnalysis() {
             padding: "24px",
           }}
         >
+          {/* Monitor de Recursos del Servidor */}
+          {systemStatus && (
+            <div
+              style={{
+                marginBottom: "20px",
+                padding: "14px",
+                background: "rgba(0, 0, 0, 0.25)",
+                borderRadius: "12px",
+                border: `1px solid ${
+                  systemStatus.ram.percent > 85 || systemStatus.disk.percent > 90
+                    ? "rgba(239, 68, 68, 0.4)"
+                    : "rgba(255, 255, 255, 0.06)"
+                }`,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "10px",
+                }}
+              >
+                <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#cbd5e1", display: "flex", alignItems: "center", gap: "6px" }}>
+                  💻 Recursos del Servidor
+                </span>
+                <span
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    borderRadius: "50%",
+                    background: systemStatus.ram.percent > 85 ? "#ef4444" : "#10b981",
+                    boxShadow: `0 0 8px ${systemStatus.ram.percent > 85 ? "#ef4444" : "#10b981"}`,
+                    display: "inline-block",
+                  }}
+                />
+              </div>
+
+              {/* RAM stats */}
+              <div style={{ marginBottom: "10px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "4px" }}>
+                  <span>Memoria RAM</span>
+                  <span style={{ fontWeight: 600, color: systemStatus.ram.percent > 85 ? "#f87171" : "#cbd5e1" }}>
+                    {systemStatus.ram.percent}% ({systemStatus.ram.available_gb} GB libres)
+                  </span>
+                </div>
+                <div style={{ height: "4px", background: "rgba(255,255,255,0.08)", borderRadius: "2px", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${systemStatus.ram.percent}%`,
+                      background: systemStatus.ram.percent > 85 ? "#ef4444" : systemStatus.ram.percent > 70 ? "#f59e0b" : "#10b981",
+                      transition: "width 0.5s ease",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Disk stats */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "4px" }}>
+                  <span>Almacenamiento Libre</span>
+                  <span style={{ fontWeight: 600, color: systemStatus.disk.free_gb < 5 ? "#f87171" : "#cbd5e1" }}>
+                    {systemStatus.disk.free_gb} GB ({100 - systemStatus.disk.percent}% libre)
+                  </span>
+                </div>
+                <div style={{ height: "4px", background: "rgba(255,255,255,0.08)", borderRadius: "2px", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${systemStatus.disk.percent}%`,
+                      background: systemStatus.disk.percent > 90 ? "#ef4444" : "#38bdf8",
+                      transition: "width 0.5s ease",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {systemStatus.ram.percent > 85 && (
+                <div style={{ marginTop: "10px", fontSize: "0.7rem", color: "#f87171", lineHeight: "1.3" }}>
+                  ⚠️ <strong>RAM crítica:</strong> Windows podría terminar repentinamente la carga o ralentizarla severamente por paginación.
+                </div>
+              )}
+            </div>
+          )}
+
           <h2 style={{ fontSize: "1rem", fontWeight: 600, color: "#e2e8f0", marginBottom: "16px" }}>
             📂 Subir Interferogramas
           </h2>
@@ -856,6 +996,24 @@ export default function MintPyAnalysis() {
               {files.length >= MIN_IGRAMS && uploadedCount === files.length
                 ? `✅ ${uploadedCount} interferogramas listos`
                 : isUploading ? `⏳ Subiendo archivo ${uploadedCount + 1} de ${files.length}...` : `⚠️ ${files.length}/${MIN_IGRAMS} — faltan ${MIN_IGRAMS - files.length} más`}
+            </div>
+          )}
+
+          {/* Advertencia de Inactividad en Carga */}
+          {uploadWarning && (
+            <div
+              style={{
+                marginBottom: "12px",
+                padding: "10px 14px",
+                borderRadius: "10px",
+                background: "rgba(245, 158, 11, 0.12)",
+                border: "1px solid rgba(245, 158, 11, 0.35)",
+                fontSize: "0.8rem",
+                color: "#fbbf24",
+                lineHeight: "1.4",
+              }}
+            >
+              {uploadWarning}
             </div>
           )}
 

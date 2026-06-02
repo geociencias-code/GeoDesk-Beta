@@ -69,3 +69,4 @@ scipy>=1.12.0
 h5py>=3.10.0
 mintpy>=1.6.0
 eq-insar>=0.1.1
+psutil==7.2.2

@@ -74,6 +74,17 @@ GeoDesk invoca asíncronamente las siguientes capas científicas de MintPy:
 - Aislamiento y validación de puntos de referencia espacial con coherencia superior a 0.85 (Seed Points), eliminando la necesidad de sustracciones empíricas (como restar la mediana estadística) que falsifican los movimientos sísmicos reales asimétricos oscureciéndolos a cero.
 - Mapeo dinámico y tabulación generada a Microsoft Excel, dividiendo el historial consolidado de velocidad y el vector discreto de cada paso temporal.
 
+### Fases de Procesamiento y Comparativa de Fase
+
+La plataforma organiza el análisis en dos fases secuenciales y científicamente diferenciadas:
+1. **Fase 1: Pre-inversión (HyP3):** Visualización del promedio estadístico crudo del desplazamiento calculado directamente de las adquisiciones satelitales (antes de aplicar inversión temporal). Es útil para evaluar la calidad y tendencia preliminar de los datos.
+2. **Fase 2: Post-inversión (MintPy):** Visualización de la velocidad lineal de subsidencia calculada tras la inversión matricial SBAS, removiendo ruidos sistemáticos (atmósfera, DEM y órbita).
+
+Para fines de validación visual y educativa, GeoDesk incluye un módulo de **Visualización de Estados de Fase** de un par representativo:
+- **Fase Envuelta (Wrapped):** El estado electromagnético original con patrones de franjas cíclicas de $-\pi$ a $+\pi$ radianes.
+- **Fase Desenvuelta (Unwrapped):** La fase continua y desenrollada por SNAPHU (HyP3), que agrupa la señal de deformación y el ruido.
+- **Fase Corregida (MintPy):** La deformación final limpia (en milímetros) tras la sustracción de la troposfera y la corrección orbital.
+
 ### Descomposición Geométrica 2D (Vertical & Este-Oeste)
 
 Cuando se provee al motor una ingesta combinada de interferogramas de órbita **Ascendente** (apuntando al Este) y **Descendente** (apuntando al Oeste), GeoDesk resuelve automáticamente la descomposición 2D. Esta técnica aprovecha las matrices de ángulos de incidencia ($\theta$) y acimut ($\alpha$) del sensor para separar la velocidad unidimensional bidireccional (LOS) en vectores puros tridimensionales (Proyectando el vector Norte-Sur muy cercano al plano orbital como despreciable).

@@ -57,6 +57,138 @@ DATE_RE = re.compile(r"(20\d{6})T")
 SESSION_BASE = Path("/tmp/mintpy_sessions")
 SESSION_BASE.mkdir(parents=True, exist_ok=True)
 
+def generate_phase_previews(active_work_dir: Path, active_zip_dir: Path, igram_meta_list: List[dict]):
+    """Generates wrapped, unwrapped, and corrected phase images for a representative pair."""
+    if not igram_meta_list:
+        logging.warning("No interferogram metadata list provided for phase previews.")
+        return None
+    
+    # Pick the first pair as representative
+    first_pair = igram_meta_list[0]
+    d1_str = first_pair["date1"].replace("-", "")
+    d2_str = first_pair["date2"].replace("-", "")
+    
+    # Locate the extracted product directory in active_zip_dir
+    target_folder = None
+    if active_zip_dir.exists():
+        for folder in active_zip_dir.iterdir():
+            if folder.is_dir() and d1_str in folder.name and d2_str in folder.name:
+                target_folder = folder
+                break
+                
+        if not target_folder:
+            # Fallback: search for any subfolder
+            subfolders = [d for d in active_zip_dir.iterdir() if d.is_dir()]
+            if subfolders:
+                target_folder = subfolders[0]
+                
+    if not target_folder or not target_folder.exists():
+        logging.warning("Target folder containing extracted TIF/PNG files not found.")
+        return None
+        
+    # Search for color_phase.png and unw_phase.png inside target_folder
+    color_phase_file = None
+    unw_phase_file = None
+    for f in target_folder.iterdir():
+        if f.is_file():
+            name = f.name.lower()
+            if name.endswith("color_phase.png"):
+                color_phase_file = f
+            elif name.endswith("unw_phase.png"):
+                unw_phase_file = f
+            
+    previews_dir = RESULTS_DIR / "phase_previews"
+    previews_dir.mkdir(parents=True, exist_ok=True)
+    
+    preview_info = {
+        "pair_label": f"{first_pair['date1']} → {first_pair['date2']}",
+        "wrapped_url": None,
+        "unwrapped_url": None,
+        "corrected_url": None
+    }
+    
+    # Copy wrapped phase
+    if color_phase_file and color_phase_file.exists():
+        wrapped_dest = previews_dir / f"wrapped_{d1_str}_{d2_str}.png"
+        try:
+            shutil.copy(color_phase_file, wrapped_dest)
+            preview_info["wrapped_url"] = f"/mintpy_results/phase_previews/{wrapped_dest.name}"
+        except Exception as err:
+            logging.warning(f"Error copying wrapped phase file: {err}")
+            
+    # Copy unwrapped phase
+    if unw_phase_file and unw_phase_file.exists():
+        unwrapped_dest = previews_dir / f"unwrapped_{d1_str}_{d2_str}.png"
+        try:
+            shutil.copy(unw_phase_file, unwrapped_dest)
+            preview_info["unwrapped_url"] = f"/mintpy_results/phase_previews/{unwrapped_dest.name}"
+        except Exception as err:
+            logging.warning(f"Error copying unwrapped phase file: {err}")
+            
+    # Render corrected phase from timeseries.h5
+    timeseries_h5 = active_work_dir / "timeseries.h5"
+    if timeseries_h5.exists():
+        try:
+            with h5py.File(timeseries_h5, "r") as f:
+                if "timeseries" in f and "date" in f:
+                    dates_array = [d.decode('utf-8') for d in f["date"][:]]
+                    idx1 = None
+                    idx2 = None
+                    for idx, d_val in enumerate(dates_array):
+                        if d_val == d1_str:
+                            idx1 = idx
+                        elif d_val == d2_str:
+                            idx2 = idx
+                            
+                    # Fallbacks if index not found
+                    if idx1 is None:
+                        idx1 = 0
+                    if idx2 is None:
+                        idx2 = len(dates_array) - 1
+                        
+                    if idx1 < len(dates_array) and idx2 < len(dates_array):
+                        ts_data = f["timeseries"]
+                        disp1 = ts_data[idx1]
+                        disp2 = ts_data[idx2]
+                        # Difference in mm
+                        corrected_disp = (disp2 - disp1) * 1000.0
+                        
+                        # Apply mask: where infinite, otherwise NaN
+                        corrected_disp = np.where(np.isfinite(corrected_disp) & (corrected_disp != 0.0), corrected_disp, np.nan)
+                        
+                        # Set matplotlib backend to Agg
+                        import matplotlib
+                        matplotlib.use("Agg")
+                        import matplotlib.pyplot as plt
+                        
+                        fig, ax = plt.subplots(figsize=(8, 6))
+                        # We use seismic colormap (red is subsidence, blue is uplift, white is stable)
+                        vmax_val = np.nanpercentile(np.abs(corrected_disp), 98) if np.any(np.isfinite(corrected_disp)) else 15.0
+                        if np.isnan(vmax_val) or vmax_val == 0:
+                            vmax_val = 15.0
+                        
+                        im = ax.imshow(corrected_disp, cmap="seismic", vmin=-vmax_val, vmax=vmax_val)
+                        ax.set_title(f"Deformación Corregida (SBAS MintPy)\n{first_pair['date1']} a {first_pair['date2']}", fontsize=12, color="white", pad=12)
+                        ax.axis("off")
+                        
+                        # Modern dark background styling
+                        fig.patch.set_facecolor('#0f172a')
+                        ax.set_facecolor('#0f172a')
+                        
+                        cbar = fig.colorbar(im, ax=ax, orientation='horizontal', pad=0.08, shrink=0.7)
+                        cbar.set_label('Deformación en Línea de Visión (mm)', color='white', fontsize=10, labelpad=8)
+                        cbar.ax.tick_params(labelsize=8, labelcolor='white')
+                        
+                        corrected_dest = previews_dir / f"corrected_{d1_str}_{d2_str}.png"
+                        plt.savefig(corrected_dest, dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+                        plt.close(fig)
+                        
+                        preview_info["corrected_url"] = f"/mintpy_results/phase_previews/{corrected_dest.name}"
+        except Exception as err:
+            logging.warning(f"Error rendering corrected phase preview: {err}")
+            
+    return preview_info
+
 @router.post("/upload_file")
 async def upload_file(session_id: str = Form(...), file: UploadFile = File(...)):
     if not session_id:
@@ -1484,7 +1616,20 @@ async def process_interferograms(
             step_s = max(1, len(results) // 1000)
             sample = results[::step_s][:1000]
             
-            output = {"stats": stats, "interferograms": igram_meta, "igram_stats": igram_stats_2d, "sample": sample, "mode": "2D"}
+            # Generate phase previews for 2D mode
+            previews_2d = None
+            try:
+                asc_meta = [m for m in igram_meta if m["track"] == "ASC"]
+                if asc_meta:
+                    previews_2d = generate_phase_previews(work_dir_asc, zip_dir_asc, asc_meta)
+                else:
+                    desc_meta = [m for m in igram_meta if m["track"] == "DESC"]
+                    if desc_meta:
+                        previews_2d = generate_phase_previews(work_dir_desc, zip_dir_desc, desc_meta)
+            except Exception as e_prev:
+                logging.warning(f"Error generando phase previews 2D: {e_prev}")
+            
+            output = {"stats": stats, "interferograms": igram_meta, "igram_stats": igram_stats_2d, "sample": sample, "mode": "2D", "phase_previews": previews_2d}
 
             # HyP3 direct velocity comparison (if los_disp.tif files are present)
             # In 2D mode, scan both ASC and DESC directories
@@ -1613,7 +1758,14 @@ async def process_interferograms(
             else:
                 if XLSX_FILE.exists(): XLSX_FILE.unlink()
 
-            output = {"stats": stats, "interferograms": igram_meta, "igram_stats": igram_stats, "sample": sample, "mode": "LOS"}
+            # Generate phase previews for LOS mode
+            previews_los = None
+            try:
+                previews_los = generate_phase_previews(work_dir, zip_dir, igram_meta)
+            except Exception as e_prev:
+                logging.warning(f"Error generando phase previews LOS: {e_prev}")
+
+            output = {"stats": stats, "interferograms": igram_meta, "igram_stats": igram_stats, "sample": sample, "mode": "LOS", "phase_previews": previews_los}
 
             # HyP3 direct velocity comparison — run in a thread with timeout to avoid hanging
             logging.info("[LOS] Checking for HyP3 displacement files...")

@@ -377,6 +377,12 @@ interface ProcessingResults {
   sample: VelocityPoint[];
   mode?: "2D" | "LOS";
   hyp3?: HyP3Results | null;
+  phase_previews?: {
+    pair_label: string;
+    wrapped_url?: string | null;
+    unwrapped_url?: string | null;
+    corrected_url?: string | null;
+  } | null;
 }
 
 
@@ -853,91 +859,7 @@ export default function MintPyAnalysis() {
             padding: "24px",
           }}
         >
-          {/* Monitor de Recursos del Servidor */}
-          {systemStatus && (
-            <div
-              style={{
-                marginBottom: "20px",
-                padding: "14px",
-                background: "rgba(0, 0, 0, 0.25)",
-                borderRadius: "12px",
-                border: `1px solid ${
-                  systemStatus.ram.percent > 85 || systemStatus.disk.percent > 90
-                    ? "rgba(239, 68, 68, 0.4)"
-                    : "rgba(255, 255, 255, 0.06)"
-                }`,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: "10px",
-                }}
-              >
-                <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#cbd5e1", display: "flex", alignItems: "center", gap: "6px" }}>
-                  💻 Recursos del Servidor
-                </span>
-                <span
-                  style={{
-                    width: "8px",
-                    height: "8px",
-                    borderRadius: "50%",
-                    background: systemStatus.ram.percent > 85 ? "#ef4444" : "#10b981",
-                    boxShadow: `0 0 8px ${systemStatus.ram.percent > 85 ? "#ef4444" : "#10b981"}`,
-                    display: "inline-block",
-                  }}
-                />
-              </div>
 
-              {/* RAM stats */}
-              <div style={{ marginBottom: "10px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "4px" }}>
-                  <span>Memoria RAM</span>
-                  <span style={{ fontWeight: 600, color: systemStatus.ram.percent > 85 ? "#f87171" : "#cbd5e1" }}>
-                    {systemStatus.ram.percent}% ({systemStatus.ram.available_gb} GB libres)
-                  </span>
-                </div>
-                <div style={{ height: "4px", background: "rgba(255,255,255,0.08)", borderRadius: "2px", overflow: "hidden" }}>
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${systemStatus.ram.percent}%`,
-                      background: systemStatus.ram.percent > 85 ? "#ef4444" : systemStatus.ram.percent > 70 ? "#f59e0b" : "#10b981",
-                      transition: "width 0.5s ease",
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Disk stats */}
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "4px" }}>
-                  <span>Almacenamiento Libre</span>
-                  <span style={{ fontWeight: 600, color: systemStatus.disk.free_gb < 5 ? "#f87171" : "#cbd5e1" }}>
-                    {systemStatus.disk.free_gb} GB ({100 - systemStatus.disk.percent}% libre)
-                  </span>
-                </div>
-                <div style={{ height: "4px", background: "rgba(255,255,255,0.08)", borderRadius: "2px", overflow: "hidden" }}>
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${systemStatus.disk.percent}%`,
-                      background: systemStatus.disk.percent > 90 ? "#ef4444" : "#38bdf8",
-                      transition: "width 0.5s ease",
-                    }}
-                  />
-                </div>
-              </div>
-
-              {systemStatus.ram.percent > 85 && (
-                <div style={{ marginTop: "10px", fontSize: "0.7rem", color: "#f87171", lineHeight: "1.3" }}>
-                  ⚠️ <strong>RAM crítica:</strong> Windows podría terminar repentinamente la carga o ralentizarla severamente por paginación.
-                </div>
-              )}
-            </div>
-          )}
 
           <h2 style={{ fontSize: "1rem", fontWeight: 600, color: "#e2e8f0", marginBottom: "16px" }}>
             📂 Subir Interferogramas
@@ -1288,7 +1210,14 @@ export default function MintPyAnalysis() {
               <h3 style={{ fontSize: "0.85rem", color: "#94a3b8", marginBottom: "10px" }}>
                 Interferogramas procesados:
               </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ 
+                display: "flex", 
+                flexDirection: "column", 
+                gap: "6px",
+                maxHeight: "300px",
+                overflowY: "auto",
+                paddingRight: "6px"
+              }}>
                 {results.interferograms.map((ig, i) => (
                   <div
                     key={i}
@@ -1401,7 +1330,7 @@ export default function MintPyAnalysis() {
                     <div>
                       <div style={{ fontWeight: 700, color: "#fbbf24", fontSize: "0.9rem" }}>Modo Comparación Activo</div>
                       <div style={{ fontSize: "0.75rem", color: "#d97706" }}>
-                        Visualizando MintPy SBAS vs cálculo directo de desplazamiento HyP3 por interferograma
+                        Visualizando Fase 1 (Pre-inversión HyP3) vs Fase 2 (Post-inversión MintPy)
                       </div>
                     </div>
                   </div>
@@ -1415,7 +1344,7 @@ export default function MintPyAnalysis() {
                         background: activeMethod === "mintpy" ? "linear-gradient(135deg, #38bdf8, #6366f1)" : "rgba(255,255,255,0.07)",
                         color: activeMethod === "mintpy" ? "white" : "#94a3b8",
                       }}
-                    >🔬 MintPy SBAS</button>
+                    >Fase 2: Post-inversión (MintPy)</button>
                     <button
                       id="tab-hyp3"
                       onClick={() => setActiveMethod("hyp3")}
@@ -1425,7 +1354,7 @@ export default function MintPyAnalysis() {
                         background: activeMethod === "hyp3" ? "linear-gradient(135deg, #f59e0b, #ef4444)" : "rgba(255,255,255,0.07)",
                         color: activeMethod === "hyp3" ? "white" : "#94a3b8",
                       }}
-                    >📦 HyP3 Directo</button>
+                    >Fase 1: Pre-inversión (HyP3)</button>
                   </div>
                 </div>
               )}
@@ -1461,9 +1390,9 @@ export default function MintPyAnalysis() {
                   { label: "Vel. Media", value: `${(isEW && (s as VelocityStats).mean_ew !== undefined ? (s as VelocityStats).mean_ew! : (s as VelocityStats).mean).toFixed(2)} mm/a`, color: "#34d399" },
                   { label: "Desv. Est.", value: `${(isEW && (s as VelocityStats).std_ew !== undefined ? (s as VelocityStats).std_ew! : (s as VelocityStats).std).toFixed(2)} mm/a`, color: "#a78bfa" },
                 ] : [];
-                const methodLabel = activeMethod === "hyp3" ? "📦 HyP3" : "🔬 MintPy";
-                const methodColor = activeMethod === "hyp3" ? "rgba(245,158,11,0.2)" : "rgba(56,189,248,0.08)";
-                const methodBorder = activeMethod === "hyp3" ? "rgba(245,158,11,0.3)" : "rgba(56,189,248,0.2)";
+                const methodLabel = activeMethod === "hyp3" ? "Fase 1: Pre-inversión (HyP3)" : "Fase 2: Post-inversión (MintPy)";
+                const methodColor = activeMethod === "hyp3" ? "rgba(245,158,11,0.12)" : "rgba(56,189,248,0.08)";
+                const methodBorder = activeMethod === "hyp3" ? "rgba(245,158,11,0.25)" : "rgba(56,189,248,0.2)";
                 return (
                   <div>
                     {hasHyp3 && (
@@ -1512,7 +1441,7 @@ export default function MintPyAnalysis() {
                     }}
                   >
                     <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", margin: 0 }}>
-                      🗺️ Mapa de Velocidad — {activeMethod === "hyp3" ? "📦 HyP3 Directo" : "🔬 MintPy SBAS"}
+                      🗺️ Mapa de Velocidad — {activeMethod === "hyp3" ? "Fase 1: Pre-inversión (HyP3)" : "Fase 2: Post-inversión (MintPy)"}
                     </h3>
                     <div style={{ display: "flex", gap: "8px" }}>
                       {activeMethod === "hyp3" && hasHyp3 ? (
@@ -1521,12 +1450,12 @@ export default function MintPyAnalysis() {
                             href={`${API_URL}/api/mintpy/export_xlsx_hyp3`}
                             download
                             style={{ padding: "6px 14px", background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}
-                          >📊 XLSX HyP3</a>
+                          >📊 XLSX Fase 1 (HyP3)</a>
                           <a
                             href={`${API_URL}/api/mintpy/export_csv_hyp3`}
                             download
                             style={{ padding: "6px 14px", background: "linear-gradient(135deg, #ef4444, #dc2626)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}
-                          >⬇️ CSV HyP3</a>
+                          >⬇️ CSV Fase 1 (HyP3)</a>
                         </>
                       ) : (
                         <>
@@ -1534,7 +1463,7 @@ export default function MintPyAnalysis() {
                             href={`${API_URL}/api/mintpy/export_xlsx`}
                             download
                             style={{ padding: "6px 14px", background: "linear-gradient(135deg, #10b981, #059669)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}
-                          >📊 Resumen XLSX</a>
+                          >📊 XLSX Fase 2 (MintPy)</a>
                           <a
                             href={`${API_URL}/api/mintpy/export_csv`}
                             download
@@ -1651,10 +1580,10 @@ export default function MintPyAnalysis() {
                         <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
                         <Tooltip
                           contentStyle={{ background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", color: "white", fontSize: "0.8rem" }}
-                          formatter={(v: unknown, name: unknown) => [`${v} px`, name === "mintpy" ? "🔬 MintPy" : "📦 HyP3"]}
+                          formatter={(v: unknown, name: unknown) => [`${v} px`, name === "mintpy" ? "Fase 2: Post-inversión (MintPy)" : "Fase 1: Pre-inversión (HyP3)"]}
                         />
                         <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: "0.8rem", color: "#94a3b8" }}
-                          formatter={(v) => v === "mintpy" ? "🔬 MintPy SBAS" : "📦 HyP3 Directo"} />
+                          formatter={(v) => v === "mintpy" ? "Fase 2: Post-inversión (MintPy)" : "Fase 1: Pre-inversión (HyP3)"} />
                         <Bar dataKey="mintpy" fill="#6366f1" radius={[4, 4, 0, 0]} opacity={0.85} />
                         <Bar dataKey="hyp3" fill="#f59e0b" radius={[4, 4, 0, 0]} opacity={0.85} />
                       </BarChart>
@@ -1677,6 +1606,8 @@ export default function MintPyAnalysis() {
                 </div>
               </div>
 
+
+
               {/* Line Chart for Igram Stats */}
               {(() => {
                 const igStats = activeMethod === "hyp3" && hasHyp3
@@ -1689,7 +1620,7 @@ export default function MintPyAnalysis() {
                 return (
                   <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "14px", padding: "20px" }}>
                     <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", marginBottom: "14px" }}>
-                      📈 Velocidad Media por Par de Fechas — {activeMethod === "hyp3" ? "📦 HyP3 Directo" : "🔬 MintPy SBAS"}
+                      📈 Velocidad Media por Par de Fechas — {activeMethod === "hyp3" ? "Fase 1: Pre-inversión (HyP3)" : "Fase 2: Post-inversión (MintPy)"}
                     </h3>
                     <ResponsiveContainer width="100%" height={280}>
                       <LineChart data={igStats} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
@@ -1706,6 +1637,93 @@ export default function MintPyAnalysis() {
                   </div>
                 );
               })()}
+
+              {/* Visualización del Estado de Fase (Wrapped vs Unwrapped vs Corrected) */}
+              {results && results.phase_previews && (
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: "14px",
+                    padding: "20px",
+                    marginTop: "20px",
+                  }}
+                >
+                  <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", marginBottom: "14px" }}>
+                    🔍 Visualización del Estado de la Fase Radar — Par: {results.phase_previews.pair_label}
+                  </h3>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+                    {/* Fase Envuelta */}
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "0.8rem", color: "#cbd5e1", marginBottom: "8px", fontWeight: 600 }}>
+                        Fase Envuelta (Wrapped)
+                      </div>
+                      <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: "10px", padding: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                        {results.phase_previews.wrapped_url ? (
+                          <img 
+                            src={`${API_URL}${results.phase_previews.wrapped_url}`} 
+                            alt="Fase Envuelta" 
+                            style={{ width: "100%", height: "200px", objectFit: "contain", borderRadius: "6px" }} 
+                          />
+                        ) : (
+                          <div style={{ height: "200px", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b", fontSize: "0.75rem" }}>
+                            No disponible
+                          </div>
+                        )}
+                      </div>
+                      <p style={{ color: "#64748b", fontSize: "0.7rem", marginTop: "8px", lineHeight: "1.3" }}>
+                        Fase interferométrica cruda de $-\pi$ a $+\pi$ radianes. Muestra patrones cíclicos (franjas).
+                      </p>
+                    </div>
+
+                    {/* Fase Desenvuelta */}
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "0.8rem", color: "#cbd5e1", marginBottom: "8px", fontWeight: 600 }}>
+                        Fase Desenvuelta (Unwrapped)
+                      </div>
+                      <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: "10px", padding: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                        {results.phase_previews.unwrapped_url ? (
+                          <img 
+                            src={`${API_URL}${results.phase_previews.unwrapped_url}`} 
+                            alt="Fase Desenvuelta" 
+                            style={{ width: "100%", height: "200px", objectFit: "contain", borderRadius: "6px" }} 
+                          />
+                        ) : (
+                          <div style={{ height: "200px", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b", fontSize: "0.75rem" }}>
+                            No disponible
+                          </div>
+                        )}
+                      </div>
+                      <p style={{ color: "#64748b", fontSize: "0.7rem", marginTop: "8px", lineHeight: "1.3" }}>
+                        Fase desenrollada de forma continua por SNAPHU (HyP3), representando distancia física y ruido.
+                      </p>
+                    </div>
+
+                    {/* Fase Corregida */}
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "0.8rem", color: "#cbd5e1", marginBottom: "8px", fontWeight: 600 }}>
+                        Fase Corregida (MintPy)
+                      </div>
+                      <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: "10px", padding: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                        {results.phase_previews.corrected_url ? (
+                          <img 
+                            src={`${API_URL}${results.phase_previews.corrected_url}`} 
+                            alt="Fase Corregida" 
+                            style={{ width: "100%", height: "200px", objectFit: "contain", borderRadius: "6px" }} 
+                          />
+                        ) : (
+                          <div style={{ height: "200px", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b", fontSize: "0.75rem" }}>
+                            No disponible
+                          </div>
+                        )}
+                      </div>
+                      <p style={{ color: "#64748b", fontSize: "0.7rem", marginTop: "8px", lineHeight: "1.3" }}>
+                        Deformación del par limpia en milímetros tras remover atmósfera y rampas orbitales en MintPy.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Data table */}
               <div
@@ -1725,7 +1743,7 @@ export default function MintPyAnalysis() {
                   }}
                 >
                   <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", margin: 0 }}>
-                    📋 Muestra de Resultados — {activeMethod === "hyp3" ? "📦 HyP3 Directo" : "🔬 MintPy SBAS"}
+                    📋 Muestra de Resultados — {activeMethod === "hyp3" ? "Fase 1: Pre-inversión (HyP3)" : "Fase 2: Post-inversión (MintPy)"}
                     <span style={{ marginLeft: "10px", fontSize: "0.75rem", color: "#64748b", fontWeight: "normal" }}>
                       ({activeSample.length} de {((activeMethod === "hyp3" && hasHyp3 ? results!.hyp3!.stats.n_points : results?.stats?.n_points) || 0).toLocaleString()} puntos)
                     </span>
@@ -1735,22 +1753,22 @@ export default function MintPyAnalysis() {
                       <>
                         <a href={`${API_URL}/api/mintpy/export_xlsx_hyp3`} download
                           style={{ padding: "6px 14px", background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}>
-                          📊 XLSX HyP3
+                          📊 XLSX Fase 1 (HyP3)
                         </a>
                         <a href={`${API_URL}/api/mintpy/export_csv_hyp3`} download
                           style={{ padding: "6px 14px", background: "linear-gradient(135deg, #ef4444, #dc2626)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}>
-                          ⬇️ CSV HyP3
+                          ⬇️ CSV Fase 1 (HyP3)
                         </a>
                       </>
                     ) : (
                       <>
                         <a href={`${API_URL}/api/mintpy/export_xlsx`} download
                           style={{ padding: "6px 14px", background: "linear-gradient(135deg, #10b981, #059669)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}>
-                          📊 Resumen XLSX
+                          📊 XLSX Fase 2 (MintPy)
                         </a>
                         <a href={`${API_URL}/api/mintpy/export_csv`} download
                           style={{ padding: "6px 14px", background: "linear-gradient(135deg, #6366f1, #4f46e5)", color: "white", borderRadius: "8px", fontSize: "0.78rem", fontWeight: 600, textDecoration: "none" }}>
-                          ⬇️ Exportar CSV
+                          ⬇️ CSV Fase 2 (MintPy)
                         </a>
                       </>
                     )}
@@ -1851,6 +1869,97 @@ export default function MintPyAnalysis() {
           )}
         </div>
       </div>
+
+      {/* Monitor de Recursos del Servidor en el Pie de Página */}
+      {systemStatus && (
+        <div
+          style={{
+            marginTop: "32px",
+            padding: "16px 20px",
+            background: "rgba(0, 0, 0, 0.25)",
+            borderRadius: "14px",
+            border: `1px solid ${
+              systemStatus.ram.percent > 85 || systemStatus.disk.percent > 90
+                ? "rgba(239, 68, 68, 0.4)"
+                : "rgba(255, 255, 255, 0.06)"
+            }`,
+            width: "50%",
+            maxWidth: "600px",
+            boxSizing: "border-box",
+            marginRight: "auto"
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "14px",
+            }}
+          >
+            <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#cbd5e1", display: "flex", alignItems: "center", gap: "6px" }}>
+              💻 Recursos del Servidor
+            </span>
+            <span
+              style={{
+                width: "8px",
+                height: "8px",
+                borderRadius: "50%",
+                background: systemStatus.ram.percent > 85 ? "#ef4444" : "#10b981",
+                boxShadow: `0 0 8px ${systemStatus.ram.percent > 85 ? "#ef4444" : "#10b981"}`,
+                display: "inline-block",
+              }}
+            />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
+            {/* RAM stats */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "6px" }}>
+                <span>Memoria RAM</span>
+                <span style={{ fontWeight: 600, color: systemStatus.ram.percent > 85 ? "#f87171" : "#cbd5e1" }}>
+                  {systemStatus.ram.percent}% ({systemStatus.ram.available_gb} GB libres)
+                </span>
+              </div>
+              <div style={{ height: "6px", background: "rgba(255,255,255,0.08)", borderRadius: "3px", overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${systemStatus.ram.percent}%`,
+                    background: systemStatus.ram.percent > 85 ? "#ef4444" : systemStatus.ram.percent > 70 ? "#f59e0b" : "#10b981",
+                    transition: "width 0.5s ease",
+                  }}
+                />
+              </div>
+              {systemStatus.ram.percent > 85 && (
+                <div style={{ marginTop: "6px", fontSize: "0.7rem", color: "#f87171", lineHeight: "1.3" }}>
+                  ⚠️ <strong>RAM crítica:</strong> Windows podría terminar repentinamente la carga o ralentizarla severamente por paginación.
+                </div>
+              )}
+            </div>
+
+            {/* Disk stats */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "6px" }}>
+                <span>Almacenamiento Libre</span>
+                <span style={{ fontWeight: 600, color: systemStatus.disk.free_gb < 5 ? "#f87171" : "#cbd5e1" }}>
+                  {systemStatus.disk.free_gb} GB ({100 - systemStatus.disk.percent}% libre)
+                </span>
+              </div>
+              <div style={{ height: "6px", background: "rgba(255,255,255,0.08)", borderRadius: "3px", overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${systemStatus.disk.percent}%`,
+                    background: systemStatus.disk.percent > 90 ? "#ef4444" : "#38bdf8",
+                    transition: "width 0.5s ease",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

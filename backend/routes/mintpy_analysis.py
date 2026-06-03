@@ -1697,6 +1697,7 @@ async def process_interferograms(
 
             RESULTS_DIR.mkdir(parents=True, exist_ok=True)
             RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
+            shutil.rmtree(session_dir, ignore_errors=True)
             return output
 
         else:
@@ -1832,6 +1833,7 @@ async def process_interferograms(
             logging.info("[LOS] Writing results JSON and returning response...")
             RESULTS_DIR.mkdir(parents=True, exist_ok=True)
             RESULTS_FILE.write_text(json.dumps(output, ensure_ascii=False, indent=2))
+            shutil.rmtree(session_dir, ignore_errors=True)
             logging.info("[LOS] Done. Returning output.")
             return output
 

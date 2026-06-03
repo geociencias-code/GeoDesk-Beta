@@ -960,6 +960,10 @@ def _make_cfg(
                 ref_lalo_val = f"{ref_lat},{ref_lon}"
                 ref_yx_val = "no"
 
+    # Ensure the weather directory is created for persistent caching of GRIB files
+    weather_dir = RESULTS_DIR / "weather"
+    weather_dir.mkdir(parents=True, exist_ok=True)
+
     return f"""mintpy.load.processor    = hyp3
 mintpy.load.unwFile      = {unw_pat}
 mintpy.load.corFile      = {cor_pat}
@@ -972,7 +976,9 @@ mintpy.network.coherenceBased     = yes
 mintpy.network.minCoherence       = 0.6
 mintpy.reference.lalo             = {ref_lalo_val}
 mintpy.reference.yx               = {ref_yx_val}
-mintpy.troposphericDelay.method   = height_correlation
+mintpy.troposphericDelay.method   = pyaps
+mintpy.troposphericDelay.weatherModel = ERA5
+mintpy.troposphericDelay.weatherDir = {weather_dir}
 mintpy.deramp                     = linear
 mintpy.topographicResidual        = yes
 mintpy.topographicResidual.stepFuncDate = no
@@ -1179,9 +1185,33 @@ def _run_mintpy_pipeline(
                                 tsa._template["mintpy.unwrapError.method"] = "no"
 
         # Run remaining steps
+        try:
+            tsa.run(steps=["invert_network", "correct_troposphere"])
+        except Exception as tropo_err:
+            timeseries_h5 = work_dir / "timeseries.h5"
+            if timeseries_h5.exists():
+                logging.warning(f"Tropospheric correction with PyAPS/ERA5 failed: {tropo_err}")
+                logging.warning("Falling back to height_correlation tropospheric correction...")
+                mintpy_cfg = work_dir / "smallbaselineApp.cfg"
+                if mintpy_cfg.exists():
+                    import re
+                    cfg_text = mintpy_cfg.read_text()
+                    cfg_text = re.sub(
+                        r"mintpy\.troposphericDelay\.method\s*=\s*pyaps",
+                        "mintpy.troposphericDelay.method = height_correlation",
+                        cfg_text
+                    )
+                    mintpy_cfg.write_text(cfg_text)
+                    if hasattr(tsa, "_template"):
+                        tsa._template["mintpy.troposphericDelay.method"] = "height_correlation"
+                    if hasattr(tsa, "template"):
+                        tsa.template["mintpy.troposphericDelay.method"] = "height_correlation"
+                # Re-run correct_troposphere step with height_correlation
+                tsa.run(steps=["correct_troposphere"])
+            else:
+                raise
+
         tsa.run(steps=[
-            "invert_network",
-            "correct_troposphere",
             "deramp",
             "correct_topography",
             "velocity",

@@ -123,6 +123,10 @@ Para la validación científica de sus datos, el motor GeoDesk implementa una ca
 3. El módulo escanea las líneas temporales de las capturas InSAR, interceptando el centro de la escena, y lanza un canal de descarga para solicitar a la Agencia Espacial Europea los volúmenes climáticos GRIB GCM (Global Climate Models) a los niveles de presión precisos en el instante de tiempo *exacto* de la captura satelital original.
 4. Extrapolando la elevación tridimensional de los píxeles radar a través del DEM, el **Phase Screen atmosférico** es calculado tridimensionalmente e invertido para ser sustraído del interferograma en la Línea de Visión (LOS), extinguiendo el error hidroestático antes del procesamiento de subsidencia.
 
+**Optimización y Robustez:**
+*   **Caché de Archivos GRIB (Persistencia):** Para evitar descargar repetidamente múltiples gigabytes de datos climáticos en cada ejecución, GeoDesk almacena los archivos meteorológicos descargados de forma persistente en `/app/mintpy_results/weather`. Las siguientes ejecuciones que coincidan en fechas reutilizarán esta caché, reduciendo el tiempo de procesamiento de minutos a segundos.
+*   **Mecanismo de Auto-Recuperación (Fallback):** Si la descarga desde el Climate Data Store de Copernicus falla (por ejemplo, si el servidor CDS está fuera de línea, no hay conexión a internet, o las credenciales `ERA5_KEY` en el archivo `backend/.env` son incorrectas), el backend intercepta el error automáticamente y realiza un *fallback* al método empírico **`height_correlation`** (correlación fase-elevación). Esto garantiza que el procesamiento se complete exitosamente sin detener la aplicación.
+
 Esta robusta sinergia geofísica convierte el output crudo del radar en datos aptos para toma de decisión sísmica e infraestructura.
 
 ---

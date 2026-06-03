@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-############################################################
-# Program is part of MintPy                                #
-# Copyright (c) 2013, Zhang Yunjun, Heresh Fattahi         #
-# Author: Antonio Valentino, Zhang Yunjun, Aug 2022        #
-############################################################
+
+# Program is part of MintPy
+# Copyright (c) 2013, Zhang Yunjun, Heresh Fattahi
+# Author: Antonio Valentino, Zhang Yunjun, Aug 2022
 
 
 import sys
 import warnings
-
 from mintpy.utils.arg_utils import create_argument_parser
+from mintpy.generate_mask import create_mask
 
-################################################################################################
 EXAMPLE = """example:
   generate_mask.py  temporalCoherence.h5 -m 0.7 -o maskTempCoh.h5
   generate_mask.py  temporalCoherence.h5 -m 0.7 -o maskTempCoh.h5 --base inputs/geometryRadar.h5 --base-dset shadow --base-value 1
@@ -169,18 +167,10 @@ def cmd_line_parse(iargs=None):
     return inps
 
 
-################################################################################################
 def main(iargs=None):
-    # parse
     inps = cmd_line_parse(iargs)
-
-    # import
-    from mintpy.generate_mask import create_mask
-
-    # run
     create_mask(inps)
 
 
-################################################################################################
 if __name__ == '__main__':
     main(sys.argv[1:])

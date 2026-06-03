@@ -1,20 +1,15 @@
-############################################################
-# Program is part of MintPy                                #
-# Copyright (c) 2013, Zhang Yunjun, Heresh Fattahi         #
-# Author: Zhang Yunjun, Heresh Fattahi, 2013               #
-############################################################
+# Program is part of MintPy
+# Copyright (c) 2013, Zhang Yunjun, Heresh Fattahi
+# Author: Zhang Yunjun, Heresh Fattahi, 2013
 
 
 import os
 import time
-
 import h5py
 import numpy as np
 
 from mintpy.utils import readfile, utils as ut, writefile
 
-
-################################################################################################
 def run_or_skip(inps):
     print('-'*50)
     print('update mode: ON')
@@ -40,7 +35,6 @@ def run_or_skip(inps):
     return flag
 
 
-################################################################################################
 def create_threshold_mask(inps):
     if inps.dset:
         print(f'read {inps.file} {inps.dset}')

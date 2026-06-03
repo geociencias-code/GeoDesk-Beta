@@ -1660,11 +1660,45 @@ export default function MintPyAnalysis() {
                       </div>
                       <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: "10px", padding: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
                         {results.phase_previews.wrapped_url ? (
-                          <img 
-                            src={`${API_URL}${results.phase_previews.wrapped_url}`} 
-                            alt="Fase Envuelta" 
-                            style={{ width: "100%", height: "200px", objectFit: "contain", borderRadius: "6px" }} 
-                          />
+                          <>
+                            <img 
+                              src={`${API_URL}${results.phase_previews.wrapped_url}`} 
+                              alt="Fase Envuelta" 
+                              style={{ width: "100%", height: "200px", objectFit: "contain", borderRadius: "6px" }} 
+                            />
+                            <a
+                              href={`${API_URL}${results.phase_previews.wrapped_url}`}
+                              download={`fase_envuelta_${results.phase_previews.pair_label.replace(" → ", "_")}.png`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                display: "inline-block",
+                                marginTop: "8px",
+                                padding: "6px 12px",
+                                background: "rgba(255, 255, 255, 0.08)",
+                                border: "1px solid rgba(255, 255, 255, 0.15)",
+                                borderRadius: "6px",
+                                color: "#cbd5e1",
+                                fontSize: "0.72rem",
+                                fontWeight: 600,
+                                textDecoration: "none",
+                                transition: "all 0.2s",
+                                cursor: "pointer",
+                                width: "calc(100% - 24px)",
+                                boxSizing: "border-box"
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+                                e.currentTarget.style.color = "white";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                                e.currentTarget.style.color = "#cbd5e1";
+                              }}
+                            >
+                              ⬇️ Descargar Fase Envuelta
+                            </a>
+                          </>
                         ) : (
                           <div style={{ height: "200px", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b", fontSize: "0.75rem" }}>
                             No disponible
@@ -1683,11 +1717,45 @@ export default function MintPyAnalysis() {
                       </div>
                       <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: "10px", padding: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
                         {results.phase_previews.unwrapped_url ? (
-                          <img 
-                            src={`${API_URL}${results.phase_previews.unwrapped_url}`} 
-                            alt="Fase Desenvuelta" 
-                            style={{ width: "100%", height: "200px", objectFit: "contain", borderRadius: "6px" }} 
-                          />
+                          <>
+                            <img 
+                              src={`${API_URL}${results.phase_previews.unwrapped_url}`} 
+                              alt="Fase Desenvuelta" 
+                              style={{ width: "100%", height: "200px", objectFit: "contain", borderRadius: "6px" }} 
+                            />
+                            <a
+                              href={`${API_URL}${results.phase_previews.unwrapped_url}`}
+                              download={`fase_desenvuelta_${results.phase_previews.pair_label.replace(" → ", "_")}.png`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                display: "inline-block",
+                                marginTop: "8px",
+                                padding: "6px 12px",
+                                background: "rgba(255, 255, 255, 0.08)",
+                                border: "1px solid rgba(255, 255, 255, 0.15)",
+                                borderRadius: "6px",
+                                color: "#cbd5e1",
+                                fontSize: "0.72rem",
+                                fontWeight: 600,
+                                textDecoration: "none",
+                                transition: "all 0.2s",
+                                cursor: "pointer",
+                                width: "calc(100% - 24px)",
+                                boxSizing: "border-box"
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+                                e.currentTarget.style.color = "white";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                                e.currentTarget.style.color = "#cbd5e1";
+                              }}
+                            >
+                              ⬇️ Descargar Fase Desenvuelta
+                            </a>
+                          </>
                         ) : (
                           <div style={{ height: "200px", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b", fontSize: "0.75rem" }}>
                             No disponible
@@ -1706,11 +1774,45 @@ export default function MintPyAnalysis() {
                       </div>
                       <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: "10px", padding: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
                         {results.phase_previews.corrected_url ? (
-                          <img 
-                            src={`${API_URL}${results.phase_previews.corrected_url}`} 
-                            alt="Fase Corregida" 
-                            style={{ width: "100%", height: "200px", objectFit: "contain", borderRadius: "6px" }} 
-                          />
+                          <>
+                            <img 
+                              src={`${API_URL}${results.phase_previews.corrected_url}`} 
+                              alt="Fase Corregida" 
+                              style={{ width: "100%", height: "200px", objectFit: "contain", borderRadius: "6px" }} 
+                            />
+                            <a
+                              href={`${API_URL}${results.phase_previews.corrected_url}`}
+                              download={`fase_corregida_${results.phase_previews.pair_label.replace(" → ", "_")}.png`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                display: "inline-block",
+                                marginTop: "8px",
+                                padding: "6px 12px",
+                                background: "rgba(255, 255, 255, 0.08)",
+                                border: "1px solid rgba(255, 255, 255, 0.15)",
+                                borderRadius: "6px",
+                                color: "#cbd5e1",
+                                fontSize: "0.72rem",
+                                fontWeight: 600,
+                                textDecoration: "none",
+                                transition: "all 0.2s",
+                                cursor: "pointer",
+                                width: "calc(100% - 24px)",
+                                boxSizing: "border-box"
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+                                e.currentTarget.style.color = "white";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                                e.currentTarget.style.color = "#cbd5e1";
+                              }}
+                            >
+                              ⬇️ Descargar Fase Corregida
+                            </a>
+                          </>
                         ) : (
                           <div style={{ height: "200px", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b", fontSize: "0.75rem" }}>
                             No disponible

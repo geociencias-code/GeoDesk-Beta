@@ -14,7 +14,9 @@
     "date_end": "2025-11-02",
     "era5_successful": true,
     "tropo_method": "ERA5",
-    "phase_closure_skipped": false
+    "phase_closure_skipped": false,
+    "min_coherence": 0.5,
+    "excluded_ifgrams": []
   },
   "interferograms": [
     {

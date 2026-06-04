@@ -331,6 +331,14 @@ interface VelocityStats {
   mean_ew?: number;
   std_ew?: number;
   phase_closure_skipped?: boolean;
+  min_coherence?: number;
+  excluded_ifgrams?: Array<{
+    date1: string;
+    date2: string;
+    days: number;
+    filename: string;
+    reason: string;
+  }>;
 }
 
 interface VelocityPoint {
@@ -500,6 +508,7 @@ export default function MintPyAnalysis() {
 
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [selectedMode, setSelectedMode] = useState<string | null>(null);
+  const [minCoherence, setMinCoherence] = useState<number>(0.6);
   const [activeMethod, setActiveMethod] = useState<"mintpy" | "hyp3">("mintpy");
   const [viewMode, setViewMode] = useState<"UP" | "EW">("UP");
 
@@ -746,6 +755,7 @@ export default function MintPyAnalysis() {
         formData.append("crop_lon_min", drawnBox.lon_min.toString());
         formData.append("crop_lon_max", drawnBox.lon_max.toString());
       }
+      formData.append("min_coherence", minCoherence.toString());
 
       const response = await axios.post(`${API_URL}/api/mintpy/process`, formData, {
         onUploadProgress: (e) => {
@@ -1097,6 +1107,69 @@ export default function MintPyAnalysis() {
               </div>
             </div>
           )}
+
+          {/* Min Coherence input */}
+          <div
+            style={{
+              marginTop: "16px",
+              padding: "14px 16px",
+              background: "rgba(99,102,241,0.07)",
+              border: "1px solid rgba(99,102,241,0.25)",
+              borderRadius: "12px",
+            }}
+          >
+            <label
+              htmlFor="min-coherence-input"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontSize: "0.82rem",
+                fontWeight: 600,
+                color: "#a5b4fc",
+                marginBottom: "10px",
+              }}
+            >
+              <span>🎚️ Coherencia mínima de red</span>
+              <span
+                style={{
+                  fontSize: "1rem",
+                  fontWeight: 700,
+                  color: minCoherence >= 0.7 ? "#34d399" : minCoherence >= 0.5 ? "#fbbf24" : "#f87171",
+                  minWidth: "36px",
+                  textAlign: "right",
+                }}
+              >
+                {minCoherence.toFixed(2)}
+              </span>
+            </label>
+            <input
+              id="min-coherence-input"
+              type="range"
+              min={0.1}
+              max={1.0}
+              step={0.05}
+              value={minCoherence}
+              onChange={(e) => setMinCoherence(parseFloat(e.target.value))}
+              style={{ width: "100%", accentColor: "#818cf8", cursor: "pointer" }}
+            />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "0.68rem",
+                color: "#475569",
+                marginTop: "4px",
+              }}
+            >
+              <span>0.10 (permisivo)</span>
+              <span style={{ color: "#64748b" }}>Recomendado: 0.60–0.70</span>
+              <span>1.00 (estricto)</span>
+            </div>
+            <p style={{ fontSize: "0.7rem", color: "#475569", margin: "8px 0 0", lineHeight: "1.4" }}>
+              Interferogramas con coherencia espacial media inferior a este umbral serán excluidos de la red SBAS.
+            </p>
+          </div>
 
           {/* Action Buttons */}
           <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
@@ -1917,6 +1990,149 @@ export default function MintPyAnalysis() {
                   </p>
                 )}
               </div>
+
+              {/* ── Resumen del procesamiento MintPy ─────────────────── */}
+              {results && activeMethod === "mintpy" && (
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: "14px",
+                    padding: "20px",
+                  }}
+                >
+                  <h3 style={{ fontSize: "0.9rem", color: "#e2e8f0", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    🔬 Resumen del Procesamiento MintPy
+                  </h3>
+
+                  {/* Two-column info grid */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
+                    {/* Tropo correction */}
+                    <div style={{
+                      padding: "12px 16px",
+                      borderRadius: "10px",
+                      background: results.stats.tropo_method === "ERA5"
+                        ? "rgba(16,185,129,0.10)"
+                        : "rgba(245,158,11,0.10)",
+                      border: `1px solid ${
+                        results.stats.tropo_method === "ERA5"
+                          ? "rgba(16,185,129,0.3)"
+                          : "rgba(245,158,11,0.3)"
+                      }`,
+                    }}>
+                      <div style={{ fontSize: "0.72rem", color: "#64748b", marginBottom: "4px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Corrección Atmosférica
+                      </div>
+                      <div style={{
+                        fontSize: "1rem",
+                        fontWeight: 700,
+                        color: results.stats.tropo_method === "ERA5" ? "#34d399" : "#fbbf24",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}>
+                        {results.stats.tropo_method === "ERA5" ? "☁️" : "🌄"}
+                        {results.stats.tropo_method === "ERA5"
+                          ? "PyAPS / ERA5 (exitoso)"
+                          : "height_correlation (fallback)"}
+                      </div>
+                      <div style={{ fontSize: "0.72rem", color: "#64748b", marginTop: "4px" }}>
+                        {results.stats.tropo_method === "ERA5"
+                          ? "Corrección troposférica con reanálisis ERA5 de ECMWF."
+                          : "ERA5 falló o no disponible. Se usó correlación con altura del terreno."}
+                      </div>
+                    </div>
+
+                    {/* Min coherence threshold */}
+                    <div style={{
+                      padding: "12px 16px",
+                      borderRadius: "10px",
+                      background: "rgba(99,102,241,0.10)",
+                      border: "1px solid rgba(99,102,241,0.3)",
+                    }}>
+                      <div style={{ fontSize: "0.72rem", color: "#64748b", marginBottom: "4px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Umbral de Coherencia de Red
+                      </div>
+                      <div style={{ fontSize: "1rem", fontWeight: 700, color: "#a5b4fc" }}>
+                        ≥ {(results.stats.min_coherence ?? 0.6).toFixed(2)}
+                      </div>
+                      <div style={{ fontSize: "0.72rem", color: "#64748b", marginTop: "4px" }}>
+                        Interferogramas con coherencia espacial media inferior a este valor fueron excluidos de la red SBAS.
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Excluded interferograms list */}
+                  {(() => {
+                    const excl = results.stats.excluded_ifgrams ?? [];
+                    return (
+                      <div>
+                        <div style={{
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                          color: excl.length > 0 ? "#fbbf24" : "#34d399",
+                          marginBottom: "10px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}>
+                          {excl.length > 0 ? "⚠️" : "✅"}
+                          {excl.length > 0
+                            ? `${excl.length} interferograma(s) descartado(s) por baja coherencia`
+                            : "Todos los interferogramas fueron incluidos en la red SBAS"}
+                        </div>
+                        {excl.length > 0 && (
+                          <div style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "6px",
+                            maxHeight: "260px",
+                            overflowY: "auto",
+                            paddingRight: "4px",
+                          }}>
+                            {excl.map((ig, idx) => (
+                              <div
+                                key={idx}
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "auto 1fr auto",
+                                  alignItems: "center",
+                                  gap: "10px",
+                                  padding: "8px 12px",
+                                  background: "rgba(245,158,11,0.06)",
+                                  border: "1px solid rgba(245,158,11,0.2)",
+                                  borderRadius: "8px",
+                                  fontSize: "0.78rem",
+                                }}
+                              >
+                                <span style={{ color: "#f59e0b", fontWeight: 700, minWidth: "20px", textAlign: "center" }}>{idx + 1}</span>
+                                <div>
+                                  <div style={{ color: "#fbbf24", fontWeight: 600 }}>
+                                    {ig.date1} → {ig.date2}
+                                  </div>
+                                  <div style={{ color: "#64748b", fontSize: "0.72rem", marginTop: "2px" }}>
+                                    {ig.days} días · {ig.reason}
+                                  </div>
+                                </div>
+                                <span style={{
+                                  padding: "2px 8px",
+                                  background: "rgba(239,68,68,0.15)",
+                                  border: "1px solid rgba(239,68,68,0.3)",
+                                  borderRadius: "4px",
+                                  color: "#fca5a5",
+                                  fontSize: "0.7rem",
+                                  fontWeight: 600,
+                                  whiteSpace: "nowrap",
+                                }}>Descartado</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
               {/* Static Vector Map (Quiver) */}
               {results?.mode === "2D" && (

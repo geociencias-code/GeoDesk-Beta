@@ -872,14 +872,15 @@ def _extract_dates(filename: str):
 
 
 def _make_cfg(
-    zip_dir: Path, 
-    ref_lat: float = None, 
+    zip_dir: Path,
+    ref_lat: float = None,
     ref_lon: float = None,
     crop_lat_min: float = None,
     crop_lat_max: float = None,
     crop_lon_min: float = None,
     crop_lon_max: float = None,
-    has_triplets: bool = False
+    has_triplets: bool = False,
+    min_coherence: float = 0.6,
 ) -> str:
     """Generates a MintPy configuration file for SBAS processing.
 
@@ -973,7 +974,7 @@ mintpy.load.azAngleFile  = {azi_pat}
 mintpy.subset.lalo       = {subset_lalo_val}
 mintpy.subset.yx         = {subset_yx_val}
 mintpy.network.coherenceBased     = yes
-mintpy.network.minCoherence       = 0.6
+mintpy.network.minCoherence       = {min_coherence}
 mintpy.reference.lalo             = {ref_lalo_val}
 mintpy.reference.yx               = {ref_yx_val}
 mintpy.troposphericDelay.method   = pyaps
@@ -992,16 +993,61 @@ mintpy.plot = no
 """
 
 
+def _get_excluded_ifgrams(work_dir: Path, igram_meta: list) -> list:
+    """Compare submitted igrams against those MintPy kept in the network stack.
+
+    MintPy selects a coherence-based network and silently drops low-coherence
+    interferograms. This function detects those dropped pairs by comparing the
+    date pairs in the submitted igram_meta list against the pairs stored in
+    ifgramStack.h5 after load_data runs.
+
+    Returns a list of dicts: {date1, date2, days, filename, reason}
+    """
+    ifgram_file = work_dir / "inputs" / "ifgramStack.h5"
+    if not ifgram_file.exists():
+        return []
+
+    try:
+        kept_pairs: set = set()
+        with h5py.File(ifgram_file, "r") as f:
+            if "date" in f:
+                dates_arr = f["date"][:]
+                for row in dates_arr:
+                    if hasattr(row, '__len__') and len(row) >= 2:
+                        d1 = row[0].decode("utf-8") if isinstance(row[0], bytes) else str(row[0])
+                        d2 = row[1].decode("utf-8") if isinstance(row[1], bytes) else str(row[1])
+                        # Normalize: MintPy stores as YYYYMMDD
+                        kept_pairs.add((d1.replace("-", ""), d2.replace("-", "")))
+
+        excluded = []
+        for m in igram_meta:
+            d1 = m["date1"].replace("-", "")
+            d2 = m["date2"].replace("-", "")
+            if (d1, d2) not in kept_pairs and (d2, d1) not in kept_pairs:
+                excluded.append({
+                    "date1": m["date1"],
+                    "date2": m["date2"],
+                    "days": m.get("days", 0),
+                    "filename": m.get("filename", ""),
+                    "reason": "Baja coherencia espacial promedio (< umbral de red)",
+                })
+        return excluded
+    except Exception as exc:
+        logging.warning("Could not detect excluded interferograms: %s", exc)
+        return []
+
+
 def _run_mintpy_pipeline(
-    work_dir: Path, 
-    zip_dir: Path, 
-    ref_lat: float = None, 
+    work_dir: Path,
+    zip_dir: Path,
+    ref_lat: float = None,
     ref_lon: float = None,
     crop_lat_min: float = None,
     crop_lat_max: float = None,
     crop_lon_min: float = None,
     crop_lon_max: float = None,
-    has_triplets: bool = False
+    has_triplets: bool = False,
+    min_coherence: float = 0.6,
 ) -> bool:
     """Executes the complete MintPy SBAS time-series analysis pipeline.
 
@@ -1041,9 +1087,6 @@ def _run_mintpy_pipeline(
     warnings.filterwarnings("ignore")
     skipped_phase_closure = False
 
-    # Force non-interactive matplotlib backend BEFORE MintPy imports view.py.
-    # Without this, MintPy's auto-plot (plot_result) tries to open a GUI display
-    # inside the Docker container, which blocks indefinitely.
     os.environ["MPLBACKEND"] = "Agg"
     try:
         import matplotlib
@@ -1058,7 +1101,7 @@ def _run_mintpy_pipeline(
     mintpy_logger.addHandler(fh)
 
     cfg_path = work_dir / "mintpy.cfg"
-    cfg_path.write_text(_make_cfg(zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets))
+    cfg_path.write_text(_make_cfg(zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence))
 
     cds_url = os.getenv("ERA5_URL", "https://cds.climate.copernicus.eu/api")
     cds_key = os.getenv("ERA5_KEY")
@@ -1074,10 +1117,6 @@ def _run_mintpy_pipeline(
         )
         tsa.open()
 
-        # Run initial steps — with auto-recovery if the reference falls in a masked zone.
-        # MintPy's maskConnComp.h5 is stricter than our preview (it requires non-zero phase
-        # in ALL interferograms). If the pre-selected seed fails, we pick the best pixel
-        # directly from the files MintPy already generated and retry once.
         try:
             tsa.run(steps=["load_data", "reference_point"])
         except (ValueError, Exception) as ref_err:
@@ -1113,11 +1152,6 @@ def _run_mintpy_pipeline(
             best_yx = np.unravel_index(np.nanargmax(coh_masked), coh_masked.shape)
             best_y, best_x = int(best_yx[0]), int(best_yx[1])
 
-            # Read the geometric reference from the geometry file so we can convert y/x → lat/lon.
-            # IMPORTANT: After MintPy's load_data runs "update Y/X_FIRST", the Y_FIRST/X_FIRST
-            # attributes in geometryGeo.h5 already point to pixel (0,0) of the CROPPED domain.
-            # So best_y/best_x (in the cropped 435×470 space) map DIRECTLY via:
-            #   lat = Y_FIRST + best_y * Y_STEP   (no need to add SUBSET_YMIN)
             geom_file = work_dir / "inputs" / "geometryGeo.h5"
             with h5py.File(geom_file, "r") as f:
                 meta = dict(f.attrs)
@@ -1140,7 +1174,7 @@ def _run_mintpy_pipeline(
                 _make_cfg(
                     zip_dir, new_lat, new_lon,
                     crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max,
-                    has_triplets
+                    has_triplets, min_coherence
                 )
             )
             # Restart TSA with updated config
@@ -1154,6 +1188,7 @@ def _run_mintpy_pipeline(
             tsa = tsa2
 
         if has_triplets:
+            #posible error
             # HyP3 Gamma products lack 'connectComponent', which phase_closure explicitly requires.
             # We inject a dummy single-component mask to prevent KeyError.
             ifgram_file = work_dir / "inputs" / "ifgramStack.h5"
@@ -1184,7 +1219,6 @@ def _run_mintpy_pipeline(
                             if hasattr(tsa, "_template"):
                                 tsa._template["mintpy.unwrapError.method"] = "no"
 
-        # Run remaining steps
         try:
             tsa.run(steps=["invert_network", "correct_troposphere"])
         except Exception as tropo_err:
@@ -1257,16 +1291,14 @@ async def process_interferograms(
     crop_lat_max: float = Form(None),
     crop_lon_min: float = Form(None),
     crop_lon_max: float = Form(None),
-    selected_mode: str = Form(None)
+    selected_mode: str = Form(None),
+    min_coherence: float = Form(0.6),
 ):
     session_dir = SESSION_BASE / session_id
     zips = list(session_dir.glob("*.zip"))
     if len(zips) < MIN_INTERFEROGRAMS:
         raise HTTPException(status_code=400, detail=f"Se requieren al menos {MIN_INTERFEROGRAMS} interferogramas.")
 
-    # Validate that the reference point (if provided) is inside the crop region.
-    # If the user changed the crop box after selecting seeds, the seed may be
-    # from the old region → MintPy gets a reference pixel outside the subset → 500.
     if ref_lat is not None and ref_lon is not None:
         if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
             eps = 1e-5
@@ -1466,7 +1498,7 @@ async def process_interferograms(
                 
             try:
                 # Run ASC pipeline first
-                skipped_asc = _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
+                skipped_asc = _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence)
 
                 # If no reference was provided by the user, read the one MintPy auto-selected
                 # for ASC and force DESC to use the exact same geographic point.
@@ -1493,7 +1525,7 @@ async def process_interferograms(
                             except (ValueError, TypeError):
                                 forced_ref_lat, forced_ref_lon = ref_lat, ref_lon
 
-                skipped_desc = _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
+                skipped_desc = _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence)
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
                 
@@ -1641,6 +1673,11 @@ async def process_interferograms(
                     (work_dir_desc / "inputs" / "ERA5.h5").exists()
                 ) else "height_correlation",
                 "phase_closure_skipped": skipped_asc or skipped_desc,
+                "min_coherence": min_coherence,
+                "excluded_ifgrams": (
+                    _get_excluded_ifgrams(work_dir_asc, [m for m in igram_meta if m["track"] == "ASC"]) +
+                    _get_excluded_ifgrams(work_dir_desc, [m for m in igram_meta if m["track"] == "DESC"])
+                ),
             }
             
             step_s = max(1, len(results) // 1000)
@@ -1702,7 +1739,7 @@ async def process_interferograms(
 
         else:
             try:
-                skipped = _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets)
+                skipped = _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence)
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
 
@@ -1759,6 +1796,8 @@ async def process_interferograms(
                 "era5_successful": (work_dir / "inputs/ERA5.h5").exists(),
                 "tropo_method": "ERA5" if (work_dir / "inputs/ERA5.h5").exists() else "height_correlation",
                 "phase_closure_skipped": skipped,
+                "min_coherence": min_coherence,
+                "excluded_ifgrams": _get_excluded_ifgrams(work_dir, igram_meta),
             }
 
             step_s = max(1, len(results) // 1000)

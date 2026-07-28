@@ -16,14 +16,12 @@ app = FastAPI(title="MyApp API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", 
-                   "http://localhost:3000", "http://127.0.0.1:3000", "*"],
+    allow_origins=["http://localhost:5173", "[https://geociencias.ues.edu.sv](https://geociencias.ues.edu.sv)"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# MONTAJE DE CARPETAS EXISTENTES
 os.makedirs("resultados_comparativa", exist_ok=True)
 app.mount(
     "/resultados_comparativa",

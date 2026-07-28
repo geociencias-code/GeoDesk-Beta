@@ -8,7 +8,7 @@ from typing import Any, Iterable, List, Optional, Tuple, Dict
 from datetime import datetime, timezone
 import requests
 from dateutil import parser
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 import asf_search as asf
 from asf_search import ASFSession
@@ -17,19 +17,42 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ASF_USERNAME = os.getenv("ASF_USERNAME")
-ASF_PASSWORD = os.getenv("ASF_PASSWORD")
-HYP3_USERNAME = os.getenv("HYP3_USERNAME")
-HYP3_PASSWORD = os.getenv("HYP3_PASSWORD")
+# Credenciales del .env como FALLBACK (pueden estar vacías en producción)
+_ENV_ASF_USERNAME = os.getenv("ASF_USERNAME")
+_ENV_ASF_PASSWORD = os.getenv("ASF_PASSWORD")
+_ENV_HYP3_USERNAME = os.getenv("HYP3_USERNAME")
+_ENV_HYP3_PASSWORD = os.getenv("HYP3_PASSWORD")
 HYP3_PLUS_ENABLED = os.getenv("HYP3_PLUS_ENABLED")
 HYP3_PLUS_URL = os.getenv("HYP3_PLUS_URL")
 
-if not HYP3_USERNAME or not HYP3_PASSWORD:
-    print("ADVERTENCIA: Faltan HYP3_USERNAME/HYP3_PASSWORD en backend/.env")
-if not ASF_USERNAME or not ASF_PASSWORD:
-    print("ADVERTENCIA: Faltan ASF_USERNAME/ASF_PASSWORD en backend/.env (requeridos para descargar del Data Pool)")
+if not _ENV_HYP3_USERNAME or not _ENV_HYP3_PASSWORD:
+    print("INFO: HYP3_USERNAME/HYP3_PASSWORD no configurados en .env — se usarán los del header por petición.")
+if not _ENV_ASF_USERNAME or not _ENV_ASF_PASSWORD:
+    print("INFO: ASF_USERNAME/ASF_PASSWORD no configurados en .env — se usarán los del header por petición.")
 else:
-    print("ASF_USERNAME detectado (OK)")
+    print("ASF_USERNAME detectado en .env (OK)")
+
+
+def _get_hyp3_creds(
+    x_hyp3_username: Optional[str] = None,
+    x_hyp3_password: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Devuelve (username, password) dando prioridad a los headers del request
+    y usando el .env como fallback."""
+    user = x_hyp3_username or _ENV_HYP3_USERNAME
+    pwd  = x_hyp3_password or _ENV_HYP3_PASSWORD
+    return user, pwd
+
+
+def _get_asf_creds(
+    x_hyp3_username: Optional[str] = None,
+    x_hyp3_password: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """ASF usa las mismas credenciales que HyP3 (cuenta EarthData unificada)."""
+    user = x_hyp3_username or _ENV_ASF_USERNAME or _ENV_HYP3_USERNAME
+    pwd  = x_hyp3_password or _ENV_ASF_PASSWORD or _ENV_HYP3_PASSWORD
+    return user, pwd
+
 
 router = APIRouter()
 
@@ -247,10 +270,14 @@ def search_scenes(params: SearchParams) -> List[Any]:
 
 
 
-def make_asf_session() -> ASFSession:
+def make_asf_session(
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+) -> ASFSession:
     s = ASFSession()
-    if ASF_USERNAME and ASF_PASSWORD:
-        s.auth = (ASF_USERNAME, ASF_PASSWORD)
+    u, p = _get_asf_creds(username, password)
+    if u and p:
+        s.auth = (u, p)
     return s
 
 def ensure_dir(dir_path: pathlib.Path) -> pathlib.Path:
@@ -425,11 +452,16 @@ def api_search(params: SearchParams):
 
 
 @router.post("/api/submit", response_model=SubmitResponse)
-def api_submit(body: SubmitRequest):
-    if not HYP3_USERNAME or not HYP3_PASSWORD:
-        raise HTTPException(status_code=400, detail="Faltan HYP3_USERNAME/HYP3_PASSWORD en backend/.env")
+def api_submit(
+    body: SubmitRequest,
+    x_hyp3_username: Optional[str] = Header(default=None),
+    x_hyp3_password: Optional[str] = Header(default=None),
+):
+    hyp3_user, hyp3_pass = _get_hyp3_creds(x_hyp3_username, x_hyp3_password)
+    if not hyp3_user or not hyp3_pass:
+        raise HTTPException(status_code=401, detail="Se requieren credenciales de HyP3. Inicia sesión primero.")
     try:
-        hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
+        hyp3 = sdk.HyP3(username=hyp3_user, password=hyp3_pass)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"No se pudo autenticar en HyP3: {e}")
 
@@ -454,9 +486,14 @@ def api_submit(body: SubmitRequest):
 
 
 @router.post("/api/submit-from-granules", response_model=SubmitResponse)
-def api_submit_from_granules(body: SubmitFromGranulesBody):
-    if not HYP3_USERNAME or not HYP3_PASSWORD:
-        raise HTTPException(status_code=400, detail="Faltan HYP3_USERNAME/HYP3_PASSWORD en backend/.env")
+def api_submit_from_granules(
+    body: SubmitFromGranulesBody,
+    x_hyp3_username: Optional[str] = Header(default=None),
+    x_hyp3_password: Optional[str] = Header(default=None),
+):
+    hyp3_user, hyp3_pass = _get_hyp3_creds(x_hyp3_username, x_hyp3_password)
+    if not hyp3_user or not hyp3_pass:
+        raise HTTPException(status_code=401, detail="Se requieren credenciales de HyP3. Inicia sesión primero.")
 
     try:
         try:
@@ -487,7 +524,7 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
             pairs.append((g1, g2))
 
     try:
-        hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
+        hyp3 = sdk.HyP3(username=hyp3_user, password=hyp3_pass)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"No se pudo autenticar en HyP3: {e}")
 
@@ -511,9 +548,13 @@ def api_submit_from_granules(body: SubmitFromGranulesBody):
 
 
 @router.get("/api/projects")
-def get_projects():
+def get_projects(
+    x_hyp3_username: Optional[str] = Header(default=None),
+    x_hyp3_password: Optional[str] = Header(default=None),
+):
+    hyp3_user, hyp3_pass = _get_hyp3_creds(x_hyp3_username, x_hyp3_password)
     try:
-        hyp3 = sdk.HyP3(username=HYP3_USERNAME, password=HYP3_PASSWORD)
+        hyp3 = sdk.HyP3(username=hyp3_user, password=hyp3_pass)
         batch = hyp3.find_jobs().filter_jobs(running=False, include_expired=False, succeeded=True)
 
         import re
@@ -534,15 +575,20 @@ def get_projects():
 
 
 @router.post("/api/project-files", response_model=List[JobFile]) # usado
-def get_project_files(body: ProjectFileDownloadRequest):
+def get_project_files(
+    body: ProjectFileDownloadRequest,
+    x_hyp3_username: Optional[str] = Header(default=None),
+    x_hyp3_password: Optional[str] = Header(default=None),
+):
     nombre_proyecto = body.nombre_proyecto
     product_type = body.product_type
+    hyp3_user, hyp3_pass = _get_asf_creds(x_hyp3_username, x_hyp3_password)
 
     if not nombre_proyecto:
         raise HTTPException(status_code=400, detail="El nombre del proyecto es obligatorio")
 
     try:
-        hyp3 = sdk.HyP3(username=ASF_USERNAME, password=ASF_PASSWORD)
+        hyp3 = sdk.HyP3(username=hyp3_user, password=hyp3_pass)
 
         import re
         batch = (

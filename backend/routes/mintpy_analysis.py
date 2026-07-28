@@ -8,7 +8,7 @@ import zipfile
 import pyproj
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 import warnings
 
 from PIL.ImageOps import scale
@@ -20,7 +20,7 @@ import mintpy.ifgram_inversion as inv
 import numpy as np
 import pandas as pd
 import rasterio
-from fastapi import APIRouter, File, HTTPException, UploadFile, Form
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile, Form
 from fastapi.responses import FileResponse
 import rasterio.warp
 from rasterio.windows import Window
@@ -1048,6 +1048,7 @@ def _run_mintpy_pipeline(
     crop_lon_max: float = None,
     has_triplets: bool = False,
     min_coherence: float = 0.6,
+    era5_key: Optional[str] = None,
 ) -> bool:
     """Executes the complete MintPy SBAS time-series analysis pipeline.
 
@@ -1104,7 +1105,8 @@ def _run_mintpy_pipeline(
     cfg_path.write_text(_make_cfg(zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence))
 
     cds_url = os.getenv("ERA5_URL", "https://cds.climate.copernicus.eu/api")
-    cds_key = os.getenv("ERA5_KEY")
+    # Prioridad: header del request > variable de entorno
+    cds_key = era5_key or os.getenv("ERA5_KEY")
     if cds_key:
         cdsapirc_path = Path.home() / ".cdsapirc"
         cdsapirc_path.write_text(f"url: {cds_url}\nkey: {cds_key}\n")
@@ -1293,6 +1295,7 @@ async def process_interferograms(
     crop_lon_max: float = Form(None),
     selected_mode: str = Form(None),
     min_coherence: float = Form(0.6),
+    x_era5_key: Optional[str] = Header(default=None),
 ):
     session_dir = SESSION_BASE / session_id
     zips = list(session_dir.glob("*.zip"))
@@ -1498,7 +1501,8 @@ async def process_interferograms(
                 
             try:
                 # Run ASC pipeline first
-                skipped_asc = _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence)
+                skipped_asc = _run_mintpy_pipeline(work_dir_asc, zip_dir_asc, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence, era5_key=x_era5_key)
+
 
                 # If no reference was provided by the user, read the one MintPy auto-selected
                 # for ASC and force DESC to use the exact same geographic point.
@@ -1525,7 +1529,8 @@ async def process_interferograms(
                             except (ValueError, TypeError):
                                 forced_ref_lat, forced_ref_lon = ref_lat, ref_lon
 
-                skipped_desc = _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence)
+                skipped_desc = _run_mintpy_pipeline(work_dir_desc, zip_dir_desc, forced_ref_lat, forced_ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence, era5_key=x_era5_key)
+
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
                 
@@ -1739,7 +1744,8 @@ async def process_interferograms(
 
         else:
             try:
-                skipped = _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence)
+                skipped = _run_mintpy_pipeline(work_dir, zip_dir, ref_lat, ref_lon, crop_lat_min, crop_lat_max, crop_lon_min, crop_lon_max, has_triplets, min_coherence, era5_key=x_era5_key)
+
             except ValueError as exc:
                 raise HTTPException(status_code=500, detail=str(exc))
 

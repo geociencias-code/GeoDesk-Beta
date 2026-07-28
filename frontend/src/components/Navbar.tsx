@@ -1,13 +1,18 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  Home, 
-  Map, 
-  ChevronDown, 
+import {
+  Home,
+  Map,
+  ChevronDown,
   Layers,
   Activity,
-  Zap
+  Zap,
+  LogOut,
+  LogIn,
+  ShieldCheck,
+  ShieldAlert,
 } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
 
 const cx = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
 
@@ -36,6 +41,7 @@ type ItemProps = {
 export default function Navbar({ activeSection, onChangeSection }: NavbarProps) {
   const [isAlaskaOpen, setIsAlaskaOpen] = useState(false);
   const [isHerramientasOpen, setIsHerramientasOpen] = useState(false);
+  const { isAuthenticated, isGuest, username, logout } = useAuth();
 
   const handleKey = (section: string, toggleSubmenu?: () => void) => (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -55,8 +61,8 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
     submenuItems,
     activeSection,
   }: ItemProps) => {
-    const isActive = activeSection === id || submenuItems?.some(s => s.id === activeSection);
-    
+    const isActive = activeSection === id || submenuItems?.some((s) => s.id === activeSection);
+
     return (
       <li className={cx("sidebar__item", isActive ? "is-active" : undefined)}>
         <div
@@ -110,6 +116,9 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
     );
   };
 
+  // Suppresses the unused variable warning for isHerramientasOpen
+  void isHerramientasOpen;
+
   return (
     <aside className="sidebar" aria-label="Barra lateral de navegación">
       <div className="sidebar__brand">
@@ -118,12 +127,12 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
         </div>
         <span>GeoDesk Beta</span>
       </div>
-      
+
       <h3 className="sidebar__title">Navegación Principal</h3>
-      
+
       <nav style={{ flex: 1 }}>
         <ul className="sidebar__list">
-          <Item 
+          <Item
             id="inicio"
             label="Inicio"
             icon={<Home size={18} />}
@@ -170,6 +179,51 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
           />
         </ul>
       </nav>
+
+      {/* ── Session status panel ─────────────────────────────────────────── */}
+      <div className="sidebar__session">
+        {isAuthenticated ? (
+          <>
+            <div className="sidebar__session-row">
+              <ShieldCheck size={15} className="sidebar__session-icon sidebar__session-icon--ok" />
+              <div className="sidebar__session-info">
+                <span className="sidebar__session-label">Sesión activa</span>
+                <span className="sidebar__session-user" title={username ?? ""}>
+                  {username}
+                </span>
+              </div>
+            </div>
+            <button
+              id="navbar-logout-btn"
+              className="sidebar__session-btn sidebar__session-btn--logout"
+              onClick={logout}
+              aria-label="Cerrar sesión"
+            >
+              <LogOut size={14} />
+              Cerrar sesión
+            </button>
+          </>
+        ) : isGuest ? (
+          <>
+            <div className="sidebar__session-row">
+              <ShieldAlert size={15} className="sidebar__session-icon sidebar__session-icon--warn" />
+              <div className="sidebar__session-info">
+                <span className="sidebar__session-label">Modo invitado</span>
+                <span className="sidebar__session-user">Acceso limitado</span>
+              </div>
+            </div>
+            <button
+              id="navbar-login-btn"
+              className="sidebar__session-btn sidebar__session-btn--login"
+              onClick={logout}
+              aria-label="Iniciar sesión"
+            >
+              <LogIn size={14} />
+              Iniciar sesión
+            </button>
+          </>
+        ) : null}
+      </div>
     </aside>
   );
 }

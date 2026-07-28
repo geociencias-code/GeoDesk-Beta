@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple, Iterable  # Importa Iterable
 from datetime import datetime, timezone
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 import os
 import re
 import logging
@@ -19,8 +19,9 @@ load_dotenv()
 
 router = APIRouter()
 
-USERNAME = os.getenv("HYP3_USERNAME")
-PASSWORD = os.getenv("HYP3_PASSWORD")
+# Credenciales del .env como FALLBACK
+_ENV_USERNAME = os.getenv("HYP3_USERNAME")
+_ENV_PASSWORD = os.getenv("HYP3_PASSWORD")
 
 NOMBRE_PROYECTO_POR_DEFECTO = "prueba_api_2023_01"
 
@@ -224,12 +225,17 @@ def submit_jobs(
     pairs: List[Tuple[str, str]],
     project_name: str,
     ruta: int = 128,
-    marco: int = 547
+    marco: int = 547,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
 ) -> List[JobSummary]:
     if not pairs:
         return []
 
-    hyp3 = sdk.HyP3(username=USERNAME, password=PASSWORD)
+    # Prioridad: parámetros > .env
+    usr = username or _ENV_USERNAME
+    pwd = password or _ENV_PASSWORD
+    hyp3 = sdk.HyP3(username=usr, password=pwd)
     summaries: List[JobSummary] = []
 
     for idx, (g1, g2) in enumerate(pairs, 1):
@@ -268,7 +274,11 @@ def submit_jobs(
 
 
 @router.post("/api/solicitar_imagenes")
-def solicitar_imagenes_automatico(payload: SolicitudAutoIn) -> Dict[str, Any]:
+def solicitar_imagenes_automatico(
+    payload: SolicitudAutoIn,
+    x_hyp3_username: Optional[str] = Header(default=None),
+    x_hyp3_password: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
     project_name = _sanear_nombre_proyecto(payload.project_name)
     base_dir = payload.output_folder or CARPETA_BASE_SALIDA
     carpeta_salida = _ruta_carpeta_salida(project_name, base=base_dir)
@@ -329,7 +339,14 @@ def solicitar_imagenes_automatico(payload: SolicitudAutoIn) -> Dict[str, Any]:
 
     pairs = build_pairs(results, payload.day_interval)
 
-    jobs = submit_jobs(pairs, project_name=project_name, ruta=ruta_val, marco=marco_val)
+    jobs = submit_jobs(
+        pairs,
+        project_name=project_name,
+        ruta=ruta_val,
+        marco=marco_val,
+        username=x_hyp3_username,
+        password=x_hyp3_password,
+    )
 
     response: Dict[str, Any] = {
         "project_input": payload.project_name,

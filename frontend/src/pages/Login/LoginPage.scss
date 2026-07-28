@@ -1,0 +1,374 @@
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-main);
+  position: relative;
+  overflow: hidden;
+  padding: 2rem 1rem;
+}
+
+/* Animated background blobs */
+.login-page__bg-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.12;
+  pointer-events: none;
+  animation: blob-drift 12s ease-in-out infinite alternate;
+}
+
+.login-page__bg-blob--1 {
+  width: 500px;
+  height: 500px;
+  background: var(--color-primary);
+  top: -120px;
+  left: -150px;
+  animation-duration: 14s;
+}
+
+.login-page__bg-blob--2 {
+  width: 400px;
+  height: 400px;
+  background: var(--color-secondary);
+  bottom: -100px;
+  right: -100px;
+  animation-duration: 18s;
+  animation-delay: -6s;
+}
+
+@keyframes blob-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(30px, 20px) scale(1.05); }
+  100% { transform: translate(-20px, 40px) scale(0.95); }
+}
+
+/* ── Card ───────────────────────────────────────────────────────────────────── */
+.login-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 480px;
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: var(--border-glass);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04),
+    var(--shadow-lg),
+    0 0 40px rgba(0, 229, 255, 0.05);
+}
+
+/* ── Brand header ───────────────────────────────────────────────────────────── */
+.login-card__brand {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.login-card__icon {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #020617;
+  flex-shrink: 0;
+  box-shadow: 0 0 20px var(--color-primary-glow);
+}
+
+.login-card__title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--color-text-main);
+  margin: 0 0 0.15rem;
+  letter-spacing: -0.02em;
+}
+
+.login-card__subtitle {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* ── Divider ─────────────────────────────────────────────────────────────────── */
+.login-card__divider {
+  height: 1px;
+  background: rgba(255,255,255,0.06);
+  margin: 1.5rem 0;
+}
+
+.login-card__divider--text {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: auto;
+  background: none;
+  margin: 1.25rem 0;
+
+  &::before,
+  &::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: rgba(255,255,255,0.07);
+  }
+
+  span {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+  }
+}
+
+.login-card__description {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin: 0 0 1.5rem;
+
+  strong {
+    color: var(--color-text-main);
+    font-weight: 600;
+  }
+}
+
+/* ── Error banner ────────────────────────────────────────────────────────────── */
+.login-card__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  color: #fca5a5;
+  font-size: 0.83rem;
+  line-height: 1.5;
+  margin-bottom: 1.25rem;
+
+  svg {
+    flex-shrink: 0;
+    margin-top: 1px;
+    color: #f87171;
+  }
+}
+
+/* ── Guest note ──────────────────────────────────────────────────────────────── */
+.login-card__guest-note {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  line-height: 1.55;
+  text-align: center;
+  margin: 0.75rem 0 0;
+
+  strong {
+    color: var(--color-text-main);
+    font-weight: 500;
+  }
+}
+
+/* ── Form ────────────────────────────────────────────────────────────────────── */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.login-form__section {
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius-md);
+  padding: 1.1rem 1.1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  background: rgba(255,255,255,0.015);
+}
+
+.login-form__section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0;
+  margin: 0 0 0.15rem;
+}
+
+.login-form__badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+
+  &--hyp3 {
+    background: rgba(0, 229, 255, 0.15);
+    color: var(--color-primary);
+    border: 1px solid rgba(0, 229, 255, 0.25);
+  }
+
+  &--era5 {
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(139, 92, 246, 0.25);
+  }
+}
+
+.login-form__optional {
+  margin-left: auto;
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: rgba(255,255,255,0.05);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  letter-spacing: 0.03em;
+}
+
+.login-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.login-form__label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.login-form__input {
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-main);
+  font-family: var(--font-family);
+  font-size: 0.88rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+
+  &::placeholder {
+    color: rgba(148, 163, 184, 0.4);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: rgba(0, 229, 255, 0.4);
+    box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.08);
+    background: rgba(0, 229, 255, 0.03);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &--password {
+    padding-right: 2.5rem;
+  }
+
+  &--mono {
+    font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+    font-size: 0.8rem;
+    letter-spacing: 0.03em;
+  }
+}
+
+.login-form__input-wrap {
+  position: relative;
+}
+
+.login-form__eye-btn {
+  position: absolute;
+  right: 0.65rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: color 0.2s;
+
+  &:hover { color: var(--color-text-main); }
+}
+
+.login-form__hint {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.4;
+  opacity: 0.75;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────── */
+.login-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  font-family: var(--font-family);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &--primary {
+    background: linear-gradient(135deg, var(--color-primary) 0%, #00b4d8 100%);
+    color: #020617;
+    box-shadow: 0 0 20px rgba(0, 229, 255, 0.25);
+
+    &:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 0 28px rgba(0, 229, 255, 0.4);
+    }
+
+    &:active:not(:disabled) {
+      transform: translateY(0);
+    }
+  }
+
+  &--ghost {
+    background: rgba(255,255,255,0.04);
+    color: var(--color-text-muted);
+    border: 1px solid rgba(255,255,255,0.08);
+
+    &:hover:not(:disabled) {
+      background: rgba(255,255,255,0.07);
+      color: var(--color-text-main);
+      border-color: rgba(255,255,255,0.12);
+    }
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.login-btn__spinner {
+  animation: spin 0.9s linear infinite;
+}

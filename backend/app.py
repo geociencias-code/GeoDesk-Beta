@@ -5,7 +5,7 @@ import uvicorn
 import sys
 import os
 from routes.alaska import router as alaska_router
-
+from routes.auth import router as auth_router
 
 from routes.solicitar_imagenes_automatico import router as solicitar_imagenes_router
 from routes.mintpy_analysis import router as mintpy_router
@@ -33,7 +33,7 @@ os.makedirs("mintpy_results", exist_ok=True)
 app.mount("/mintpy_results", StaticFiles(directory="mintpy_results"), name="mintpy_results")
 
 app.include_router(alaska_router)
-
+app.include_router(auth_router)
 
 app.include_router(solicitar_imagenes_router)
 app.include_router(mintpy_router)

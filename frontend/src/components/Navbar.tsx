@@ -40,7 +40,6 @@ type ItemProps = {
 
 export default function Navbar({ activeSection, onChangeSection }: NavbarProps) {
   const [isAlaskaOpen, setIsAlaskaOpen] = useState(false);
-  const [isHerramientasOpen, setIsHerramientasOpen] = useState(false);
   const { isAuthenticated, isGuest, username, logout } = useAuth();
 
   const handleKey = (section: string, toggleSubmenu?: () => void) => (e: React.KeyboardEvent) => {
@@ -115,9 +114,6 @@ export default function Navbar({ activeSection, onChangeSection }: NavbarProps) 
       </li>
     );
   };
-
-  // Suppresses the unused variable warning for isHerramientasOpen
-  void isHerramientasOpen;
 
   return (
     <aside className="sidebar" aria-label="Barra lateral de navegación">

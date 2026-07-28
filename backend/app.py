@@ -14,9 +14,15 @@ from routes.eq_insar import router as eq_insar_router
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 app = FastAPI(title="MyApp API", version="0.1.0")
 
+raw_cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:4173,https://geociencias.ues.edu.sv",
+)
+allowed_origins = [origin.strip() for origin in raw_cors_origins.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "[https://geociencias.ues.edu.sv](https://geociencias.ues.edu.sv)"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,4 +50,4 @@ def health_root():
     return {"ok": True, "service": "MyApp API (root)"}
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)

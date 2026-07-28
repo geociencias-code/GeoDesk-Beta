@@ -135,12 +135,11 @@ const AuthBlocker: React.FC<{ onGoToLogin: () => void }> = ({ onGoToLogin }) => 
 );
 
 const AppInner: React.FC = () => {
-  const { mode, isAuthenticated, isGuest } = useAuth();
+  const { mode, isGuest } = useAuth();
   const [activeSection, setActiveSection] = useState<string>("inicio");
   const [, setActivePage] = useState<string>("");
   const [isHeaderHidden, setIsHeaderHidden] = useState<boolean>(false);
   const [showWarningBanner, setShowWarningBanner] = useState(false);
-  const [warningMessage, setWarningMessage] = useState("");
 
   const contentRef = useRef<HTMLDivElement | null>(null);
   const lastScrollTopRef = useRef<number>(0);
@@ -171,9 +170,6 @@ const AppInner: React.FC = () => {
 
     // Guest accessing mintpy → show banner, allow access
     if (isGuest && GUEST_PARTIAL_SECTIONS.has(section)) {
-      setWarningMessage(
-        "⚠️ Modo invitado: estás accediendo sin credenciales. El paso de corrección atmosférica de ERA5 no estará disponible. Para acceso completo, inicia sesión."
-      );
       setShowWarningBanner(true);
     }
 

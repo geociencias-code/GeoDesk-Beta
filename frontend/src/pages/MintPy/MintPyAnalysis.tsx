@@ -1656,7 +1656,7 @@ export default function MintPyAnalysis() {
                           formatter={(v: unknown, name: unknown) => [`${v} px`, name === "mintpy" ? "Fase 2: Post-inversión (MintPy)" : "Fase 1: Pre-inversión (HyP3)"]}
                         />
                         <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: "0.8rem", color: "#94a3b8" }}
-                          formatter={(v) => v === "mintpy" ? "Fase 2: Post-inversión (MintPy)" : "Fase 1: Pre-inversión (HyP3)"} />
+                          formatter={(v: string) => v === "mintpy" ? "Fase 2: Post-inversión (MintPy)" : "Fase 1: Pre-inversión (HyP3)"} />
                         <Bar dataKey="mintpy" fill="#6366f1" radius={[4, 4, 0, 0]} opacity={0.85} />
                         <Bar dataKey="hyp3" fill="#f59e0b" radius={[4, 4, 0, 0]} opacity={0.85} />
                       </BarChart>

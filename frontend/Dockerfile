@@ -11,6 +11,13 @@ RUN npm install react-globe.gl three recharts
 
 COPY . .
 
-EXPOSE 5173
+RUN npm run build
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+FROM nginx:1.27-alpine
+
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/dist /usr/share/nginx/html/geo-desk
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

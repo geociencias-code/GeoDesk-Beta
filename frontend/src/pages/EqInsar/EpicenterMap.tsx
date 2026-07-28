@@ -104,7 +104,7 @@ const EpicenterMap: React.FC<EpicenterMapProps> = ({
   // xcen_km es el offset del epicentro desde el centro de grilla en X (este)
   // ycen_km es el offset del epicentro desde el centro de grilla en Y (norte)
   // → centro_grilla = epicentro − offset
-  const { latDeg: xcenLatOff, lonDeg: xcenLonOff } = kmToDeg(Math.abs(xcenKm), lat);
+  const { lonDeg: xcenLonOff } = kmToDeg(Math.abs(xcenKm), lat);
   const { latDeg: ycenLatOff }                      = kmToDeg(Math.abs(ycenKm), lat);
 
   const gridCenterLat = lat - (ycenKm >= 0 ? ycenLatOff : -ycenLatOff);

@@ -10,6 +10,7 @@ __pycache__/
 .env
 .env.local
 .env.*.local
+.env.*
 
 # El archivo de ejemplo SÍ se puede subir
 !.env.example

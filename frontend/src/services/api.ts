@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-export const API_URL = 'http://localhost:8000';
+export const API_URL = import.meta.env.VITE_API_URL;
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -14,9 +14,6 @@ export const apiFormData = axios.create({
   // Let the browser set the boundary for multipart/form-data
 });
 
-// ── Credential Interceptors ───────────────────────────────────────────────────
-// These inject HyP3 and ERA5 credentials from localStorage into every request
-// so the backend can use them without a server-side session.
 
 const STORAGE_KEY = 'geodesk_credentials';
 

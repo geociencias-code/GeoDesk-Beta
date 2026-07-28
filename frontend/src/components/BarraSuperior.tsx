@@ -5,7 +5,7 @@ type BarraSuperiorProps = {
 };
 
 const BarraSuperior: React.FC<BarraSuperiorProps> = ({ isHidden }) => {
-  const logoSrc: string = "/imagenes/logo.png";
+  const logoSrc: string = `${import.meta.env.BASE_URL || "/"}imagenes/logo.png`;
   const logoAlt: string = "Logo Novalis Lab";
 
   return (

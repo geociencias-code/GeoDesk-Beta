@@ -299,14 +299,11 @@ const AppInner: React.FC = () => {
     }
   };
 
-  // ── Content router ──────────────────────────────────────────────────────────
   const renderContent = () => {
-    // Guest tried to access a restricted section
     if (activeSection === "login-redirect") {
       return <AuthBlocker onGoToLogin={() => setActiveSection("inicio")} />;
     }
 
-    // Double-check: if authenticated user lands on auth-required section, allow it
     switch (activeSection) {
       case "inicio":
         return <Inicio onNavigate={handleChangeSection} />;
@@ -389,7 +386,6 @@ const AppInner: React.FC = () => {
     }
   };
 
-  // Show login page if not authenticated (all hooks already called above)
   if (mode === "unauthenticated") {
     return <LoginPage />;
   }

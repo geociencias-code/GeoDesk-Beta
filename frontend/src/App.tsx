@@ -15,7 +15,6 @@ import EqInsarAnalysis from "./pages/EqInsar/EqInsarAnalysis";
 import Inicio from "./pages/Home/Home";
 import api, { API_URL } from "./services/api";
 import type { Scene } from "./pages/Alaska/AlaskaContent";
-
 const SIDEBAR_WIDTH = 300;
 const APP_BG = "var(--color-bg-main)";
 

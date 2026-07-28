@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     allowedHosts: ['geociencias.ues.edu.sv']
   },
+  base: '/geo-desk/',
   plugins: [
     react({
       babel: {

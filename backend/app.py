@@ -4,6 +4,13 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 import sys
 import os
+import logging
+
+# Configurar logging para que los mensajes de los routers aparezcan en los logs
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s: [%(name)s] %(message)s",
+)
 from routes.alaska import router as alaska_router
 from routes.auth import router as auth_router
 

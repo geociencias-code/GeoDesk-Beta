@@ -3,6 +3,7 @@ import math
 import os
 import re
 import pathlib
+import traceback
 import urllib.parse
 from typing import Any, Iterable, List, Optional, Tuple, Dict
 from datetime import datetime, timezone
@@ -14,6 +15,9 @@ import asf_search as asf
 from asf_search import ASFSession
 import hyp3_sdk as sdk
 from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -553,16 +557,17 @@ def get_projects(
     x_hyp3_password: Optional[str] = Header(default=None),
 ):
     hyp3_user, hyp3_pass = _get_hyp3_creds(x_hyp3_username, x_hyp3_password)
+    logger.info("[get_projects] user_from_header=%s creds_ok=%s",
+                x_hyp3_username, bool(hyp3_user and hyp3_pass))
     try:
         hyp3 = sdk.HyP3(username=hyp3_user, password=hyp3_pass)
         batch = hyp3.find_jobs().filter_jobs(running=False, include_expired=False, succeeded=True)
 
-        import re
         projects = []
         for job in batch.jobs:
             if not job.name:
                 continue
-            m = re.match(r'^(.*?)_\d+_\d+_\d+$', job.name)
+            m = re.match(r'^(.*?)_(\d+_\d+_\d+)$', job.name)
             project_name = m.group(1) if m else job.name
 
             if project_name not in [p['name'] for p in projects]:
@@ -570,6 +575,7 @@ def get_projects(
 
         return projects
     except Exception as e:
+        logger.error("[get_projects] ERROR: %s\n%s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error al obtener proyectos: {str(e)}")
 
 

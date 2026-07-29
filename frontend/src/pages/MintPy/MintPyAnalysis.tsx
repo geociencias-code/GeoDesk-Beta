@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
+import axios from "axios";
 import api, { apiFormData, API_URL } from "../../services/api";
 import {
   BarChart,
@@ -12,7 +13,6 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import api, { apiFormData, API_URL } from "../../services/api";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle, CircleMarker, Marker, Tooltip as LeafletTooltip } from "react-leaflet";

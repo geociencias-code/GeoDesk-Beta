@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import api from "../../services/api";
+import api, { API_URL } from "../../services/api";
 import EpicenterMap from "./EpicenterMap";
 
 // ── Type Definitions ──────────────────────────────────────────────────────

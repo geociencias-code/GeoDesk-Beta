@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import AlaskaSearch from "./AlaskaSearch";
 import SentinelDashboard from "./SentinelDashboard";
-import api from "../../services/api";
+import api, { API_URL } from "../../services/api";
 import type { PathFrameOption } from "./MapComponent";
 
 export type Scene = {

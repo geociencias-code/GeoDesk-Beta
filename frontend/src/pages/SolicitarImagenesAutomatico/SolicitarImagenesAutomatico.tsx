@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from "react";
 import axios from "axios";
 import api from "../../services/api";
+import MapComponent from "../Alaska/MapComponent";
 import type { PathFrameOption } from "../Alaska/MapComponent";
 
 interface TimeWindow {

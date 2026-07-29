@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import axios from "axios";
-import { API_URL } from "../../services/api";
+import api from "../../services/api";
 import EpicenterMap from "./EpicenterMap";
 
 // ── Type Definitions ──────────────────────────────────────────────────────
@@ -440,7 +439,7 @@ function TabSingle({satellites=[]}:{satellites?:string[]}) {
     try {
       const body = { ...p } as Record<string, unknown>;
       if (!body.satellite) delete body.satellite;
-      const res = await axios.post(`${API_URL}/api/eq_insar/generate`, body);
+      const res = await api.post('/api/eq_insar/generate', body);
       setResult(res.data);
     } catch(e) {
       const error = e instanceof Error ? e.message : "Error desconocido";
@@ -568,7 +567,7 @@ function TabTimeseries({satellites=[]}:{satellites?:string[]}) {
     try {
       const body = {...p} as Record<string, unknown>;
       if (!body.satellite) delete body.satellite;
-      const res = await axios.post(`${API_URL}/api/eq_insar/timeseries`, body);
+      const res = await api.post('/api/eq_insar/timeseries', body);
       setResult(res.data);
     } catch(e) {
       const errorMsg = e instanceof Error ? e.message : "Error desconocido";
@@ -672,7 +671,7 @@ function TabBatch({satellites=[]}:{satellites?:string[]}) {
   const run = async () => {
     setBusy(true); setError(""); setResult(null);
     try {
-      const res = await axios.post(`${API_URL}/api/eq_insar/batch`, p);
+      const res = await api.post('/api/eq_insar/batch', p);
       setResult(res.data);
     } catch(e) {
       const errorMessage = e instanceof Error ? e.message : "Error desconocido";
@@ -765,7 +764,7 @@ export default function EqInsarAnalysis() {
   useEffect(() => {
     const fetchSatellites = async () => {
       try {
-        const res = await axios.get(`${API_URL}/api/eq_insar/satellites`);
+        const res = await api.get('/api/eq_insar/satellites');
         setSatellites(res.data.satellites || []);
       } catch (err) {
         console.error("Error cargando satélites:", err);

@@ -1,7 +1,6 @@
 import React, { useState, useCallback } from "react";
 import axios from "axios";
-import { API_URL } from "../../services/api";
-import MapComponent from "../Alaska/MapComponent";
+import api from "../../services/api";
 import type { PathFrameOption } from "../Alaska/MapComponent";
 
 interface TimeWindow {
@@ -92,7 +91,7 @@ const SolicitarImagenesAutomatico: React.FC = () => {
         polarization: polarization || undefined,
       };
 
-      const res = await axios.post<PathFrameOption[]>(`${API_URL}/api/discover_paths`, body);
+      const res = await api.post<PathFrameOption[]>('/api/discover_paths', body);
       const options = res.data;
       setPathFrameOptions(options);
 
@@ -154,7 +153,7 @@ const SolicitarImagenesAutomatico: React.FC = () => {
         polygon: polygonWKT,
       };
 
-      const response = await axios.post<ResponseData>(`${API_URL}/api/solicitar_imagenes`, payload);
+      const response = await api.post<ResponseData>('/api/solicitar_imagenes', payload);
       const data = response.data;
 
       if (data.error) {

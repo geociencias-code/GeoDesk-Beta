@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import axios from "axios";
-import { API_URL } from "../../services/api";
+import api from "../../services/api";
 import { toast } from "sonner";
 
 type FileEntry = {
@@ -25,7 +24,7 @@ const DownloadFiles: React.FC = () => {
   // Cargar lista de proyectos disponibles
   const fetchProjects = async () => {
     try {
-      const res = await axios.get(`${API_URL}/api/projects`);
+      const res = await api.get('/api/projects');
       setProjects(res.data);
     } catch (e: unknown) {
       if (e instanceof Error) {
@@ -45,7 +44,7 @@ const DownloadFiles: React.FC = () => {
     setError(null);
 
     try {
-      const res = await axios.post(`${API_URL}/api/project-files`, {
+      const res = await api.post('/api/project-files', {
         nombre_proyecto: projectName,
         product_type: "INSAR_GAMMA",
       });
@@ -110,7 +109,7 @@ const DownloadFiles: React.FC = () => {
 
     try {
       const downloadPromises = itemsToDownload.map(async (file) => {
-        const res = await axios.post(`${API_URL}/api/download`, {
+        const res = await api.post('/api/download', {
           file_url: file.url,
           file_name: file.file_name,
         });

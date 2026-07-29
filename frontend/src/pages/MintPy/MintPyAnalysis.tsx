@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import axios from "axios";
+import api, { apiFormData, API_URL } from "../../services/api";
 import {
   BarChart,
   Bar,
@@ -12,7 +12,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { API_URL } from "../../services/api";
+import api, { apiFormData, API_URL } from "../../services/api";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MapContainer, TileLayer, FeatureGroup, useMap, Rectangle, CircleMarker, Marker, Tooltip as LeafletTooltip } from "react-leaflet";
@@ -529,7 +529,7 @@ export default function MintPyAnalysis() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await axios.get(`${API_URL}/api/mintpy/system_status`);
+        const res = await api.get('/api/mintpy/system_status');
         if (res.data.success) {
           setSystemStatus({
             ram: res.data.ram,
@@ -550,7 +550,7 @@ export default function MintPyAnalysis() {
     try {
       const formData = new FormData();
       formData.append("session_id", sessionId);
-      const res = await axios.post(`${API_URL}/api/mintpy/preview_plan`, formData);
+      const res = await apiFormData.post('/api/mintpy/preview_plan', formData);
       if (res.data.success) {
         setPlan(res.data);
       }
@@ -563,7 +563,7 @@ export default function MintPyAnalysis() {
     try {
       const formData = new FormData();
       formData.append("session_id", sessionId);
-      const res = await axios.post(`${API_URL}/api/mintpy/preview_bounds`, formData);
+      const res = await apiFormData.post('/api/mintpy/preview_bounds', formData);
       if (res.data.success) {
         setBounds(res.data.bounds);
         
@@ -629,7 +629,7 @@ export default function MintPyAnalysis() {
             }, 5000);
 
             try {
-              await axios.post(`${API_URL}/api/mintpy/upload_file`, formData, {
+              await apiFormData.post('/api/mintpy/upload_file', formData, {
                 onUploadProgress: (progressEvent) => {
                   if (progressEvent.loaded !== lastLoadedBytes) {
                     lastLoadedBytes = progressEvent.loaded;
@@ -704,7 +704,7 @@ export default function MintPyAnalysis() {
         formData.append("crop_lon_max", drawnBox.lon_max.toString());
       }
 
-      const response = await axios.post(`${API_URL}/api/mintpy/preview_reference`, formData, {
+      const response = await apiFormData.post('/api/mintpy/preview_reference', formData, {
         onUploadProgress: (e) => {
           if (e.total) setProgress(Math.round((e.loaded / e.total) * 100));
         },
@@ -757,7 +757,7 @@ export default function MintPyAnalysis() {
       }
       formData.append("min_coherence", minCoherence.toString());
 
-      const response = await axios.post(`${API_URL}/api/mintpy/process`, formData, {
+      const response = await apiFormData.post('/api/mintpy/process', formData, {
         onUploadProgress: (e) => {
           if (e.total) setProgress(Math.round((e.loaded / e.total) * 50));
         },
@@ -797,7 +797,7 @@ export default function MintPyAnalysis() {
     setSessionId(crypto.randomUUID());
     const fd = new FormData();
     fd.append("session_id", oldSession);
-    axios.post(`${API_URL}/api/mintpy/clear_session`, fd).catch(console.error);
+    apiFormData.post('/api/mintpy/clear_session', fd).catch(console.error);
   };
 
   const cropIsValid = drawnBox && bounds ? isCropWithinBounds(drawnBox, bounds) : !!drawnBox;

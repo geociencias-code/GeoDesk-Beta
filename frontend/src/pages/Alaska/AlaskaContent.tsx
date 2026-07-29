@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import AlaskaSearch from "./AlaskaSearch";
 import SentinelDashboard from "./SentinelDashboard";
-import axios from "axios";
-import { API_URL } from "../../services/api";
+import api from "../../services/api";
 import type { PathFrameOption } from "./MapComponent";
 
 export type Scene = {
@@ -79,7 +78,7 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
         polarization: polarization || undefined,
       };
 
-      const res = await axios.post(`${API_URL}/api/discover_paths`, body);
+      const res = await api.post<PathFrameOption[]>('/api/discover_paths', body);
       const options: PathFrameOption[] = res.data;
       setPathFrameOptions(options);
 
@@ -133,7 +132,7 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
         polarization: polarization || undefined,
       };
 
-      const res = await axios.post(`${API_URL}/api/search`, body);
+      const res = await api.post('/api/search', body);
       const data: Scene[] = res.data;
       setScenes(data);
     } catch (e: unknown) {
@@ -150,7 +149,7 @@ const AlaskaContent: React.FC<Props> = ({ pageKey }) => {
   async function loadFromHyP3() {
     try {
       setError(null);
-      const res = await axios.post(`${API_URL}/api/hyp3-files`, { nombre_proyecto: DEFAULT_PROJECT, product_type: "INSAR_GAMMA", ruta, marco });
+      const res = await api.post('/api/hyp3-files', { nombre_proyecto: DEFAULT_PROJECT, product_type: "INSAR_GAMMA", ruta, marco });
       const data: Array<{ granule: string; download_url: string; size_mb?: number|null; }> = res.data;
       setScenes(data.map(d => ({ granule: d.granule, download_url: d.download_url, size_mb: d.size_mb ?? null })));
     } catch (e: unknown) {

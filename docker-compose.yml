@@ -3,16 +3,22 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
+    # Sin ports: no exponer 8000 al exterior, solo accesible internamente
+    expose:
+      - "8000"
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "80:80"
+    environment:
+      # El nginx del frontend resuelve "backend" por el nombre del servicio Docker
+      - BACKEND_UPSTREAM=backend:8000
     depends_on:
       - backend

@@ -2,45 +2,76 @@ server {
   listen 80;
   server_name _;
 
+  # ── Resolver interno de Docker ────────────────────────────────────────────
   resolver 127.0.0.11 valid=30s ipv6=off;
   set $backend_upstream ${BACKEND_UPSTREAM};
 
   root /usr/share/nginx/html;
   index index.html;
 
-  location / {
-    try_files $uri $uri/ /index.html;
-  }
-
+  # ── Proxy al backend: peticiones /api/* ───────────────────────────────────
+  # Con Strip Path ON en Dokploy: el browser pide /geo-desk/api/X →
+  #   Dokploy quita /geo-desk/ → nginx recibe /api/X → proxy_pass al backend.
+  # Con Strip Path OFF: nginx recibe /geo-desk/api/X y NO entraría aquí,
+  #   por eso también tenemos el bloque /geo-desk/api/ más abajo.
   location /api/ {
-    proxy_pass http://$backend_upstream;
+    proxy_pass         http://$backend_upstream;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header   Host              $host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+    client_max_body_size 500m;
   }
 
+  # ── Proxy al backend: archivos estáticos del backend ─────────────────────
   location /resultados_comparativa/ {
-    proxy_pass http://$backend_upstream;
+    proxy_pass         http://$backend_upstream;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header   Host $host;
+    proxy_set_header   X-Real-IP $remote_addr;
+    proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
   }
 
   location /mintpy_results/ {
-    proxy_pass http://$backend_upstream;
+    proxy_pass         http://$backend_upstream;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header   Host $host;
+    proxy_set_header   X-Real-IP $remote_addr;
+    proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
   }
 
+  # ── SPA React (base='/geo-desk/') ────────────────────────────────────────
+  # Con Strip Path ON: Dokploy quita /geo-desk/, nginx recibe / y sirve el SPA.
+  # Con Strip Path OFF: Dokploy no quita nada, nginx recibe /geo-desk/ y
+  #   este bloque lo sirve con alias.
+
+  # Caso Strip Path OFF: /geo-desk/api/... va al backend
+  location ^~ /geo-desk/api/ {
+    rewrite ^/geo-desk/(.*)$ /$1 break;
+    proxy_pass         http://$backend_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header   Host              $host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+    client_max_body_size 500m;
+  }
+
+  # Caso Strip Path OFF: /geo-desk/* sirve el SPA
   location /geo-desk/ {
     alias /usr/share/nginx/html/;
+    try_files $uri $uri/ /index.html;
+  }
+
+  # Caso Strip Path ON: / → sirve el SPA directamente
+  location / {
     try_files $uri $uri/ /index.html;
   }
 }

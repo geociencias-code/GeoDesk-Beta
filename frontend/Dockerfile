@@ -11,9 +11,6 @@ RUN npm install react-globe.gl three recharts
 
 COPY . .
 
-# VITE_API_URL se embebe en el bundle JS en tiempo de build.
-# El default es /geo-desk para que todas las llamadas pasen por
-# el prefijo que Traefik enruta al nginx de este contenedor.
 ARG VITE_API_URL=/geo-desk
 ENV VITE_API_URL=${VITE_API_URL}
 

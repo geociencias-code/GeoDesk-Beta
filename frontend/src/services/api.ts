@@ -1,10 +1,5 @@
 import axios from 'axios';
 
-// En producción no se necesita un URL absoluto: el nginx del frontend
-// hace el proxy de /api/ → backend. En desarrollo local apuntamos al
-// backend directamente por puerto.
-// Si se define VITE_API_URL en el build, se usa ese valor.
-// Si no, usamos '' (ruta relativa) para que el proxy de nginx funcione.
 export const API_URL = import.meta.env.VITE_API_URL ?? '';
 
 export const api = axios.create({
@@ -19,8 +14,6 @@ export const apiFormData = axios.create({
   // Let the browser set the boundary for multipart/form-data
 });
 
-// ── Credential Interceptors ───────────────────────────────────────────────────
-// Injectan HyP3 y ERA5 credentials desde localStorage en cada petición.
 
 const STORAGE_KEY = 'geodesk_credentials';
 
@@ -34,7 +27,6 @@ function injectCredentialHeaders(config: { headers: Record<string, string> }) {
       if (creds.era5Key)      config.headers['x-era5-key']      = creds.era5Key;
     }
   } catch {
-    // Ignore storage errors
   }
   return config;
 }

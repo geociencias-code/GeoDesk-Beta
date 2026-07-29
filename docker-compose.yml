@@ -13,6 +13,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Embebe /geo-desk como prefijo de API en el bundle JS.
+        # Todas las peticiones axios irán a /geo-desk/api/...
+        # Traefik quita /geo-desk/ → nginx recibe /api/ → proxea al backend.
+        - VITE_API_URL=/geo-desk
     restart: unless-stopped
     environment:
       - BACKEND_UPSTREAM=backend:8000

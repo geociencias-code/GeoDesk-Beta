@@ -1,5 +1,6 @@
 import os
 import shutil
+import zipfile
 import logging
 from typing import Optional
 from pathlib import Path
@@ -311,18 +312,37 @@ def pipeline_run_mintpy(self, prev_result: dict, volcano: str):
 
     work_dir = WORK_BASE / f"{volcano}_{year}"
     work_dir.mkdir(parents=True, exist_ok=True)
+    products_dir = work_dir / "hyp3_products"
+    products_dir.mkdir(parents=True, exist_ok=True)
+
+    # Extraer los ZIPs de shared/ hacia work_dir/hyp3_products si aún no se han extraído
+    zips = list(shared_dir.glob("*.zip"))
+    logger.info(
+        "[%s] Verificando extracción de %d ZIPs en %s...",
+        group_label, len(zips), products_dir,
+    )
+    for zpath in zips:
+        try:
+            with zipfile.ZipFile(zpath, "r") as zf:
+                # Comprobar si la carpeta ya está descomprimida
+                top_folders = {p.split('/')[0] for p in zf.namelist() if '/' in p}
+                already_extracted = any((products_dir / tf).exists() for tf in top_folders)
+                if not already_extracted:
+                    zf.extractall(products_dir)
+        except Exception as ze:
+            logger.warning("[%s] Error extrayendo %s: %s", group_label, zpath.name, ze)
 
     logger.info(
-        "[%s] Iniciando MintPy. ZIPs desde shared/: %s. "
+        "[%s] Iniciando MintPy. Productos desde: %s. "
         "Recorte: lat=[%.4f,%.4f] lon=[%.4f,%.4f]",
-        group_label, shared_dir, lat_min, lat_max, lon_min, lon_max,
+        group_label, products_dir, lat_min, lat_max, lon_min, lon_max,
     )
 
     try:
         era5_key = os.getenv("ERA5_KEY")
         _run_mintpy_pipeline(
             work_dir=work_dir,
-            zip_dir=shared_dir,   # <-- usa el shared/ compartido
+            zip_dir=products_dir,   # <-- usa los productos extraídos
             ref_lat=None,
             ref_lon=None,
             crop_lat_min=lat_min,

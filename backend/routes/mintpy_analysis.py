@@ -910,9 +910,19 @@ def _make_cfg(
 
     tifs = list(zip_dir.glob("*/*_unw_phase.tif"))
     min_h = min_w = "auto"
+    subset_lalo_val = "no"
     subset_yx_val = "auto"
+    ref_lalo_val = "no"
     ref_yx_val = "auto"
-    
+
+    if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
+        subset_lalo_val = f"{crop_lat_min}:{crop_lat_max},{crop_lon_min}:{crop_lon_max}"
+        subset_yx_val = "no"
+
+    if ref_lat is not None and ref_lon is not None:
+        ref_lalo_val = f"{ref_lat},{ref_lon}"
+        ref_yx_val = "no"
+
     if tifs:
         heights = []
         widths = []
@@ -941,19 +951,6 @@ def _make_cfg(
             transformer = None
             if crs and crs.to_epsg() != 4326:
                 transformer = pyproj.Transformer.from_crs(4326, crs.to_epsg() or 32616, always_xy=True)
-
-            subset_lalo_val = "no"
-            subset_yx_val = "auto"
-            ref_lalo_val = "no"
-            ref_yx_val = "auto"
-
-            if crop_lat_min is not None and crop_lat_max is not None and crop_lon_min is not None and crop_lon_max is not None:
-                subset_lalo_val = f"{crop_lat_min}:{crop_lat_max},{crop_lon_min}:{crop_lon_max}"
-                subset_yx_val = "no"
-
-            if ref_lat is not None and ref_lon is not None:
-                ref_lalo_val = f"{ref_lat},{ref_lon}"
-                ref_yx_val = "no"
 
     # Ensure the weather directory is created for persistent caching of GRIB files
     weather_dir = RESULTS_DIR / "weather"

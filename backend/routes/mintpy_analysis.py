@@ -979,7 +979,7 @@ mintpy.interferogram.filter.type  = gaussian
 mintpy.interferogram.filter.wavelength = 400
 mintpy.networkInversion.minTempCoh = 0.5
 mintpy.compute.cluster = local
-mintpy.compute.numWorker = 12
+mintpy.compute.numWorker = auto
 mintpy.plot = no
 """
 

@@ -37,9 +37,8 @@ celery_app.conf.update(
 
     result_expires=86400 * 7, # por que tanto tiempo?
 
-    # Si un proceso hijo supera 2 GB de RAM, Celery lo reinicia limpiamente al terminar la tarea
-    # Con concurrencia=3, el techo total es ~6 GB
-    worker_max_memory_per_child=2 * 1024 * 1024,  # 2 GB en KB
+    # Si un proceso hijo supera 3.5 GB de RAM (RSS), Celery lo reinicia limpiamente al terminar la tarea
+    worker_max_memory_per_child=3500 * 1024,  # 3.5 GB en KB
 
     task_acks_late=True,
     task_reject_on_worker_lost=True,
@@ -58,12 +57,3 @@ celery_app.conf.update(
         }
     }
 )
-
-@worker_process_init.connect
-def limit_worker_memory(**kwargs):
-    """Limita la memoria virtual de cada proceso hijo a 2 GB.
-    Si una tarea intenta asignar más, Python lanza MemoryError
-    en lugar de que Docker mate el contenedor entero.
-    """
-    soft = 2 * 1024 ** 3  # 2 GB en bytes
-    resource.setrlimit(resource.RLIMIT_AS, (soft, soft))

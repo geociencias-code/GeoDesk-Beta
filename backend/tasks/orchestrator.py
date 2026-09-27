@@ -33,12 +33,65 @@ def _download_task_id(track: int, frame: int, year: int) -> str:
 
 
 def _is_download_running(track: int, frame: int, year: int) -> bool:
-    """Retorna True si ya hay una descarga activa para este grupo/año."""
-    if is_download_lock_active(track, frame, year):
-        return True
+    """Retorna True si ya hay una descarga activa para este grupo/año.
+    Si detecta un lock huérfano (la tarea Celery no existe o terminó/fue revocada),
+    lo limpia automáticamente para evitar estancamientos perpetuos.
+    """
     task_id = _download_task_id(track, frame, year)
     result = AsyncResult(task_id)
-    return result.state in ("STARTED", "RECEIVED", "RETRY", "PENDING")
+
+    # Si Celery confirma un estado activo real
+    if result.state in ("STARTED", "RECEIVED", "RETRY"):
+        return True
+
+    # Si la tarea fue revocada o falló, asegurar que cualquier lock en Redis se limpie
+    if result.state in ("REVOKED", "FAILURE"):
+        if is_download_lock_active(track, frame, year):
+            logger.warning(
+                "Orquestador: Tarea %s está en estado %s pero el lock sigue activo. "
+                "Limpiando lock huérfano para track%d_frame%d/%d.",
+                task_id, result.state, track, frame, year,
+            )
+            from tasks.automated_pipeline import _release_lock
+            _release_lock(track, frame, year)
+        return False
+
+    # Si hay lock activo en Redis
+    if is_download_lock_active(track, frame, year):
+        # En Celery, si una tarea nunca existió o su resultado expiró, result.state es "PENDING".
+        # Si tiene lock pero no está en STARTED/RECEIVED/RETRY, verificamos si está viva en el worker.
+        try:
+            from celery_app import celery_app
+            inspector = celery_app.control.inspect(timeout=1.0)
+            active_tasks = inspector.active() or {}
+            reserved_tasks = inspector.reserved() or {}
+            all_running_ids = {
+                t["id"]
+                for worker_tasks in list(active_tasks.values()) + list(reserved_tasks.values())
+                for t in worker_tasks
+            }
+            if task_id in all_running_ids:
+                return True
+        except Exception as e:
+            logger.debug("No se pudo inspeccionar workers activos de Celery: %s", e)
+
+        # Si no encontramos la tarea activa en workers, verificamos el contenido del lock
+        r = _get_redis()
+        lock_val = r.get(_pipeline_lock_key(track, frame, year))
+        if lock_val == task_id and result.state not in ("STARTED", "RECEIVED", "RETRY"):
+            # Lock huérfano (la tarea no está corriendo activamente)
+            logger.warning(
+                "Orquestador: Lock huérfano detectado para %s (task_id=%s, state=%s). "
+                "Liberando automáticamente.",
+                _pipeline_lock_key(track, frame, year), task_id, result.state,
+            )
+            from tasks.automated_pipeline import _release_lock
+            _release_lock(track, frame, year)
+            return False
+
+        return True
+
+    return False
 
 
 def _launch_download_for_group(track: int, frame: int, year: int,

@@ -55,6 +55,19 @@ app.include_router(eq_insar_router)
 app.include_router(jobs_router)
 app.include_router(visualization_router)
 
+@app.on_event("startup")
+def trigger_initial_bootstrap():
+    """Al iniciar el backend, lanza una verificación de datos históricos en Celery
+    para no tener que esperar al cron de las 06:00 AM ni requerir intervención manual.
+    """
+    try:
+        from tasks.orchestrator import bootstrap_historical
+        bootstrap_historical.delay()
+        logging.getLogger(__name__).info("Verificación histórica inicial encolada en Celery al iniciar backend.")
+    except Exception as exc:
+        logging.getLogger(__name__).warning("No se pudo encolar bootstrap inicial al arrancar: %s", exc)
+
+
 @app.get("/api/health")
 def health_root():
     return {"ok": True, "service": "MyApp API (root)"}

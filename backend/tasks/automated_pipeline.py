@@ -1,6 +1,7 @@
 import os
 import shutil
 import logging
+from typing import Optional
 from pathlib import Path
 from celery import shared_task, chain
 from redis import Redis
@@ -21,7 +22,7 @@ import hyp3_sdk as sdk
 logger = logging.getLogger(__name__)
 
 _REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-_LOCK_TTL_SECONDS = 4 * 24 * 3600  # 4 días
+_LOCK_TTL_SECONDS = 6 * 3600  # 6 horas (renovable) para evitar bloqueos perpetuos
 
 MIN_COHERENCE = 0.5
 WORK_BASE = Path("/tmp/mintpy_auto")
@@ -32,14 +33,14 @@ def _get_redis() -> Redis:
 
 
 def _pipeline_lock_key(track: int, frame: int, year: int) -> str:
-    """Lock a nivel de grupo (track, frame, year) — cubre todos los volcanes del grupo."""
+    """Lock a nivel de grupo (track, frame, year) — cubre la fase de descarga para el grupo."""
     return f"pipeline_lock:track{track}_frame{frame}:{year}"
 
 
 def _acquire_lock(track: int, frame: int, year: int, task_id: str) -> bool:
     """Intenta adquirir el lock para este (track, frame, year).
     Retorna True si lo adquirió (puede proceder), False si ya existe.
-    Usa SET NX para garantizar atomicidad.
+    Usa SET NX con TTL razonable (6 horas) para evitar bloqueos perpetuos si el proceso muere.
     """
     r = _get_redis()
     key = _pipeline_lock_key(track, frame, year)
@@ -47,28 +48,43 @@ def _acquire_lock(track: int, frame: int, year: int, task_id: str) -> bool:
     return acquired is True
 
 
-def _release_lock(track: int, frame: int, year: int, task_id: str):
-    """Libera el lock sólo si lo posee esta tarea."""
-    r = _get_redis()
-    key = _pipeline_lock_key(track, frame, year)
-    current = r.get(key)
-    if current == task_id:
-        r.delete(key)
+def _release_lock(track: int, frame: int, year: int, task_id: Optional[str] = None):
+    """Libera el lock de descarga para este grupo y año.
+    Si se proporciona task_id, solo se borra si coincide. Si task_id es None, se fuerza la liberación.
+    """
+    try:
+        r = _get_redis()
+        key = _pipeline_lock_key(track, frame, year)
+        if task_id is None:
+            r.delete(key)
+        else:
+            current = r.get(key)
+            if current == task_id:
+                r.delete(key)
+    except Exception as e:
+        logger.error("Error al liberar lock %s: %s", key, e)
 
 
 def _refresh_lock(track: int, frame: int, year: int, task_id: str):
     """Renueva el TTL del lock antes de cada reintento."""
-    r = _get_redis()
-    key = _pipeline_lock_key(track, frame, year)
-    current = r.get(key)
-    if current == task_id:
-        r.expire(key, _LOCK_TTL_SECONDS)
+    try:
+        r = _get_redis()
+        key = _pipeline_lock_key(track, frame, year)
+        current = r.get(key)
+        if current == task_id:
+            r.expire(key, _LOCK_TTL_SECONDS)
+    except Exception as e:
+        logger.error("Error al refrescar lock %s: %s", key, e)
 
 
 def is_download_lock_active(track: int, frame: int, year: int) -> bool:
     """Retorna True si hay un lock de descarga activo para este grupo/año."""
-    r = _get_redis()
-    return r.exists(_pipeline_lock_key(track, frame, year)) > 0
+    try:
+        r = _get_redis()
+        return r.exists(_pipeline_lock_key(track, frame, year)) > 0
+    except Exception as e:
+        logger.error("Error consultando lock en Redis: %s", e)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +203,7 @@ def pipeline_wait_and_download(self, prev_result: dict):
 
     if not job_ids:
         logger.info("[%s] Sin job_ids que esperar. Pasando al procesamiento.", group_label)
+        _release_lock(track, frame, year)
         return prev_result
 
     logger.info("[%s] Revisando estado de %d trabajos en HyP3...",
@@ -221,6 +238,7 @@ def pipeline_wait_and_download(self, prev_result: dict):
                 group_label, len(completed_jobs), failed)
 
     if not completed_jobs:
+        _release_lock(track, frame, year)
         raise ValueError(f"[{group_label}] Todos los trabajos de HyP3 fallaron.")
 
     # Descargar al directorio compartido
@@ -250,6 +268,9 @@ def pipeline_wait_and_download(self, prev_result: dict):
         "[%s] Descarga completada — nuevos: %d, omitidos (ya existían): %d.",
         group_label, downloaded, skipped,
     )
+    # La fase de descarga concluyó exitosamente. Se libera el lock para que el sistema
+    # sepa que no hay descarga en curso.
+    _release_lock(track, frame, year)
     prev_result["shared_dir"] = str(shared_dir)
     return prev_result
 
@@ -385,7 +406,6 @@ def pipeline_finalize_and_cleanup(self, prev_result: dict):
                 group_label, year, deleted,
             )
 
-    _release_lock(track, frame, year, lock_task_id)
     logger.info("[%s] Pipeline finalizado.", group_label)
     return {"success": parquet_saved, "volcano": volcano, "year": year}
 

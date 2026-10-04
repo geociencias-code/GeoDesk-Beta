@@ -978,8 +978,7 @@ mintpy.unwrapError.method         = {'phase_closure' if has_triplets else 'no'}
 mintpy.interferogram.filter.type  = gaussian
 mintpy.interferogram.filter.wavelength = 400
 mintpy.networkInversion.minTempCoh = 0.5
-mintpy.compute.cluster = local
-mintpy.compute.numWorker = auto
+mintpy.compute.cluster = no
 mintpy.plot = no
 """
 
@@ -1224,7 +1223,7 @@ def _run_mintpy_pipeline(
                     import re
                     cfg_text = mintpy_cfg.read_text()
                     cfg_text = re.sub(
-                        r"mintpy\.troposphericDelay\.method\s*=\s*pyaps",
+                        r"mintpy\.troposphericDelay\.method\s*=\s*\S+",
                         "mintpy.troposphericDelay.method = height_correlation",
                         cfg_text
                     )
@@ -1233,8 +1232,30 @@ def _run_mintpy_pipeline(
                         tsa._template["mintpy.troposphericDelay.method"] = "height_correlation"
                     if hasattr(tsa, "template"):
                         tsa.template["mintpy.troposphericDelay.method"] = "height_correlation"
-                # Re-run correct_troposphere step with height_correlation
-                tsa.run(steps=["correct_troposphere"])
+                # height_correlation needs maskTempCoh.h5 → run generate_mask first
+                try:
+                    tsa.run(steps=["generate_mask"])
+                except Exception:
+                    pass  # best-effort; correct_troposphere will fail gracefully if mask missing
+                try:
+                    tsa.run(steps=["correct_troposphere"])
+                except Exception as height_err:
+                    logging.warning(f"height_correlation tropospheric correction also failed: {height_err}")
+                    logging.warning("Disabling tropospheric correction (method = no) and continuing...")
+                    mintpy_cfg = work_dir / "smallbaselineApp.cfg"
+                    if mintpy_cfg.exists():
+                        import re
+                        cfg_text = mintpy_cfg.read_text()
+                        cfg_text = re.sub(
+                            r"mintpy\.troposphericDelay\.method\s*=\s*\S+",
+                            "mintpy.troposphericDelay.method = no",
+                            cfg_text
+                        )
+                        mintpy_cfg.write_text(cfg_text)
+                        if hasattr(tsa, "_template"):
+                            tsa._template["mintpy.troposphericDelay.method"] = "no"
+                        if hasattr(tsa, "template"):
+                            tsa.template["mintpy.troposphericDelay.method"] = "no"
             else:
                 raise
 

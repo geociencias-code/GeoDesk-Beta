@@ -1191,8 +1191,26 @@ def _run_mintpy_pipeline(
                         # Los píxeles nulos (NaN) o con valor 0.0 (máscara de agua de Gamma) deben ser 0.
                         cc = np.where(np.isnan(unw) | (unw == 0), 0, 1).astype(np.int16)
                         f.create_dataset("connectComponent", data=cc, compression="lzf")
-            
-            tsa.run(steps=["correct_unwrap_error"])
+            try:
+                tsa.run(steps=["correct_unwrap_error"])
+            except Exception as unwrap_err:
+                logging.warning(f"Phase closure (correct_unwrap_error) failed: {unwrap_err}")
+                logging.warning("Disabling unwrap error correction (method = no) and continuing...")
+                skipped_phase_closure = True
+                mintpy_cfg = work_dir / "smallbaselineApp.cfg"
+                if mintpy_cfg.exists():
+                    import re
+                    cfg_text = mintpy_cfg.read_text()
+                    cfg_text = re.sub(
+                        r"mintpy\.unwrapError\.method\s*=\s*\S+",
+                        "mintpy.unwrapError.method = no",
+                        cfg_text
+                    )
+                    mintpy_cfg.write_text(cfg_text)
+                    if hasattr(tsa, "_template"):
+                        tsa._template["mintpy.unwrapError.method"] = "no"
+                    if hasattr(tsa, "template"):
+                        tsa.template["mintpy.unwrapError.method"] = "no"
 
             if ifgram_file.exists():
                 with h5py.File(ifgram_file, "r") as f:

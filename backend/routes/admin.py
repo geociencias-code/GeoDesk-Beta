@@ -80,22 +80,29 @@ def reprocess_volcano(
             _enqueue_volcano_processing,
         )
 
-        if _is_download_running(track, frame, year):
-            return {
-                "ok": False,
-                "message": f"Ya hay una descarga o procesamiento en curso para track{track}_frame{frame}/{year}.",
-                "volcano": volcano,
-                "year": year,
-            }
+        try:
+            if _is_download_running(track, frame, year):
+                return {
+                    "ok": False,
+                    "message": f"Ya hay una descarga o procesamiento en curso para track{track}_frame{frame}/{year}.",
+                    "volcano": volcano,
+                    "year": year,
+                }
 
-        # Cadena de descarga de HyP3 -> procesar solo este volcán
-        workflow = chain(
-            pipeline_submit_hyp3.s(track, frame, year, start_iso, end_iso),
-            pipeline_wait_and_download.s(),
-            _enqueue_volcano_processing.s(volcanoes=[volcano]),
-        )
-        task_id = _download_task_id(track, frame, year)
-        workflow.apply_async(queue="geodesk_heavy", task_id=task_id)
+            # Cadena de descarga de HyP3 -> procesar solo este volcán
+            workflow = chain(
+                pipeline_submit_hyp3.s(track, frame, year, start_iso, end_iso),
+                pipeline_wait_and_download.s(),
+                _enqueue_volcano_processing.s(volcanoes=[volcano]),
+            )
+            task_id = _download_task_id(track, frame, year)
+            workflow.apply_async(queue="geodesk_heavy", task_id=task_id)
+        except Exception as exc:
+            logger.exception("[Admin] Error al encolar descarga HyP3: %s", exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al encolar descarga en Celery: {exc}",
+            )
 
         logger.info(
             "[Admin] Descarga HyP3 y procesamiento encolados por '%s': volcán=%s año=%d (task_id=%s)",

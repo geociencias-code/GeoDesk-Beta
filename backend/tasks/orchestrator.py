@@ -38,19 +38,25 @@ def _is_download_running(track: int, frame: int, year: int) -> bool:
     lo limpia automáticamente para evitar estancamientos perpetuos.
     """
     task_id = _download_task_id(track, frame, year)
-    result = AsyncResult(task_id)
+    try:
+        from celery_app import celery_app
+        result = AsyncResult(task_id, app=celery_app)
+        state = result.state
+    except Exception as exc:
+        logger.warning("No se pudo consultar estado de AsyncResult(%s): %s", task_id, exc)
+        state = "UNKNOWN"
 
     # Si Celery confirma un estado activo real
-    if result.state in ("STARTED", "RECEIVED", "RETRY"):
+    if state in ("STARTED", "RECEIVED", "RETRY"):
         return True
 
     # Si la tarea fue revocada o falló, asegurar que cualquier lock en Redis se limpie
-    if result.state in ("REVOKED", "FAILURE"):
+    if state in ("REVOKED", "FAILURE"):
         if is_download_lock_active(track, frame, year):
             logger.warning(
                 "Orquestador: Tarea %s está en estado %s pero el lock sigue activo. "
                 "Limpiando lock huérfano para track%d_frame%d/%d.",
-                task_id, result.state, track, frame, year,
+                task_id, state, track, frame, year,
             )
             from tasks.automated_pipeline import _release_lock
             _release_lock(track, frame, year)

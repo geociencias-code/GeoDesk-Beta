@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin"])
 class ReprocessRequest(BaseModel):
     volcano: str
     year: int
+    download_if_missing: bool = False  # Si True y no hay ZIPs, lanza la descarga en HyP3
 
 
 @router.post("/reprocess")
@@ -30,10 +31,12 @@ def reprocess_volcano(
 ):
     """
     Fuerza el reprocesamiento MintPy + guardado Parquet para un volcán y año concretos.
-    El Parquet existente (aunque sea de ceros) será sobreescrito al finalizar.
+    Si download_if_missing=True y no hay ZIPs en shared/, lanza la descarga desde HyP3
+    y luego ejecuta MintPy para ese volcán.
     """
     volcano = req.volcano
     year    = req.year
+    download_if_missing = req.download_if_missing
 
     if volcano not in VOLCANOES:
         raise HTTPException(
@@ -49,14 +52,68 @@ def reprocess_volcano(
     zips = list(shared_dir.glob("*.zip")) if shared_dir.exists() else []
 
     if not zips:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"No hay ZIPs en shared/ para track{track}_frame{frame}/{year}. "
-                f"Ruta esperada: {shared_dir}. "
-                "Primero ejecuta una descarga completa del año desde HyP3."
-            ),
+        if not download_if_missing:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"No hay ZIPs en shared/ para track{track}_frame{frame}/{year}. "
+                    f"Ruta esperada: {shared_dir}. "
+                    "Para descargar automáticamente de HyP3 y procesar, incluye: "
+                    "'download_if_missing': true en la petición."
+                ),
+            )
+
+        # Encolar descarga completa de HyP3 para este grupo/año y procesar solo el volcán solicitado
+        start_iso = f"{year}-01-01T00:00:00Z"
+        end_iso   = f"{year}-12-31T23:59:59Z"
+
+        from tasks.orchestrator import _launch_download_for_group
+        # Lanzamos la descarga especificando solo este volcán en el callback
+        from celery import chain
+        from tasks.automated_pipeline import (
+            pipeline_submit_hyp3,
+            pipeline_wait_and_download,
         )
+        from tasks.orchestrator import (
+            _is_download_running,
+            _download_task_id,
+            _enqueue_volcano_processing,
+        )
+
+        if _is_download_running(track, frame, year):
+            return {
+                "ok": False,
+                "message": f"Ya hay una descarga o procesamiento en curso para track{track}_frame{frame}/{year}.",
+                "volcano": volcano,
+                "year": year,
+            }
+
+        # Cadena de descarga de HyP3 -> procesar solo este volcán
+        workflow = chain(
+            pipeline_submit_hyp3.s(track, frame, year, start_iso, end_iso),
+            pipeline_wait_and_download.s(),
+            _enqueue_volcano_processing.s(volcanoes=[volcano]),
+        )
+        task_id = _download_task_id(track, frame, year)
+        workflow.apply_async(queue="geodesk_heavy", task_id=task_id)
+
+        logger.info(
+            "[Admin] Descarga HyP3 y procesamiento encolados por '%s': volcán=%s año=%d (task_id=%s)",
+            current_user.username, volcano, year, task_id,
+        )
+
+        return {
+            "ok": True,
+            "message": (
+                f"Descarga desde HyP3 iniciada para track{track}_frame{frame}/{year} [{start_iso} → {end_iso}]. "
+                f"Una vez completada la descarga, se procesará automáticamente MintPy para '{volcano}' "
+                f"y se guardará el Parquet con los datos calculados."
+            ),
+            "volcano": volcano,
+            "year": year,
+            "task_id": task_id,
+            "queued_by": current_user.username,
+        }
 
     try:
         from tasks.automated_pipeline import launch_process_only

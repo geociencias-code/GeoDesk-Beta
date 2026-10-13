@@ -70,6 +70,12 @@ def _parquet_path(volcano: str, year: int) -> Path:
     return _ensure_parquet_dir() / f"timeseries_{volcano}_{year}.parquet"
 
 
+# Alias público para uso externo (ej. routes/admin.py)
+def parquet_path(volcano: str, year: int) -> Path:
+    """Retorna la ruta canónica del archivo Parquet para un volcán y año dados."""
+    return _parquet_path(volcano, year)
+
+
 def save_timeseries(
     df: pd.DataFrame,
     volcano: str,

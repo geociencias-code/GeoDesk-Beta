@@ -18,6 +18,7 @@ from routes.mintpy_analysis import router as mintpy_router
 from routes.eq_insar import router as eq_insar_router
 from routes.jobs import router as jobs_router
 from routes.visualization import router as visualization_router
+from routes.admin import router as admin_router
 
 #sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 app = FastAPI(title="MyApp API", version="0.1.0")
@@ -54,6 +55,7 @@ app.include_router(mintpy_router)
 app.include_router(eq_insar_router)
 app.include_router(jobs_router)
 app.include_router(visualization_router)
+app.include_router(admin_router)
 
 @app.on_event("startup")
 def trigger_initial_bootstrap():

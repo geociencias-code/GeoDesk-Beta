@@ -122,12 +122,22 @@ def reprocess_volcano(
                     "year": year,
                 }
 
-            # Cadena de descarga de HyP3 -> procesar solo este volcán
-            workflow = chain(
-                pipeline_submit_hyp3.s(track, frame, year, start_iso, end_iso),
-                pipeline_wait_and_download.s(),
-                _enqueue_volcano_processing.s(volcanoes=[volcano]),
+            from celery_app import celery_app
+            celery_app.set_current()
+
+            s_submit = celery_app.signature(
+                "tasks.automated_pipeline.pipeline_submit_hyp3",
+                args=[track, frame, year, start_iso, end_iso],
             )
+            s_wait = celery_app.signature(
+                "tasks.automated_pipeline.pipeline_wait_and_download",
+            )
+            s_proc = celery_app.signature(
+                "tasks.orchestrator._enqueue_volcano_processing",
+                kwargs={"volcanoes": [volcano]},
+            )
+
+            workflow = chain(s_submit, s_wait, s_proc)
             task_id = _download_task_id(track, frame, year)
             workflow.apply_async(queue="geodesk_heavy", task_id=task_id)
         except Exception as exc:

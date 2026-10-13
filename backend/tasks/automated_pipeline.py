@@ -22,15 +22,17 @@ import hyp3_sdk as sdk
 
 logger = logging.getLogger(__name__)
 
-_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 _LOCK_TTL_SECONDS = 6 * 3600  # 6 horas (renovable) para evitar bloqueos perpetuos
-
 MIN_COHERENCE = 0.5
 WORK_BASE = Path("/tmp/mintpy_auto")
 
 
+def _get_redis_url() -> str:
+    return os.getenv("REDIS_URL", "redis://redis:6379/0" if os.path.exists("/.dockerenv") else "redis://localhost:6379/0")
+
+
 def _get_redis() -> Redis:
-    return Redis.from_url(_REDIS_URL, decode_responses=True)
+    return Redis.from_url(_get_redis_url(), decode_responses=True)
 
 
 def _pipeline_lock_key(track: int, frame: int, year: int) -> str:

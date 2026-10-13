@@ -24,6 +24,39 @@ class ReprocessRequest(BaseModel):
     download_if_missing: bool = False  # Si True y no hay ZIPs, lanza la descarga en HyP3
 
 
+@router.get("/debug-redis")
+def debug_redis(current_user: TokenData = Depends(require_admin)):
+    """Diagnóstico de conectividad a Redis desde el backend."""
+    import os
+    import socket
+    from redis import Redis
+
+    redis_env = os.getenv("REDIS_URL", "NO DEFINIDA (fallback a localhost)")
+    info = {
+        "REDIS_URL_env": redis_env,
+        "dns_resolution": {},
+        "ping_result": None,
+        "error": None,
+    }
+
+    # Probar resolver 'redis' por DNS
+    for host in ["redis", "localhost", "127.0.0.1"]:
+        try:
+            ip = socket.gethostbyname(host)
+            info["dns_resolution"][host] = ip
+        except Exception as e:
+            info["dns_resolution"][host] = f"Error: {e}"
+
+    # Probar ping directo
+    try:
+        r = Redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), socket_timeout=3)
+        info["ping_result"] = r.ping()
+    except Exception as e:
+        info["error"] = str(e)
+
+    return info
+
+
 @router.post("/reprocess")
 def reprocess_volcano(
     req: ReprocessRequest,

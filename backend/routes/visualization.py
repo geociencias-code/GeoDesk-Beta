@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
+import numpy as np
 import pandas as pd
 
 from utils.timeseries_parquet import (
@@ -212,9 +213,12 @@ def get_timeseries(
                     # Usar la velocidad promedio como representación del año actual
                     current_df = raw[["lat", "lon", "velocidad_mm_yr"]].copy()
                     current_df = current_df.rename(columns={"velocidad_mm_yr": "deformation"})
+                    current_df = current_df.replace([np.inf, -np.inf], np.nan).dropna()
                     current_df["date"] = pd.Timestamp(f"{current_year}-06-15")  # Midpoint del año
                     current_df["year"] = current_year
                     current_df["volcano"] = volcano
+                    if current_df.empty:
+                        current_df = None
             except Exception as exc:
                 logger.warning("[Viz] No se pudo cargar CSV actual: %s", exc)
 
@@ -235,6 +239,7 @@ def get_timeseries(
         step = max(1, len(df) // MAX_POINTS)
         df = df.iloc[::step].head(MAX_POINTS)
 
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=["date", "deformation", "lat", "lon"])
     df["date"] = df["date"].dt.strftime("%Y-%m-%d")
     records = df[["date", "deformation", "lat", "lon", "year"]].to_dict(orient="records")
 

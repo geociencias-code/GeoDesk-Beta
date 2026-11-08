@@ -22,6 +22,91 @@ class ReprocessRequest(BaseModel):
     volcano: str
     year: int
     download_if_missing: bool = False  # Si True y no hay ZIPs, lanza la descarga en HyP3
+    force: bool = False                # Si True, limpia cualquier lock huérfano previo en Redis
+
+
+@router.get("/storage-status")
+def get_storage_status(current_user: TokenData = Depends(require_admin)):
+    """Diagnóstico detallado de almacenamiento compartido, parquets y bloqueos en Redis."""
+    from utils.timeseries_parquet import VOLCANOES, parquet_path, list_available_years
+    from utils.shared_storage import get_shared_dir, get_track_frame_groups
+    from tasks.automated_pipeline import is_download_lock_active, _pipeline_lock_key, _get_redis
+    import pandas as pd
+
+    groups = get_track_frame_groups()
+    shared_status = []
+    years_to_check = [2024, 2025, 2026]
+
+    for (track, frame), volcanoes in groups.items():
+        for year in years_to_check:
+            s_dir = get_shared_dir(track, frame, year)
+            exists = s_dir.exists()
+            zips = list(s_dir.glob("*.zip")) if exists else []
+            total_size_mb = round(sum(z.stat().st_size for z in zips) / (1024 ** 2), 2) if zips else 0
+            has_lock = is_download_lock_active(track, frame, year)
+            lock_val = None
+            if has_lock:
+                try:
+                    lock_val = _get_redis().get(_pipeline_lock_key(track, frame, year))
+                except Exception:
+                    pass
+
+            shared_status.append({
+                "group": f"track{track}_frame{frame}",
+                "track": track,
+                "frame": frame,
+                "year": year,
+                "volcanoes": volcanoes,
+                "dir_exists": exists,
+                "dir_path": str(s_dir),
+                "zips_count": len(zips),
+                "total_size_mb": total_size_mb,
+                "has_redis_lock": has_lock,
+                "lock_task_id": lock_val,
+            })
+
+    # Analizar parquets con detalle de datos reales vs ceros
+    volcanoes_status = {}
+    for volcano_key, vinfo in VOLCANOES.items():
+        years = list_available_years(volcano_key)
+        y_entries = []
+        for year in years:
+            p_path = parquet_path(volcano_key, year)
+            size_kb = round(p_path.stat().st_size / 1024, 2) if p_path.exists() else 0
+            row_count = 0
+            non_zero_count = 0
+            is_flat_zeros = True
+            try:
+                df = pd.read_parquet(p_path)
+                row_count = len(df)
+                if "deformation" in df.columns:
+                    non_zero = df[df["deformation"] != 0.0]
+                    non_zero_count = len(non_zero)
+                    is_flat_zeros = (non_zero_count == 0)
+            except Exception as e:
+                logger.warning("Error leyendo %s: %s", p_path, e)
+
+            y_entries.append({
+                "year": year,
+                "size_kb": size_kb,
+                "row_count": row_count,
+                "non_zero_points": non_zero_count,
+                "is_flat_zeros": is_flat_zeros,
+                "path": str(p_path),
+            })
+
+        volcanoes_status[volcano_key] = {
+            "name": vinfo["name"],
+            "track": vinfo["track"],
+            "frame": vinfo["frame"],
+            "years": y_entries,
+        }
+
+    return {
+        "ok": True,
+        "shared_storage": shared_status,
+        "volcanoes": volcanoes_status,
+    }
 
 
 @router.get("/debug-redis")
@@ -70,6 +155,7 @@ def reprocess_volcano(
     volcano = req.volcano
     year    = req.year
     download_if_missing = req.download_if_missing
+    force   = req.force
 
     if volcano not in VOLCANOES:
         raise HTTPException(
@@ -80,6 +166,11 @@ def reprocess_volcano(
     config = VOLCANOES[volcano]
     track  = config["track"]
     frame  = config["frame"]
+
+    if force:
+        from tasks.automated_pipeline import _release_lock
+        logger.info("[Admin] Forzando liberación de lock previo para track%d_frame%d/%d", track, frame, year)
+        _release_lock(track, frame, year)
 
     shared_dir = get_shared_dir(track, frame, year)
     zips = list(shared_dir.glob("*.zip")) if shared_dir.exists() else []
@@ -100,8 +191,6 @@ def reprocess_volcano(
         start_iso = f"{year}-01-01T00:00:00Z"
         end_iso   = f"{year}-12-31T23:59:59Z"
 
-        from tasks.orchestrator import _launch_download_for_group
-        # Lanzamos la descarga especificando solo este volcán en el callback
         from celery import chain
         from tasks.automated_pipeline import (
             pipeline_submit_hyp3,
@@ -114,7 +203,7 @@ def reprocess_volcano(
         )
 
         try:
-            if _is_download_running(track, frame, year):
+            if not force and _is_download_running(track, frame, year):
                 return {
                     "ok": False,
                     "message": f"Ya hay una descarga o procesamiento en curso para track{track}_frame{frame}/{year}.",
@@ -167,7 +256,7 @@ def reprocess_volcano(
 
     try:
         from tasks.automated_pipeline import launch_process_only
-        launch_process_only(volcano, year)
+        task_id = launch_process_only(volcano, year)
     except Exception as exc:
         logger.error("[Admin] Error encolando reprocesamiento %s/%d: %s", volcano, year, exc)
         raise HTTPException(status_code=500, detail=f"Error al encolar tarea Celery: {exc}")
@@ -181,11 +270,12 @@ def reprocess_volcano(
         "ok":         True,
         "message":    (
             f"Reprocesamiento encolado para '{volcano}' / {year}. "
-            f"Se usarán {len(zips)} ZIPs de shared/. "
+            f"Se usarán {len(zips)} ZIPs existentes en shared/. "
             "El Parquet existente será sobreescrito al finalizar."
         ),
         "volcano":    volcano,
         "year":       year,
+        "task_id":    task_id,
         "zips_found": len(zips),
         "shared_dir": str(shared_dir),
         "queued_by":  current_user.username,

@@ -156,6 +156,20 @@ def get_pipeline_preview(step_id: str):
     )
 
 
+@router.get("/timeseries/available")
+def get_available_timeseries():
+    """
+    Retorna qué volcanes y años tienen datos históricos en Parquet.
+    El frontend usa esto para saber qué pestañas/filtros mostrar.
+    """
+    available = list_all_available()
+    return {
+        "ok":        True,
+        "available": available,
+        "total_years": sum(len(y) for y in available.values()),
+    }
+
+
 @router.get("/timeseries/{volcano}")
 def get_timeseries(
     volcano: str,
@@ -249,20 +263,6 @@ def get_timeseries(
         "n_points":     len(records),
         "historical_years": historical_years,
         "records":      records,
-    }
-
-
-@router.get("/timeseries/available")
-def get_available_timeseries():
-    """
-    Retorna qué volcanes y años tienen datos históricos en Parquet.
-    El frontend usa esto para saber qué pestañas/filtros mostrar.
-    """
-    available = list_all_available()
-    return {
-        "ok":        True,
-        "available": available,
-        "total_years": sum(len(y) for y in available.values()),
     }
 
 

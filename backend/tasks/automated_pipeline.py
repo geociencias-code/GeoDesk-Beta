@@ -437,10 +437,11 @@ def pipeline_finalize_and_cleanup(self, prev_result: dict):
 # (sin descargar — usa los ZIPs ya presentes en shared/)
 # ---------------------------------------------------------------------------
 
-def launch_process_only(volcano: str, year: int) -> None:
+def launch_process_only(volcano: str, year: int) -> str:
     """Encola solo las tareas de procesamiento MintPy + Parquet para un volcán/año.
     Útil cuando los ZIPs ya están en shared/ (ej: después de la migración o
     cuando bootstrap_historical detecta datos sin procesar).
+    Retorna el ID de la tarea principal encolada.
     """
     config = VOLCANOES.get(volcano)
     if not config:
@@ -452,11 +453,20 @@ def launch_process_only(volcano: str, year: int) -> None:
     base_result = {"track": track, "frame": frame, "year": year,
                    "volcano": volcano, "lock_task_id": None}
 
-    workflow = chain(
-        pipeline_run_mintpy.s(base_result, volcano),
-        pipeline_finalize_and_cleanup.s(),
+    from celery_app import celery_app
+    celery_app.set_current()
+
+    s_mintpy = celery_app.signature(
+        "tasks.automated_pipeline.pipeline_run_mintpy",
+        args=[base_result, volcano],
     )
-    workflow.apply_async(queue="geodesk_heavy")
+    s_cleanup = celery_app.signature(
+        "tasks.automated_pipeline.pipeline_finalize_and_cleanup",
+    )
+    workflow = chain(s_mintpy, s_cleanup)
+    async_res = workflow.apply_async(queue="geodesk_heavy")
     logger.info(
-        "[launch_process_only] Encolado procesamiento MintPy para %s/%d", volcano, year
+        "[launch_process_only] Encolado procesamiento MintPy para %s/%d (id=%s)",
+        volcano, year, async_res.id,
     )
+    return async_res.id

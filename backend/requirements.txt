@@ -75,4 +75,4 @@ redis>=5.0.0
 python-jose[cryptography]>=3.3.0
 bcrypt>=4.0.0
 python-multipart>=0.0.6
-pyarrow>=14.0.0
+pyarrow>=14.0.0,<18.0.0
